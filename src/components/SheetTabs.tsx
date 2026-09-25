@@ -1,18 +1,11 @@
 import { Area, Input, Section, useSheet } from './fields';
 import { ListRows, Portrait } from './widgets';
-import { AutoNumber, DebuffPanel, HealthBar, HealthTools, ManaTools, StatMod, useStatMod } from './rulesWidgets';
-import { MAX_ACCESSORIES, num, statModFromScore } from '../lib/rules';
+import { AutoNumber, DebuffPanel, HealthBar, HealthTools, ManaTools, useStatMod } from './rulesWidgets';
+import { MAX_ACCESSORIES, annotateDamage, num, pinnedAttacks, statModFromScore } from '../lib/rules';
+import { useSearchParams } from 'react-router-dom';
+import { CastButton } from './SkillsTab';
 import { useI18n, type MsgKey } from '../lib/i18n';
-import {
-  STATS,
-  emptyAttack,
-  emptyItem,
-  signed,
-  type Attack,
-  type Item,
-  type SheetData,
-  type StatKey,
-} from '../lib/sheet';
+import { STATS, emptyItem, signed, type Item, type SheetData, type StatKey } from '../lib/sheet';
 
 const statLabel = (k: StatKey) => `stat.${k}` as MsgKey;
 const statShort = (k: StatKey) => `stat.${k}.short` as MsgKey;
@@ -147,51 +140,96 @@ export function CoreTab() {
       </Section>
 
       <Section title={t('core.attacks')} className="span-attacks">
-        <ListRows<Attack>
-          path={['attacks']}
-          make={emptyAttack}
-          addLabel={t('atk.add')}
-          className="attacks"
-          header={
-            <div className="list-head attacks-cols">
-              <span>{t('atk.name')}</span>
-              <span>{t('atk.toHit')}</span>
-              <span>{t('atk.damage')}</span>
-              <span>{t('atk.effects')}</span>
-            </div>
-          }
-        >
-          {(i) => <AttackRow i={i} />}
-        </ListRows>
+        <PinnedAttacks />
       </Section>
     </div>
   );
 }
 
-function AttackRow({ i }: { i: number }) {
+function PinnedAttacks() {
   const { data, der } = useSheet();
   const { t } = useI18n();
-  const a = data.attacks[i];
-  const hitMod = useStatMod(a.hitStat, a.statMod);
-  const rank = num(a.rank);
-  const toHit = rank === null && hitMod === null ? null : (rank ?? 0) + (hitMod ?? 0) + der.penalty;
+  const [, setParams] = useSearchParams();
+  const pinned = pinnedAttacks(data);
+  const goToSkills = () => setParams({ tab: 'skills' }, { replace: true });
+  if (pinned.length === 0) {
+    return (
+      <div className="pinned-empty">
+        <p className="dim small">{t('pin.empty')}</p>
+        <button type="button" className="btn small ghost" onClick={goToSkills}>
+          {t('pin.goToSkills')}
+        </button>
+      </div>
+    );
+  }
   return (
-    <div className="attacks-cols">
-      <Input path={['attacks', i, 'name']} ariaLabel={t('atk.name')} placeholder={t('atk.phAttack')} />
-      <div className="pair">
-        <Input path={['attacks', i, 'rank']} ariaLabel={t('atk.phRank')} placeholder={t('atk.phRank')} center />
-        <span className="op">+</span>
-        <StatMod statPath={['attacks', i, 'hitStat']} legacyPath={['attacks', i, 'statMod']} label={t('atk.hitMod')} />
-        <output className="roll-total" title={t('atk.toHitTotal')}>
-          {toHit === null ? '' : `d20 ${signed(toHit)}`}
-        </output>
+    <div className="list pinned">
+      <div className="list-head pinned-cols">
+        <span>{t('atk.name')}</span>
+        <span>{t('pin.toHit')}</span>
+        <span>{t('skill.baseDamage')}</span>
+        <span>{t('skill.range')}</span>
+        <span>{t('atk.effects')}</span>
+        <span />
       </div>
-      <div className="pair">
-        <Input path={['attacks', i, 'dice']} ariaLabel={t('atk.phDice')} placeholder={t('atk.phDice')} center />
-        <span className="op">+</span>
-        <StatMod statPath={['attacks', i, 'dmgStat']} legacyPath={['attacks', i, 'dmgMod']} label={t('atk.dmgMod')} />
+      {pinned.map((i) => (
+        <PinnedRow key={i} i={i} der={der} onEdit={goToSkills} />
+      ))}
+      <p className="dim tiny">{t('pin.hint')}</p>
+    </div>
+  );
+}
+
+/** "Melee" + "Melee (5 ft)" → "Melee (5 ft)"; otherwise "Ranged · 100 feet". */
+function rangeText(type: string, range: string): string {
+  if (!range.trim()) return type;
+  if (!type || range.toLowerCase().startsWith(type.toLowerCase())) return range;
+  return `${type} · ${range}`;
+}
+
+function PinnedRow({ i, der, onEdit }: { i: number; der: ReturnType<typeof useSheet>['der']; onEdit: () => void }) {
+  const { data } = useSheet();
+  const { t } = useI18n();
+  const s = data.skills[i];
+  const mod = useStatMod(s.stat, s.statMod);
+  const rank = num(s.rank);
+  const toHit = rank === null && mod === null ? null : (rank ?? 0) + (mod ?? 0) + der.penalty;
+  const statLbl = s.stat && s.stat !== 'none' ? t(`stat.${s.stat}.short` as MsgKey) : '';
+  const spell = s.category === 'spell';
+  const typeLbl = s.subtype
+    ? t(`skillsub.${s.category}.${s.subtype}` as MsgKey)
+    : t(`skillcat.${s.category}` as MsgKey);
+  return (
+    <div className={`pinned-cols pinned-row ${spell ? 'is-spell' : ''}`}>
+      <div className="pin-name">
+        <button type="button" className="pin-link" onClick={onEdit} title={t('pin.edit')}>
+          {s.name || t('skills.phSkill')}
+        </button>
+        <span className="dim tiny">
+          {typeLbl}
+          {s.cooldown && ` · ${t('skill.sumCooldown', { v: s.cooldown })}`}
+        </span>
       </div>
-      <Input path={['attacks', i, 'effects']} ariaLabel={t('atk.effects')} placeholder={t('atk.effects')} />
+      <div className="pin-hit">
+        <strong>{toHit === null ? '—' : `d20 ${signed(toHit)}`}</strong>
+        <span className="dim tiny">
+          {[rank !== null && `${t('skills.rank')} ${rank}`, statLbl && mod !== null && `${statLbl} ${signed(mod)}`]
+            .filter(Boolean)
+            .join(' · ')}
+        </span>
+      </div>
+      <div className="pin-dmg">{s.baseDamage ? annotateDamage(s.baseDamage, der) : '—'}</div>
+      <div className="pin-range">
+        {rangeText(s.attackType ? t(`skill.${s.attackType}` as MsgKey) : '', s.range) || '—'}
+      </div>
+      <div className="pin-fx">
+        {s.effect || '—'}
+        {s.limitations && <div className="dim tiny">{s.limitations}</div>}
+      </div>
+      <div className="pin-cast">
+        {spell && s.manaCost && <span className="pill">{t('skill.sumMana', { n: s.manaCost })}</span>}
+        {spell && <CastButton i={i} compact />}
+      </div>
     </div>
   );
 }

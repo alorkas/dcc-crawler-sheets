@@ -13,7 +13,7 @@ import {
 } from './sheet';
 import { classifySkill } from './skillTypes';
 
-export const SCHEMA_VERSION = 3;
+export const SCHEMA_VERSION = 4;
 export const HB_SLOTS = 10;
 export const MAX_SKILL_RANK = 15; // Floors 1–5
 export const MAX_EXTERNAL_BUFFS = 3;
@@ -356,6 +356,12 @@ export function newSheet(): SheetData {
       rank: '3',
       stat: 'str',
       checkType: 'Evade',
+      pinned: true,
+      attackType: 'melee',
+      range: 'Melee (5 ft)',
+      aiFavor: '1',
+      limitations: 'Cannot choose a Damage Effect',
+      baseDamage: '1d4 + Str Bludgeoning',
     },
     {
       ...emptySkill(),
@@ -365,7 +371,10 @@ export function newSheet(): SheetData {
       rank: '1',
       stat: 'none',
       checkType: 'Passive',
-      notes: 'Rank 1 (max) · Interrupt · 2 Mana · heals 2 HB slots',
+      manaCost: '2',
+      range: 'Self',
+      effect: 'Heals 2 HB slots',
+      notes: 'Rank 1 (max) · Interrupt',
     },
   ];
   s.hotlist = ['Heal (Interrupt) · 2 Mana · heals 2 HB slots', ...s.hotlist.slice(1)];
@@ -387,6 +396,7 @@ export function migrate(d: SheetData): SheetData {
   let out: SheetData = structuredClone(d);
   if (out.schema < 2) out = migrateV1(out);
   if (out.schema < 3) out = migrateV2(out);
+  if (out.schema < 4) out = migrateV3(out);
   out.schema = SCHEMA_VERSION;
   return out;
 }
@@ -413,10 +423,69 @@ function migrateV1(d: SheetData): SheetData {
 
 /** v2 → v3: skills get a category/subtype (recognised book skills are sorted automatically); blank rows are dropped. */
 function migrateV2(d: SheetData): SheetData {
-  const blank = (s: SheetData['skills'][number]) =>
-    !s.name.trim() && !s.rank.trim() && !s.notes.trim() && !s.statMod.trim() && !s.checkType.trim();
-  const skills = d.skills.filter((s) => !blank(s)).map((s) => classifyRow(s));
+  const skills = d.skills.filter((s) => !isBlankSkill(s)).map((s) => classifyRow(s));
   return { ...d, skills };
+}
+
+/**
+ * v3 → v4: the Core tab's Attacks list now shows pinned skills. Each old attack row pins the
+ * matching skill (filling its empty fields), or becomes a new pinned combat skill.
+ */
+function migrateV3(d: SheetData): SheetData {
+  const skills = [...d.skills];
+  const statAbbr: Record<string, string> = { str: 'Str', int: 'Int', con: 'Con', dex: 'Dex', cha: 'Cha' };
+  for (const a of d.attacks) {
+    if (!a.name.trim()) continue;
+    const bonus = a.dmgStat && a.dmgStat !== 'none' ? statAbbr[a.dmgStat] : a.dmgMod.trim();
+    const damage = bonus ? `${a.dice.trim()}${/^[+-]/.test(bonus) ? ' ' : ' + '}${bonus}`.trim() : a.dice.trim();
+    const idx = skills.findIndex(
+      (s) => s.name.trim().toLowerCase() === a.name.trim().toLowerCase() || attackMatchesSkill(a.name, s.name),
+    );
+    if (idx >= 0) {
+      const s = skills[idx];
+      skills[idx] = {
+        ...s,
+        pinned: true,
+        baseDamage: s.baseDamage || damage,
+        effect: s.effect || a.effects,
+        rank: s.rank || a.rank,
+      };
+    } else {
+      const row = classifyRow({
+        ...emptySkill(),
+        name: a.name.trim(),
+        rank: a.rank,
+        stat: a.hitStat,
+        statMod: a.statMod,
+        baseDamage: damage,
+        effect: a.effects,
+        pinned: true,
+      });
+      skills.push(row.category ? row : { ...row, category: 'combat' });
+    }
+  }
+  return { ...d, skills };
+}
+
+/** Pinned skills that appear in the Core tab's Attacks list (combat skills and attack spells). */
+export function pinnedAttacks(d: SheetData): number[] {
+  return d.skills
+    .map((s, i) => [s, i] as const)
+    .filter(([s]) => s.pinned && canPin(s))
+    .map(([, i]) => i);
+}
+
+export function canPin(s: { category: string; subtype: string }): boolean {
+  return s.category === 'combat' || (s.category === 'spell' && s.subtype === 'attack');
+}
+
+/** "1d4 + Str Bludgeoning" → "1d4 + Str (+2) Bludgeoning", using the current Stat Mods. */
+export function annotateDamage(text: string, der: Derived): string {
+  const map: Record<string, StatKey> = { str: 'str', int: 'int', con: 'con', dex: 'dex', cha: 'cha' };
+  return text.replace(/\b(Str|Int|Con|Dex|Cha)\b/gi, (m) => {
+    const mod = der.mods[map[m.toLowerCase()]];
+    return mod === null ? m : `${m} (${mod >= 0 ? '+' : ''}${mod})`;
+  });
 }
 
 /** Fill in category/subtype from the book's skill list when the row doesn't have one yet. */
@@ -434,5 +503,12 @@ function mapStats(d: SheetData, fn: (s: SheetData['stats'][StatKey]) => SheetDat
 export function loadSheet(stored: unknown): SheetData {
   const isEmpty = !stored || (typeof stored === 'object' && Object.keys(stored as object).length === 0);
   if (isEmpty) return newSheet();
-  return migrate(normalize(stored));
+  const d = migrate(normalize(stored));
+  // tidy-up on every load: drop completely empty rows that were never given a type
+  const skills = d.skills.filter((sk) => sk.category || !isBlankSkill(sk));
+  return skills.length === d.skills.length ? d : { ...d, skills };
+}
+
+function isBlankSkill(s: SheetData['skills'][number]): boolean {
+  return !s.name.trim() && !s.rank.trim() && !s.notes.trim() && !s.statMod.trim() && !s.checkType.trim();
 }

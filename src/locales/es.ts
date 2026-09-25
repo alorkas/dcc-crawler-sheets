@@ -438,7 +438,7 @@ export const es: Messages = {
   'skillcat.combat.hint':
     'Las habilidades de ataque tiran contra la Esquiva del objetivo. Cada arma es su propia habilidad.',
   'skillcat.utility.hint':
-    'Habilidades para explorar, hablar y sobrevivir. Tiradas enfrentadas, no enfrentadas o pasivas.',
+    'Habilidades para explorar, hablar y sobrevivir, agrupadas por tipo de tirada: enfrentadas, no enfrentadas o pasivas.',
   'skillcat.spell.hint':
     'Los hechizos no se pueden intentar sin entrenar (salvo con pergamino). Los pasivos no reciben marcas de mejora.',
   'skillsub.combat.bashing': 'Armas contundentes',
@@ -458,4 +458,39 @@ export const es: Messages = {
   'check.opposed': 'Enfrentada',
   'check.unopposed': 'No enfrentada',
   'check.passive': 'Pasiva',
+
+  // skill details
+  'skills.expandAll': 'Desplegar todo',
+  'skills.collapseAll': 'Plegar todo',
+  'skill.showDetails': 'Ver detalles',
+  'skill.hideDetails': 'Ocultar detalles',
+  'skill.attackType': 'Tipo de ataque',
+  'skill.melee': 'Cuerpo a cuerpo',
+  'skill.ranged': 'A distancia',
+  'skill.manaCost': 'Coste de maná',
+  'skill.range': 'Alcance',
+  'skill.duration': 'Duración',
+  'skill.aiFavor': 'Favor de la IA',
+  'skill.limitations': 'Limitaciones',
+  'skill.cooldown': 'Enfriamiento',
+  'skill.description': 'Descripción',
+  'skill.effect': 'Efecto',
+  'skill.effects': 'Efectos',
+  'skill.baseDamage': 'Daño base',
+  'skill.phDamage': 'p. ej. 1d8 + FUE cortante',
+  'skill.phNotes': 'Mejora de rango 5, recordatorios…',
+  'skill.sumMana': '{n} de maná',
+  'skill.sumCooldown': 'Enfr. {v}',
+  'skill.cast': 'Lanzar (−{n} maná)',
+  'skill.castDone': 'Lanzas {name} (−{n} maná).',
+
+  // pinned attacks
+  'skill.pin': 'Fijar en la lista de ataques de Principal',
+  'skill.unpin': 'Quitar de la lista de ataques',
+  'pin.empty':
+    'Aún no hay ataques fijados. Fija habilidades de combate y hechizos de ataque con el botón de chincheta en Habilidades y aparecerán aquí.',
+  'pin.goToSkills': 'Ir a Habilidades',
+  'pin.toHit': 'Impacto',
+  'pin.edit': 'Editar en Habilidades',
+  'pin.hint': 'Solo lectura: edítalos en Habilidades. El daño muestra tus modificadores actuales entre paréntesis.',
 };

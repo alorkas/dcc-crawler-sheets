@@ -1,6 +1,9 @@
 import { describe, expect, it } from 'vitest';
 import {
   addDebuff,
+  annotateDamage,
+  canPin,
+  pinnedAttacks,
   attackMatchesSkill,
   castHeal,
   checkPenalty,
@@ -182,7 +185,7 @@ describe('loading & migration', () => {
     legacy.health[8].hit = true;
     legacy.skills[0] = { ...legacy.skills[0], name: 'Persuasion', statMod: 'Cha +2' };
     const s = loadSheet(legacy);
-    expect(s.schema).toBe(3);
+    expect(s.schema).toBe(4);
     expect(s.hbLost).toBe(2);
     expect(s.stats.dex.mod).toBe('');
     expect(s.stats.str.mod).toBe('+3');
@@ -215,5 +218,53 @@ describe('skill categories', () => {
     ]);
     s.untrained = ['Climbing'];
     expect(learnUntrained(s, 'Climbing').skills[2]).toMatchObject({ category: 'utility', subtype: 'unopposed' });
+  });
+});
+
+describe('skills list', () => {
+  it('is not padded with blank rows when a saved sheet is loaded', () => {
+    const saved = JSON.parse(JSON.stringify(newSheet()));
+    const s = loadSheet(saved);
+    expect(s.skills).toHaveLength(2);
+    expect(s.skills[1].manaCost).toBe('2');
+  });
+  it('old saved skill rows get the new detail fields', () => {
+    const saved = JSON.parse(JSON.stringify(newSheet()));
+    delete saved.skills[0].baseDamage;
+    expect(loadSheet(saved).skills[0].baseDamage).toBe('');
+  });
+});
+
+describe('pinned attacks', () => {
+  it('new crawlers have Unarmed Combat pinned', () => {
+    const s = newSheet();
+    expect(pinnedAttacks(s).map((i) => s.skills[i].name)).toEqual(['Unarmed Combat']);
+  });
+  it('only combat skills and attack spells can be pinned', () => {
+    expect(canPin({ category: 'combat', subtype: '' })).toBe(true);
+    expect(canPin({ category: 'spell', subtype: 'attack' })).toBe(true);
+    expect(canPin({ category: 'spell', subtype: 'passive' })).toBe(false);
+    expect(canPin({ category: 'utility', subtype: 'opposed' })).toBe(false);
+  });
+  it('migrates old attack rows into pinned skills', () => {
+    const old = emptySheet();
+    old.schema = 3;
+    old.skills = [{ ...old.skills[0], name: 'Longsword', category: 'combat', subtype: 'edged', rank: '3' }];
+    old.attacks[0] = { ...old.attacks[0], name: 'Longsword', dice: '1d8', dmgStat: 'str', effects: 'Slashing' };
+    old.attacks[1] = { ...old.attacks[1], name: 'Fireball', rank: '5', dice: '2d12', dmgMod: '+3', effects: 'Fire' };
+    const s = loadSheet(old);
+    expect(s.skills[0]).toMatchObject({ pinned: true, baseDamage: '1d8 + Str', effect: 'Slashing' });
+    expect(s.skills[1]).toMatchObject({
+      name: 'Fireball',
+      category: 'spell',
+      subtype: 'attack',
+      pinned: true,
+      baseDamage: '2d12 +3',
+    });
+  });
+  it('annotates stat names in damage with the current mod', () => {
+    const s = newSheet();
+    s.stats.str = { enhanced: '6', unenhanced: '6', mod: '' };
+    expect(annotateDamage('1d4 + Str Bludgeoning', derive(s))).toBe('1d4 + Str (+3) Bludgeoning');
   });
 });

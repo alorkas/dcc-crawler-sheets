@@ -433,7 +433,8 @@ export const en = {
   'skillcat.utility': 'Utility Skills',
   'skillcat.spell': 'Spell Skills',
   'skillcat.combat.hint': 'Attack Skills roll against the target’s Evade. Each weapon is its own Skill.',
-  'skillcat.utility.hint': 'Skills for exploring, talking and surviving. Checked Opposed, Unopposed or Passive.',
+  'skillcat.utility.hint':
+    'Skills for exploring, talking and surviving, grouped by how they are checked: Opposed, Unopposed or Passive.',
   'skillcat.spell.hint':
     'Spells can’t be attempted untrained (except via a scroll). Passive Spells don’t get advancement marks.',
   'skillsub.combat.bashing': 'Bashing Weapons',
@@ -453,6 +454,41 @@ export const en = {
   'check.opposed': 'Opposed',
   'check.unopposed': 'Unopposed',
   'check.passive': 'Passive',
+
+  // skill details
+  'skills.expandAll': 'Expand all',
+  'skills.collapseAll': 'Collapse all',
+  'skill.showDetails': 'Show details',
+  'skill.hideDetails': 'Hide details',
+  'skill.attackType': 'Attack Type',
+  'skill.melee': 'Melee',
+  'skill.ranged': 'Ranged',
+  'skill.manaCost': 'Mana Cost',
+  'skill.range': 'Range',
+  'skill.duration': 'Duration',
+  'skill.aiFavor': 'AI Favor',
+  'skill.limitations': 'Limitations',
+  'skill.cooldown': 'Cooldown',
+  'skill.description': 'Description',
+  'skill.effect': 'Effect',
+  'skill.effects': 'Effects',
+  'skill.baseDamage': 'Base Damage',
+  'skill.phDamage': 'e.g. 1d8 + Str Slashing',
+  'skill.phNotes': 'Rank 5 upgrade, reminders…',
+  'skill.sumMana': '{n} Mana',
+  'skill.sumCooldown': 'CD {v}',
+  'skill.cast': 'Cast (−{n} Mana)',
+  'skill.castDone': 'Cast {name} (−{n} Mana).',
+
+  // pinned attacks
+  'skill.pin': 'Pin to the Attacks list on Core',
+  'skill.unpin': 'Unpin from the Attacks list',
+  'pin.empty':
+    'No attacks pinned yet. Pin combat skills and attack spells with the pin button in the Skills tab and they will show up here.',
+  'pin.goToSkills': 'Go to Skills',
+  'pin.toHit': 'To Hit',
+  'pin.edit': 'Edit in the Skills tab',
+  'pin.hint': 'Read-only: edit these in the Skills tab. Damage shows your current Stat Mods in brackets.',
 };
 
 export type Messages = { [K in keyof typeof en]: string };

@@ -24,9 +24,22 @@ export type Skill = {
   rank: string;
   stat: StatSel;
   statMod: string; // legacy free text, used when stat is ''
-  checkType: string;
-  notes: string;
+  checkType: string; // legacy, no longer shown
+  notes: string; // Notes & Upgrades
   done: boolean; // advancement mark
+  /** Combat skills and attack spells pinned to the Attacks list on the Core tab. */
+  pinned: boolean;
+  // Attack Skill / Spell details (book entry fields)
+  attackType: '' | 'melee' | 'ranged';
+  manaCost: string;
+  range: string;
+  duration: string;
+  aiFavor: string;
+  limitations: string;
+  cooldown: string;
+  description: string;
+  effect: string;
+  baseDamage: string;
 };
 export type Item = { item: string; qty: string; notes: string };
 
@@ -135,6 +148,17 @@ export const emptySkill = (): Skill => ({
   checkType: '',
   notes: '',
   done: false,
+  pinned: false,
+  attackType: '',
+  manaCost: '',
+  range: '',
+  duration: '',
+  aiFavor: '',
+  limitations: '',
+  cooldown: '',
+  description: '',
+  effect: '',
+  baseDamage: '',
 });
 export const emptyItem = (): Item => ({ item: '', qty: '', notes: '' });
 
@@ -168,7 +192,7 @@ export function emptySheet(): SheetData {
     looseEnds: '',
     regrets: '',
     notes: '',
-    skills: Array.from({ length: 8 }, emptySkill),
+    skills: [emptySkill()], // template row only; skills lists are not padded
     untrained: [],
     inventory: Array.from({ length: 8 }, emptyItem),
     pet: {
@@ -211,20 +235,22 @@ const isObj = (v: unknown): v is Obj => !!v && typeof v === 'object' && !Array.i
 
 /** Deep-merge stored data onto an empty sheet so older/partial records always have every field. */
 export function normalize(stored: unknown): SheetData {
-  const merge = (base: unknown, over: unknown): unknown => {
+  // variable-length lists: the first base entry is only a template for missing fields, never padding
+  const NO_PAD = new Set(['skills']);
+  const merge = (base: unknown, over: unknown, key = ''): unknown => {
     if (over === undefined || over === null) return base;
     if (Array.isArray(base)) {
       if (!Array.isArray(over)) return base;
       const tmpl = base[0];
       const out = over.map((v) => (tmpl !== undefined ? merge(tmpl, v) : v));
       // keep fixed-size lists (health, hotlist...) at least as long as the template
-      for (let i = out.length; i < base.length; i++) out.push(base[i]);
+      if (!NO_PAD.has(key)) for (let i = out.length; i < base.length; i++) out.push(base[i]);
       return out;
     }
     if (isObj(base)) {
       if (!isObj(over)) return base;
       const out: Obj = { ...base };
-      for (const k of Object.keys(base)) out[k] = merge(base[k], over[k]);
+      for (const k of Object.keys(base)) out[k] = merge(base[k], over[k], k);
       return out;
     }
     return typeof over === typeof base ? over : base;

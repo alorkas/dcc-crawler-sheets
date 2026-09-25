@@ -7,7 +7,8 @@ Interactive, mobile-friendly character sheets for a **Dungeon Crawler Carl RPG**
 - Admins see every sheet, grouped by player, can edit or unlock anything, reassign owners, and manage players
 - English and Spanish UI: switch with the EN/ES toggle. The choice is saved per browser, and the default follows the browser language
 - Rules automation (Tutorial Floors): Stat Mods (Table 9), Max Mana, Evade, Health Bar slots = Con Mod with a damage calculator (DR → resistance → slots), Heal, rests, Table 8 debuffs with penalties, skill roll totals, and Skill Advancement rolls. Calculated values can be overridden with ✎, and ↺ switches them back to automatic
-- Skills grouped into Combat (by weapon family), Utility (Opposed / Unopposed / Passive) and Spell (Attack / Passive) sections. Book skills are sorted automatically by name, and choosing a type fills in the default Check Type
+- Skills grouped into Combat (by weapon family), Utility (Opposed / Unopposed / Passive) and Spell (Attack / Passive) sections. Book skills are sorted automatically by name. Attack Skills and Spells are expandable cards with the book's entry fields (attack type, mana cost, range, duration, AI Favor, limitations, cooldown, description, effect(s), base damage, notes & upgrades), and spells have a Cast button that spends their Mana
+- Pinned attacks: pin combat skills and attack spells in the Skills tab and they appear read-only in the Core tab's Attacks list, with to-hit totals, damage showing current Stat Mods, and a Cast button for spells
 - A single container with a SQLite database kept in the `/data` volume
 
 ## Deploy (Komodo / docker compose)
