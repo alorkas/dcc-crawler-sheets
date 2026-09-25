@@ -3,12 +3,34 @@
 export type HealthBox = { a: string; b: string; hit: boolean };
 export type Stat = { enhanced: string; unenhanced: string; mod: string };
 export type StatKey = 'str' | 'int' | 'con' | 'dex' | 'cha';
+/** Stat used by a skill/attack: '' = not chosen (legacy free text), 'none' = no stat (passive). */
+export type StatSel = StatKey | 'none' | '';
+export type ActiveDebuff = { id: string; stacks: number; note: string };
 
-export type Attack = { name: string; rank: string; statMod: string; dice: string; dmgMod: string; effects: string };
-export type Skill = { name: string; rank: string; statMod: string; checkType: string; notes: string; done: boolean };
+export type Attack = {
+  name: string;
+  rank: string;
+  hitStat: StatSel;
+  statMod: string; // legacy / manual to-hit mod, used when hitStat is ''
+  dice: string;
+  dmgStat: StatSel;
+  dmgMod: string; // legacy / manual damage mod, used when dmgStat is ''
+  effects: string;
+};
+export type Skill = {
+  name: string;
+  rank: string;
+  stat: StatSel;
+  statMod: string; // legacy free text, used when stat is ''
+  checkType: string;
+  notes: string;
+  done: boolean; // advancement mark
+};
 export type Item = { item: string; qty: string; notes: string };
 
 export type SheetData = {
+  /** Data format version, used for one-time migrations of older sheets. */
+  schema: number;
   // header
   name: string;
   race: string;
@@ -18,14 +40,18 @@ export type SheetData = {
   class: string;
   floor: string;
   portrait: string;
-  health: HealthBox[];
+  health: HealthBox[]; // legacy (v1) health boxes
+  /** Health Bar slots lost, marked from 100% down (0–10). */
+  hbLost: number;
+  dyingRounds: string;
   stats: Record<StatKey, Stat>;
   // combat
   evade: { dexMod: string; buffs: string; move: string; step: string };
   dr: { armor: string; buffs: string; aiFavor: string; size: string };
   manaMax: string;
   manaCurrent: string;
-  debuffs: string;
+  debuffs: string; // free-text debuff notes
+  debuffList: ActiveDebuff[];
   externalBuffs: string[];
   attacks: Attack[];
   // page 2
@@ -38,11 +64,14 @@ export type SheetData = {
   notes: string;
   // page 3–4
   skills: Skill[];
+  /** Skills attempted untrained this session (Tutorial Floors). */
+  untrained: string[];
   inventory: Item[];
   // page 5
   pet: {
     name: string;
     health: HealthBox[];
+    hbLost: number;
     stats: Record<StatKey, string>;
     level: string;
     dr: string;
@@ -56,6 +85,8 @@ export type SheetData = {
   mount: {
     name: string;
     health: HealthBox[];
+    hbLost: number;
+    hbSlot: string;
     size: string;
     occupants: string;
     move: string;
@@ -82,12 +113,30 @@ export const STATS: { key: StatKey; label: string; short: string }[] = [
 
 const health = (): HealthBox[] => Array.from({ length: 10 }, () => ({ a: '', b: '', hit: false }));
 const stat = (): Stat => ({ enhanced: '', unenhanced: '', mod: '' });
-export const emptyAttack = (): Attack => ({ name: '', rank: '', statMod: '', dice: '', dmgMod: '', effects: '' });
-export const emptySkill = (): Skill => ({ name: '', rank: '', statMod: '', checkType: '', notes: '', done: false });
+export const emptyAttack = (): Attack => ({
+  name: '',
+  rank: '',
+  hitStat: '',
+  statMod: '',
+  dice: '',
+  dmgStat: '',
+  dmgMod: '',
+  effects: '',
+});
+export const emptySkill = (): Skill => ({
+  name: '',
+  rank: '',
+  stat: '',
+  statMod: '',
+  checkType: '',
+  notes: '',
+  done: false,
+});
 export const emptyItem = (): Item => ({ item: '', qty: '', notes: '' });
 
 export function emptySheet(): SheetData {
   return {
+    schema: 0,
     name: '',
     race: '',
     gender: '',
@@ -97,12 +146,15 @@ export function emptySheet(): SheetData {
     floor: '',
     portrait: '',
     health: health(),
+    hbLost: 0,
+    dyingRounds: '',
     stats: { str: stat(), int: stat(), con: stat(), dex: stat(), cha: stat() },
     evade: { dexMod: '', buffs: '', move: '', step: '' },
     dr: { armor: '', buffs: '', aiFavor: '', size: '' },
     manaMax: '',
     manaCurrent: '',
     debuffs: '',
+    debuffList: [],
     externalBuffs: ['', '', ''],
     attacks: Array.from({ length: 5 }, emptyAttack),
     hotlist: Array(10).fill(''),
@@ -113,10 +165,12 @@ export function emptySheet(): SheetData {
     regrets: '',
     notes: '',
     skills: Array.from({ length: 8 }, emptySkill),
+    untrained: [],
     inventory: Array.from({ length: 8 }, emptyItem),
     pet: {
       name: '',
       health: health(),
+      hbLost: 0,
       stats: { str: '', int: '', con: '', dex: '', cha: '' },
       level: '',
       dr: '',
@@ -127,7 +181,17 @@ export function emptySheet(): SheetData {
       attack2: '',
       special: '',
     },
-    mount: { name: '', health: health(), size: '', occupants: '', move: '', dr: '', accessories: '' },
+    mount: {
+      name: '',
+      health: health(),
+      hbLost: 0,
+      hbSlot: '',
+      size: '',
+      occupants: '',
+      move: '',
+      dr: '',
+      accessories: '',
+    },
     kills: Array(6).fill(''),
     personalSpace: { tier: '', size: '', amenities: '' },
     clubs: Array(3).fill(''),

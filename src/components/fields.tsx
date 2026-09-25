@@ -1,12 +1,17 @@
 import { createContext, useContext, useLayoutEffect, useRef, type ReactNode } from 'react';
 import { getIn, type SheetData } from '../lib/sheet';
+import type { Derived } from '../lib/rules';
 
 export type Path = (string | number)[];
 
 type SheetCtxValue = {
   data: SheetData;
+  /** Values calculated from the rules (stat mods, max mana, HB slot value, totals…). */
+  der: Derived;
   locked: boolean;
   set: (path: Path, value: unknown) => void;
+  /** Whole-sheet change (rests, damage, advancement). With a label, the change can be undone once. */
+  update: (fn: (d: SheetData) => SheetData, undoLabel?: string) => void;
 };
 
 export const SheetCtx = createContext<SheetCtxValue | null>(null);

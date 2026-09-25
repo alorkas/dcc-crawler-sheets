@@ -2,7 +2,8 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Link, useNavigate, useParams, useSearchParams } from 'react-router-dom';
 import { api, ApiError, type AdminUser, type Character } from '../lib/api';
 import { useAuth } from '../lib/auth';
-import { normalize, setIn, type SheetData } from '../lib/sheet';
+import { setIn, type SheetData } from '../lib/sheet';
+import { derive, loadSheet } from '../lib/rules';
 import { SheetCtx, type Path } from '../components/fields';
 import { AbilitiesTab, CompanionsTab, CoreTab, GearTab, InventoryTab, SkillsTab } from '../components/SheetTabs';
 import { LockIcon, UnlockIcon } from '../components/icons';
@@ -38,6 +39,7 @@ export default function SheetPage() {
   const [saveError, setSaveError] = useState<ErrState>(null);
   const [conflict, setConflict] = useState<Character | null>(null);
   const [users, setUsers] = useState<AdminUser[]>([]);
+  const [undo, setUndo] = useState<{ label: string; data: SheetData } | null>(null);
 
   const versionRef = useRef(0);
   const dirtyRef = useRef(false);
@@ -48,7 +50,8 @@ export default function SheetPage() {
   const applyServer = useCallback((c: Character) => {
     const { data: raw, ...rest } = c;
     setMeta(rest);
-    setData(normalize(raw));
+    setData(loadSheet(raw));
+    setUndo(null);
     setLocked(c.locked);
     versionRef.current = c.version;
     dirtyRef.current = false;
@@ -125,13 +128,33 @@ export default function SheetPage() {
     (path: Path, value: unknown) => {
       if (locked || conflict) return;
       setData((d) => (d ? setIn(d, path, value) : d));
+      setUndo(null);
       dirtyRef.current = true;
       setSaveState('dirty');
     },
     [locked, conflict],
   );
 
-  const ctx = useMemo(() => (data ? { data, set, locked: locked || !!conflict } : null), [data, set, locked, conflict]);
+  const update = useCallback(
+    (fn: (d: SheetData) => SheetData, undoLabel?: string) => {
+      if (locked || conflict) return;
+      const prev = dataRef.current;
+      if (!prev) return;
+      const next = fn(prev);
+      if (next === prev) return;
+      setData(next);
+      setUndo(undoLabel ? { label: undoLabel, data: prev } : null);
+      dirtyRef.current = true;
+      setSaveState('dirty');
+    },
+    [locked, conflict],
+  );
+
+  const der = useMemo(() => (data ? derive(data) : null), [data]);
+  const ctx = useMemo(
+    () => (data && der ? { data, der, set, update, locked: locked || !!conflict } : null),
+    [data, der, set, update, locked, conflict],
+  );
 
   async function toggleLock() {
     try {
@@ -291,6 +314,32 @@ export default function SheetPage() {
                 {t('sheet.retry')}
               </button>
             )}
+          </div>
+        )}
+
+        {undo && !locked && (
+          <div className="banner undo-banner">
+            <span>{undo.label}</span>
+            <button
+              type="button"
+              className="btn small"
+              onClick={() => {
+                setData(undo.data);
+                setUndo(null);
+                dirtyRef.current = true;
+                setSaveState('dirty');
+              }}
+            >
+              {t('common.undo')}
+            </button>
+            <button
+              type="button"
+              className="btn small ghost"
+              onClick={() => setUndo(null)}
+              aria-label={t('common.close')}
+            >
+              ×
+            </button>
           </div>
         )}
 

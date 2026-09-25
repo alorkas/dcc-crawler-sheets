@@ -1,60 +1,6 @@
-import { useRef, type CSSProperties, type ReactNode } from 'react';
-import { useField, useSheet, type Path } from './fields';
-import type { HealthBox } from '../lib/sheet';
+import { useRef, type ReactNode } from 'react';
+import { useField, type Path } from './fields';
 import { useI18n } from '../lib/i18n';
-
-const HEALTH_COLORS = [
-  '#e53935',
-  '#ef5a2a',
-  '#f4791f',
-  '#f99a17',
-  '#fbb80f',
-  '#e8c81a',
-  '#c7cc27',
-  '#9dc634',
-  '#6fbe3f',
-  '#43b649',
-];
-
-/** Ten split boxes (10%–100%). Each box holds two values; tapping the % label marks it as lost. */
-export function HealthTrack({ path, rows = 1 }: { path: Path; rows?: 1 | 2 }) {
-  const [boxes, , locked] = useField<HealthBox[]>(path);
-  const { set } = useSheet();
-  const { t } = useI18n();
-  return (
-    <div className={`health rows-${rows}`}>
-      {boxes.slice(0, 10).map((b, i) => (
-        <div key={i} className={`hbox ${b.hit ? 'hit' : ''}`} style={{ '--c': HEALTH_COLORS[i] } as CSSProperties}>
-          <div className="hsplit">
-            <input
-              className="ha"
-              value={b.a}
-              readOnly={locked}
-              aria-label={t('health.upper', { p: (i + 1) * 10 })}
-              onChange={(e) => set([...path, i, 'a'], e.target.value)}
-            />
-            <input
-              className="hb"
-              value={b.b}
-              readOnly={locked}
-              aria-label={t('health.lower', { p: (i + 1) * 10 })}
-              onChange={(e) => set([...path, i, 'b'], e.target.value)}
-            />
-          </div>
-          <button
-            type="button"
-            className="hpct"
-            disabled={locked}
-            title={t(b.hit ? 'health.restore' : 'health.mark')}
-            onClick={() => set([...path, i, 'hit'], !b.hit)}
-          >
-            {(i + 1) * 10}%
-          </button>
-        </div>
-      ))}
-    </div>
-  );
-}
 
 /** Dynamic list with add/remove controls (hidden when locked). */
 export function ListRows<T>({

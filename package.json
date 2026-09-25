@@ -5,7 +5,7 @@
     "test": "tests"
   },
   "scripts": {
-    "test": "node --test --disable-warning=ExperimentalWarning tests/*.test.js",
+    "test": "node --test --disable-warning=ExperimentalWarning tests/*.test.js && vitest run",
     "dev": "vite",
     "build": "tsc --noEmit && vite build",
     "start": "node --disable-warning=ExperimentalWarning server/index.js",
@@ -36,7 +36,8 @@
     "react-router-dom": "^7.18.4",
     "typescript": "^6.0.3",
     "typescript-eslint": "^8.70.1",
-    "vite": "^8.3.1"
+    "vite": "^8.3.1",
+    "vitest": "^5.0.2"
   },
   "type": "module",
   "private": true
