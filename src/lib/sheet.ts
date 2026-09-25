@@ -19,6 +19,8 @@ export type Attack = {
 };
 export type Skill = {
   name: string;
+  category: '' | 'combat' | 'utility' | 'spell';
+  subtype: string;
   rank: string;
   stat: StatSel;
   statMod: string; // legacy free text, used when stat is ''
@@ -125,6 +127,8 @@ export const emptyAttack = (): Attack => ({
 });
 export const emptySkill = (): Skill => ({
   name: '',
+  category: '',
+  subtype: '',
   rank: '',
   stat: '',
   statMod: '',

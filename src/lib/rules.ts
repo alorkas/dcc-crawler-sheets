@@ -11,8 +11,9 @@ import {
   type StatKey,
   type StatSel,
 } from './sheet';
+import { classifySkill } from './skillTypes';
 
-export const SCHEMA_VERSION = 2;
+export const SCHEMA_VERSION = 3;
 export const HB_SLOTS = 10;
 export const MAX_SKILL_RANK = 15; // Floors 1–5
 export const MAX_EXTERNAL_BUFFS = 3;
@@ -320,7 +321,7 @@ export function learnUntrained(d: SheetData, skillName: string): SheetData {
   let skills = d.skills;
   if (name && !exists) {
     const emptyIdx = skills.findIndex((s) => !s.name.trim() && !s.rank.trim());
-    const skill = { ...emptySkill(), name, rank: '1' };
+    const skill = classifyRow({ ...emptySkill(), name, rank: '1' });
     skills = emptyIdx >= 0 ? skills.map((s, i) => (i === emptyIdx ? skill : s)) : [...skills, skill];
   }
   return { ...d, skills, untrained: [] };
@@ -347,8 +348,25 @@ export function newSheet(): SheetData {
     ...s.attacks.slice(1),
   ];
   s.skills = [
-    { ...emptySkill(), name: 'Unarmed Combat', rank: '3', stat: 'str', checkType: 'Evade' },
-    ...s.skills.slice(1),
+    {
+      ...emptySkill(),
+      name: 'Unarmed Combat',
+      category: 'combat',
+      subtype: 'handToHand',
+      rank: '3',
+      stat: 'str',
+      checkType: 'Evade',
+    },
+    {
+      ...emptySkill(),
+      name: 'Heal',
+      category: 'spell',
+      subtype: 'passive',
+      rank: '1',
+      stat: 'none',
+      checkType: 'Passive',
+      notes: 'Rank 1 (max) · Interrupt · 2 Mana · heals 2 HB slots',
+    },
   ];
   s.hotlist = ['Heal (Interrupt) · 2 Mana · heals 2 HB slots', ...s.hotlist.slice(1)];
   return s;
@@ -366,7 +384,16 @@ const STAT_WORDS: [RegExp, StatKey | 'none'][] = [
 /** One-time upgrade of v1 sheets: health boxes → slots lost, skill stat text → stat key, drop redundant overrides. */
 export function migrate(d: SheetData): SheetData {
   if (d.schema >= SCHEMA_VERSION) return d;
-  const out: SheetData = structuredClone(d);
+  let out: SheetData = structuredClone(d);
+  if (out.schema < 2) out = migrateV1(out);
+  if (out.schema < 3) out = migrateV2(out);
+  out.schema = SCHEMA_VERSION;
+  return out;
+}
+
+/** v1 → v2: health boxes → slots lost, skill stat text → stat key, drop overrides equal to the automatic value. */
+function migrateV1(d: SheetData): SheetData {
+  const out = d;
   out.hbLost = d.health.filter((b) => b.hit).length;
   out.pet.hbLost = d.pet.health.filter((b) => b.hit).length;
   out.mount.hbLost = d.mount.health.filter((b) => b.hit).length;
@@ -375,15 +402,28 @@ export function migrate(d: SheetData): SheetData {
     const hit = STAT_WORDS.find(([re]) => re.test(s.statMod));
     return hit ? { ...s, stat: hit[1] } : s;
   });
-  // Typed values that equal the automatic value become automatic (so they keep updating).
   const der = derive({ ...out, stats: mapStats(out, (st) => ({ ...st, mod: '' })), manaMax: '' });
   for (const k of STAT_KEYS) {
     if (num(out.stats[k].mod) === der.modAuto[k]) out.stats[k].mod = '';
   }
   if (num(out.manaMax) === der.manaMaxAuto) out.manaMax = '';
   if (num(out.evade.dexMod) === derive(out).mods.dex) out.evade.dexMod = '';
-  out.schema = SCHEMA_VERSION;
   return out;
+}
+
+/** v2 → v3: skills get a category/subtype (recognised book skills are sorted automatically); blank rows are dropped. */
+function migrateV2(d: SheetData): SheetData {
+  const blank = (s: SheetData['skills'][number]) =>
+    !s.name.trim() && !s.rank.trim() && !s.notes.trim() && !s.statMod.trim() && !s.checkType.trim();
+  const skills = d.skills.filter((s) => !blank(s)).map((s) => classifyRow(s));
+  return { ...d, skills };
+}
+
+/** Fill in category/subtype from the book's skill list when the row doesn't have one yet. */
+export function classifyRow<T extends { name: string; category: string; subtype: string }>(s: T): T {
+  if (s.category) return s;
+  const known = classifySkill(s.name);
+  return known ? { ...s, category: known[0], subtype: known[1] } : s;
 }
 
 function mapStats(d: SheetData, fn: (s: SheetData['stats'][StatKey]) => SheetData['stats'][StatKey]) {

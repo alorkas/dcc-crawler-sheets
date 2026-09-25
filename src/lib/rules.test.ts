@@ -16,6 +16,7 @@ import {
   statModFromScore,
 } from './rules';
 import { emptySheet } from './sheet';
+import { classifySkill, defaultCheckType } from './skillTypes';
 
 const withStats = (vals: Partial<Record<'str' | 'int' | 'con' | 'dex' | 'cha', string>>) => {
   const s = newSheet();
@@ -181,10 +182,38 @@ describe('loading & migration', () => {
     legacy.health[8].hit = true;
     legacy.skills[0] = { ...legacy.skills[0], name: 'Persuasion', statMod: 'Cha +2' };
     const s = loadSheet(legacy);
-    expect(s.schema).toBe(2);
+    expect(s.schema).toBe(3);
     expect(s.hbLost).toBe(2);
     expect(s.stats.dex.mod).toBe('');
     expect(s.stats.str.mod).toBe('+3');
     expect(s.skills[0].stat).toBe('cha');
+    expect(s.skills[0]).toMatchObject({ category: 'utility', subtype: 'opposed' });
+    expect(s.skills).toHaveLength(1); // blank rows removed
+  });
+});
+
+describe('skill categories', () => {
+  it('classifies book skills, spells and bracketed custom weapons', () => {
+    expect(classifySkill('Longsword')).toEqual(['combat', 'edged']);
+    expect(classifySkill('tire iron (Club)')).toEqual(['combat', 'bashing']);
+    expect(classifySkill('Fireball')).toEqual(['spell', 'attack']);
+    expect(classifySkill('Heal')).toEqual(['spell', 'passive']);
+    expect(classifySkill('Stealth')).toEqual(['utility', 'opposed']);
+    expect(classifySkill('Internet Memes')).toBeNull();
+  });
+  it('default check types', () => {
+    expect(defaultCheckType('combat', 'edged')).toBe('evade');
+    expect(defaultCheckType('combat', 'damageEffect')).toBe('passive');
+    expect(defaultCheckType('spell', 'attack')).toBe('evade');
+    expect(defaultCheckType('utility', 'unopposed')).toBe('unopposed');
+  });
+  it('new crawlers start with Unarmed Combat and the Heal spell, and learned skills are sorted', () => {
+    const s = newSheet();
+    expect(s.skills.map((x) => [x.name, x.category, x.subtype])).toEqual([
+      ['Unarmed Combat', 'combat', 'handToHand'],
+      ['Heal', 'spell', 'passive'],
+    ]);
+    s.untrained = ['Climbing'];
+    expect(learnUntrained(s, 'Climbing').skills[2]).toMatchObject({ category: 'utility', subtype: 'unopposed' });
   });
 });

@@ -1,28 +1,16 @@
-import { Area, Check, Input, Section, useSheet } from './fields';
+import { Area, Input, Section, useSheet } from './fields';
 import { ListRows, Portrait } from './widgets';
-import {
-  AdvancementPanel,
-  AutoNumber,
-  DebuffPanel,
-  HealthBar,
-  HealthTools,
-  ManaTools,
-  RankBadge,
-  StatMod,
-  useStatMod,
-} from './rulesWidgets';
+import { AutoNumber, DebuffPanel, HealthBar, HealthTools, ManaTools, StatMod, useStatMod } from './rulesWidgets';
 import { MAX_ACCESSORIES, num, statModFromScore } from '../lib/rules';
 import { useI18n, type MsgKey } from '../lib/i18n';
 import {
   STATS,
   emptyAttack,
   emptyItem,
-  emptySkill,
   signed,
   type Attack,
   type Item,
   type SheetData,
-  type Skill,
   type StatKey,
 } from '../lib/sheet';
 
@@ -278,66 +266,8 @@ export function GearTab() {
   );
 }
 
-/* ---------------- Page 3: Skills ---------------- */
-export function SkillsTab() {
-  const { t } = useI18n();
-  return (
-    <div className="skills-page">
-      <Section title={t('skills.title')}>
-        <ListRows<Skill>
-          path={['skills']}
-          make={emptySkill}
-          addLabel={t('skills.add')}
-          className="skills"
-          header={
-            <div className="list-head skills-cols">
-              <span>{t('skills.name')}</span>
-              <span>{t('skills.rank')}</span>
-              <span>{t('skills.statMod')}</span>
-              <span>{t('skills.checkType')}</span>
-              <span>{t('skills.notes')}</span>
-              <span className="center">{t('skills.total')}</span>
-              <span className="center" title={t('skills.markHint')}>
-                ✔
-              </span>
-            </div>
-          }
-        >
-          {(i) => <SkillRow i={i} />}
-        </ListRows>
-      </Section>
-      <Section title={t('adv.section')}>
-        <AdvancementPanel />
-      </Section>
-    </div>
-  );
-}
-
-function SkillRow({ i }: { i: number }) {
-  const { data, der } = useSheet();
-  const { t } = useI18n();
-  const s = data.skills[i];
-  const mod = useStatMod(s.stat, s.statMod);
-  const rank = num(s.rank);
-  const passive = s.stat === 'none';
-  const total = passive || (rank === null && mod === null) ? null : (rank ?? 0) + (mod ?? 0) + der.penalty;
-  return (
-    <div className="skills-cols">
-      <Input path={['skills', i, 'name']} ariaLabel={t('skills.name')} placeholder={t('skills.phSkill')} />
-      <div className="rank-cell">
-        <Input path={['skills', i, 'rank']} ariaLabel={t('skills.rank')} placeholder={t('skills.rank')} center />
-        <RankBadge rank={s.rank} />
-      </div>
-      <StatMod statPath={['skills', i, 'stat']} legacyPath={['skills', i, 'statMod']} label={t('skills.statMod')} />
-      <Input path={['skills', i, 'checkType']} ariaLabel={t('skills.checkType')} placeholder={t('skills.checkType')} />
-      <Input path={['skills', i, 'notes']} ariaLabel={t('skills.notes')} placeholder={t('skills.notes')} />
-      <output className="roll-total center" title={t('skills.totalHint')}>
-        {total === null ? '' : `d20 ${signed(total)}`}
-      </output>
-      <Check path={['skills', i, 'done']} label={t('skills.checked')} />
-    </div>
-  );
-}
+/* ---------------- Page 3: Skills (see SkillsTab.tsx) ---------------- */
+export { SkillsTab } from './SkillsTab';
 
 /* ---------------- Page 4: Inventory ---------------- */
 export function InventoryTab() {
