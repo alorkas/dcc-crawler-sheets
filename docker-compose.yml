@@ -1,0 +1,31 @@
+services:
+  dcc-crawler-sheets:
+    image: ghcr.io/alorkas/dcc-crawler-sheets:latest
+    restart: unless-stopped
+    ports:
+      - '8080:3000'
+    environment:
+      - NODE_ENV=production
+      - ADMIN_USERNAME=[[DCC_ADMIN_USERNAME]]
+      - ADMIN_PASSWORD=[[DCC_ADMIN_PASSWORD]]
+      - JWT_SECRET=[[DCC_JWT_SECRET]]
+      - ALLOW_REGISTRATION=true
+      # Set to true when served over HTTPS (e.g. behind Caddy)
+      - COOKIE_SECURE=false
+    volumes:
+      - crawler-data:/data
+    healthcheck:
+      test:
+        [
+          'CMD',
+          'node',
+          '-e',
+          "fetch('http://localhost:3000/health').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))",
+        ]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 10s
+
+volumes:
+  crawler-data:
