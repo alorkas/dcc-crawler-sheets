@@ -1,6 +1,7 @@
 import { useRef, type CSSProperties, type ReactNode } from 'react';
 import { useField, useSheet, type Path } from './fields';
 import type { HealthBox } from '../lib/sheet';
+import { useI18n } from '../lib/i18n';
 
 const HEALTH_COLORS = [
   '#e53935',
@@ -19,6 +20,7 @@ const HEALTH_COLORS = [
 export function HealthTrack({ path, rows = 1 }: { path: Path; rows?: 1 | 2 }) {
   const [boxes, , locked] = useField<HealthBox[]>(path);
   const { set } = useSheet();
+  const { t } = useI18n();
   return (
     <div className={`health rows-${rows}`}>
       {boxes.slice(0, 10).map((b, i) => (
@@ -28,14 +30,14 @@ export function HealthTrack({ path, rows = 1 }: { path: Path; rows?: 1 | 2 }) {
               className="ha"
               value={b.a}
               readOnly={locked}
-              aria-label={`${(i + 1) * 10}% upper value`}
+              aria-label={t('health.upper', { p: (i + 1) * 10 })}
               onChange={(e) => set([...path, i, 'a'], e.target.value)}
             />
             <input
               className="hb"
               value={b.b}
               readOnly={locked}
-              aria-label={`${(i + 1) * 10}% lower value`}
+              aria-label={t('health.lower', { p: (i + 1) * 10 })}
               onChange={(e) => set([...path, i, 'b'], e.target.value)}
             />
           </div>
@@ -43,7 +45,7 @@ export function HealthTrack({ path, rows = 1 }: { path: Path; rows?: 1 | 2 }) {
             type="button"
             className="hpct"
             disabled={locked}
-            title={b.hit ? 'Marked as lost — click to restore' : 'Click to mark as lost'}
+            title={t(b.hit ? 'health.restore' : 'health.mark')}
             onClick={() => set([...path, i, 'hit'], !b.hit)}
           >
             {(i + 1) * 10}%
@@ -59,18 +61,19 @@ export function ListRows<T>({
   path,
   make,
   children,
-  addLabel = 'Add row',
+  addLabel,
   header,
   className = '',
 }: {
   path: Path;
   make: () => T;
   children: (i: number, item: T) => ReactNode;
-  addLabel?: string;
+  addLabel: string;
   header?: ReactNode;
   className?: string;
 }) {
   const [items, setItems, locked] = useField<T[]>(path);
+  const { t } = useI18n();
   return (
     <div className={`list ${className}`}>
       {header}
@@ -81,8 +84,8 @@ export function ListRows<T>({
             <button
               type="button"
               className="row-del"
-              title="Remove row"
-              aria-label="Remove row"
+              title={t('list.remove')}
+              aria-label={t('list.remove')}
               onClick={() => setItems(items.filter((_, j) => j !== i))}
             >
               ×
@@ -118,18 +121,23 @@ async function resizeImage(file: File, max = 640): Promise<string> {
 
 export function Portrait() {
   const [value, setValue, locked] = useField<string>(['portrait']);
+  const { t } = useI18n();
   const fileRef = useRef<HTMLInputElement>(null);
   return (
     <div className={`portrait ${value ? 'has' : ''}`}>
-      {value ? <img src={value} alt="Character portrait" /> : <span className="portrait-empty">Portrait</span>}
+      {value ? (
+        <img src={value} alt={t('portrait.alt')} />
+      ) : (
+        <span className="portrait-empty">{t('portrait.label')}</span>
+      )}
       {!locked && (
         <div className="portrait-actions">
           <button type="button" className="btn small" onClick={() => fileRef.current?.click()}>
-            {value ? 'Change' : 'Upload'}
+            {t(value ? 'portrait.change' : 'portrait.upload')}
           </button>
           {value && (
             <button type="button" className="btn small ghost" onClick={() => setValue('')}>
-              Remove
+              {t('portrait.remove')}
             </button>
           )}
         </div>

@@ -1,9 +1,11 @@
 import { useEffect, useState, type FormEvent } from 'react';
 import { useAuth } from '../lib/auth';
 import { api } from '../lib/api';
+import { LanguageSwitcher, useI18n } from '../lib/i18n';
 
 export default function LoginPage() {
   const { login, register } = useAuth();
+  const { t, err } = useI18n();
   const [mode, setMode] = useState<'login' | 'register'>('login');
   const [allowRegistration, setAllowRegistration] = useState(true);
   const [username, setUsername] = useState('');
@@ -22,13 +24,13 @@ export default function LoginPage() {
   async function submit(e: FormEvent) {
     e.preventDefault();
     setError('');
-    if (mode === 'register' && password !== confirm) return setError('Passwords do not match');
+    if (mode === 'register' && password !== confirm) return setError(t('auth.mismatch'));
     setBusy(true);
     try {
       if (mode === 'login') await login(username, password);
       else await register(username, password);
-    } catch (err) {
-      setError(err instanceof Error ? err.message : 'Something went wrong');
+    } catch (e2) {
+      setError(err(e2));
     } finally {
       setBusy(false);
     }
@@ -37,18 +39,15 @@ export default function LoginPage() {
   return (
     <div className="auth-page">
       <div className="auth-card">
+        <LanguageSwitcher className="auth-lang" />
         <div className="brand big">
-          <span className="brand-a">Crawler</span>
-          <span className="brand-b">Sheets</span>
+          <span className="brand-a">{t('brand.a')}</span>
+          <span className="brand-b">{t('brand.b')}</span>
         </div>
-        <p className="auth-tag">
-          {mode === 'login'
-            ? 'Welcome back, Crawler. The dungeon awaits.'
-            : 'New Crawler? Register to start building your sheet.'}
-        </p>
+        <p className="auth-tag">{t(mode === 'login' ? 'auth.tagLogin' : 'auth.tagRegister')}</p>
         <form onSubmit={submit} className="auth-form">
           <label className="field">
-            <span className="lbl">Username</span>
+            <span className="lbl">{t('auth.username')}</span>
             <input
               className="in"
               autoComplete="username"
@@ -59,7 +58,7 @@ export default function LoginPage() {
             />
           </label>
           <label className="field">
-            <span className="lbl">Password</span>
+            <span className="lbl">{t('auth.password')}</span>
             <input
               className="in"
               type="password"
@@ -71,7 +70,7 @@ export default function LoginPage() {
           </label>
           {mode === 'register' && (
             <label className="field">
-              <span className="lbl">Confirm password</span>
+              <span className="lbl">{t('auth.confirm')}</span>
               <input
                 className="in"
                 type="password"
@@ -84,7 +83,7 @@ export default function LoginPage() {
           )}
           {error && <p className="error">{error}</p>}
           <button className="btn primary" disabled={busy}>
-            {busy ? '…' : mode === 'login' ? 'Log in' : 'Create account'}
+            {busy ? '…' : t(mode === 'login' ? 'auth.login' : 'auth.register')}
           </button>
         </form>
         {allowRegistration && (
@@ -96,7 +95,7 @@ export default function LoginPage() {
               setError('');
             }}
           >
-            {mode === 'login' ? "Don't have an account? Register" : 'Already registered? Log in'}
+            {t(mode === 'login' ? 'auth.toRegister' : 'auth.toLogin')}
           </button>
         )}
       </div>

@@ -3,12 +3,14 @@ import { Link, useNavigate } from 'react-router-dom';
 import { api, type CharacterSummary } from '../lib/api';
 import { useAuth } from '../lib/auth';
 import { LockIcon } from '../components/icons';
+import { useI18n } from '../lib/i18n';
 
 export default function Dashboard({ scope }: { scope: 'mine' | 'all' }) {
   const { user } = useAuth();
+  const { t, err } = useI18n();
   const navigate = useNavigate();
   const [chars, setChars] = useState<CharacterSummary[] | null>(null);
-  const [error, setError] = useState('');
+  const [error, setError] = useState<unknown>(null);
   const [filter, setFilter] = useState('');
   const all = scope === 'all' && !!user?.isAdmin;
 
@@ -17,7 +19,7 @@ export default function Dashboard({ scope }: { scope: 'mine' | 'all' }) {
     api
       .listCharacters(all)
       .then(setChars)
-      .catch((e) => setError(e.message));
+      .catch((e) => setError(e ?? new Error()));
   }, [all]);
 
   async function create() {
@@ -25,7 +27,7 @@ export default function Dashboard({ scope }: { scope: 'mine' | 'all' }) {
       const c = await api.createCharacter();
       navigate(`/sheet/${c.id}`);
     } catch (e) {
-      setError(e instanceof Error ? e.message : 'Could not create character');
+      setError(e);
     }
   }
 
@@ -45,36 +47,32 @@ export default function Dashboard({ scope }: { scope: 'mine' | 'all' }) {
     <div className="page">
       <div className="page-head">
         <div>
-          <h1>{all ? 'All crawlers' : 'My crawlers'}</h1>
-          <p className="dim">
-            {all ? 'Every sheet in the campaign. Click one to view or edit it.' : 'Your characters in the dungeon.'}
-          </p>
+          <h1>{t(all ? 'dash.titleAll' : 'dash.titleMine')}</h1>
+          <p className="dim">{t(all ? 'dash.subAll' : 'dash.subMine')}</p>
         </div>
         <div className="page-actions">
           {all && (
             <input
               className="in search"
-              placeholder="Search name, race, class, player…"
+              placeholder={t('dash.search')}
               value={filter}
               onChange={(e) => setFilter(e.target.value)}
             />
           )}
           <button className="btn primary" onClick={create}>
-            + New crawler
+            {t('dash.new')}
           </button>
         </div>
       </div>
 
-      {error && <p className="error">{error}</p>}
-      {!chars && !error && <p className="dim">Loading…</p>}
+      {!!error && <p className="error">{err(error, 'err.createFailed')}</p>}
+      {!chars && !error && <p className="dim">{t('common.loading')}</p>}
       {chars && chars.length === 0 && (
         <div className="empty">
-          <h2>No crawlers yet</h2>
-          <p className="dim">
-            {all ? 'Nobody has created a character yet.' : 'Create your first character to enter the dungeon.'}
-          </p>
+          <h2>{t('dash.emptyTitle')}</h2>
+          <p className="dim">{t(all ? 'dash.emptyAll' : 'dash.emptyMine')}</p>
           <button className="btn primary" onClick={create}>
-            + Create a crawler
+            {t('dash.create')}
           </button>
         </div>
       )}
@@ -101,6 +99,7 @@ export default function Dashboard({ scope }: { scope: 'mine' | 'all' }) {
 
 function CharCard({ c }: { c: CharacterSummary }) {
   const s = c.summary;
+  const { t, locale } = useI18n();
   const initials = (s.name || '?')
     .split(/\s+/)
     .map((w) => w[0])
@@ -112,20 +111,22 @@ function CharCard({ c }: { c: CharacterSummary }) {
       <div className="char-portrait">{s.portrait ? <img src={s.portrait} alt="" /> : <span>{initials}</span>}</div>
       <div className="char-info">
         <div className="char-name">
-          {s.name || 'Unnamed crawler'}
+          {s.name || t('dash.unnamed')}
           {c.locked && (
-            <span className="lock-pill" title="Locked">
+            <span className="lock-pill" title={t('dash.locked')}>
               <LockIcon />
             </span>
           )}
         </div>
-        <div className="dim small">{[s.race, s.class].filter(Boolean).join(' · ') || 'No race or class yet'}</div>
+        <div className="dim small">{[s.race, s.class].filter(Boolean).join(' · ') || t('dash.noRaceClass')}</div>
         <div className="char-meta">
-          {s.level && <span className="pill">Lvl {s.level}</span>}
-          {s.floor && <span className="pill">Floor {s.floor}</span>}
+          {s.level && <span className="pill">{t('dash.lvl', { n: s.level })}</span>}
+          {s.floor && <span className="pill">{t('dash.floor', { n: s.floor })}</span>}
           {s.crawlerNumber && <span className="pill">#{s.crawlerNumber}</span>}
         </div>
-        <div className="dim tiny">Updated {new Date(c.updatedAt + 'Z').toLocaleString()}</div>
+        <div className="dim tiny">
+          {t('dash.updated', { date: new Date(c.updatedAt + 'Z').toLocaleString(locale) })}
+        </div>
       </div>
     </Link>
   );

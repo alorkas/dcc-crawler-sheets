@@ -87,7 +87,9 @@ test('players only see their own sheets; admin sees and edits all', async () => 
 
 test('rejects bad credentials and weak input', async () => {
   const c = client();
-  assert.equal((await c('POST', '/api/auth/login', { username: 'dm', password: 'nope' })).status, 401);
+  const bad = await c('POST', '/api/auth/login', { username: 'dm', password: 'nope' });
+  assert.equal(bad.status, 401);
+  assert.equal(bad.body.code, 'invalid_login');
   assert.equal((await c('POST', '/api/auth/register', { username: 'x', password: 'password1' })).status, 400);
   assert.equal((await c('POST', '/api/auth/register', { username: 'shorty', password: '123' })).status, 400);
   assert.equal((await c('GET', '/api/characters')).status, 401);

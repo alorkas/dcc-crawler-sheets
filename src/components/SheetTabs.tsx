@@ -1,5 +1,6 @@
 import { Area, Check, Input, Section, useSheet } from './fields';
 import { HealthTrack, ListRows, Portrait } from './widgets';
+import { useI18n, type MsgKey } from '../lib/i18n';
 import {
   STATS,
   emptyAttack,
@@ -11,143 +12,163 @@ import {
   type Item,
   type SheetData,
   type Skill,
+  type StatKey,
 } from '../lib/sheet';
+
+const statLabel = (k: StatKey) => `stat.${k}` as MsgKey;
+const statShort = (k: StatKey) => `stat.${k}.short` as MsgKey;
 
 /* ---------------- Page 1: Core ---------------- */
 export function CoreTab() {
   const { data } = useSheet();
+  const { t } = useI18n();
   const dexMod = data.evade.dexMod || data.stats.dex.mod;
   const evadeTotal = sumNumbers(dexMod, data.evade.buffs);
   const drTotal = sumNumbers(data.dr.armor, data.dr.buffs);
 
   return (
     <div className="core-grid">
-      <Section title="Crawler" className="span-identity">
+      <Section title={t('core.crawler')} className="span-identity">
         <div className="identity">
           <div className="identity-fields">
-            <Input path={['name']} label="Name" className="w-name" big />
-            <Input path={['race']} label="Race" />
-            <Input path={['gender']} label="Gender / Pronouns" />
-            <Input path={['class']} label="Class" />
-            <Input path={['level']} label="Level" numeric center />
-            <Input path={['crawlerNumber']} label="Crawler #" center />
-            <Input path={['floor']} label="Floor" numeric center />
+            <Input path={['name']} label={t('core.name')} className="w-name" big />
+            <Input path={['race']} label={t('core.race')} />
+            <Input path={['gender']} label={t('core.gender')} />
+            <Input path={['class']} label={t('core.class')} />
+            <Input path={['level']} label={t('core.level')} numeric center />
+            <Input path={['crawlerNumber']} label={t('core.crawlerNo')} center />
+            <Input path={['floor']} label={t('core.floor')} numeric center />
           </div>
           <Portrait />
         </div>
-        <div className="sub-lbl">Health</div>
+        <div className="sub-lbl">{t('core.health')}</div>
         <HealthTrack path={['health']} />
       </Section>
 
-      <Section title="Stats" className="span-stats">
+      <Section title={t('core.stats')} className="span-stats">
         <div className="stats">
           {STATS.map((s) => (
             <div className="stat" key={s.key}>
-              <div className="stat-name">{s.label}</div>
+              <div className="stat-name">{t(statLabel(s.key))}</div>
               <div className="stat-split">
-                <Input path={['stats', s.key, 'enhanced']} label="Enhanced" center numeric />
+                <Input path={['stats', s.key, 'enhanced']} label={t('core.enhanced')} center numeric />
                 <span className="slash">/</span>
-                <Input path={['stats', s.key, 'unenhanced']} label="Unenhanced" center numeric />
+                <Input path={['stats', s.key, 'unenhanced']} label={t('core.unenhanced')} center numeric />
               </div>
-              <Input path={['stats', s.key, 'mod']} label={`${s.short} Mod`} center className="stat-mod" />
+              <Input
+                path={['stats', s.key, 'mod']}
+                label={t('core.statMod', { stat: t(statShort(s.key)) })}
+                center
+                className="stat-mod"
+              />
             </div>
           ))}
         </div>
       </Section>
 
-      <Section title="Defense" className="span-defense">
+      <Section title={t('core.defense')} className="span-defense">
         <div className="formula">
           <div className="formula-name">
-            Evade <span className="dim">d20 +</span>
+            {t('core.evade')} <span className="dim">d20 +</span>
           </div>
           <div className="formula-row">
             <label className="field">
-              <span className="lbl">DEX Mod</span>
+              <span className="lbl">{t('core.dexMod')}</span>
               <DexModInput placeholder={data.stats.dex.mod} />
             </label>
             <span className="op">+</span>
-            <Input path={['evade', 'buffs']} label="Buffs" className="grow" />
+            <Input path={['evade', 'buffs']} label={t('core.buffs')} className="grow" />
             <span className="op eq">=</span>
             <div className="field total">
-              <span className="lbl">Evade Total</span>
+              <span className="lbl">{t('core.evadeTotal')}</span>
               <output className="total-val">{evadeTotal === null ? '—' : `d20 ${signed(evadeTotal)}`}</output>
             </div>
           </div>
           <div className="formula-extra">
-            <Input path={['evade', 'move']} label="Move" center />
-            <Input path={['evade', 'step']} label="Step" center />
+            <Input path={['evade', 'move']} label={t('core.move')} center />
+            <Input path={['evade', 'step']} label={t('core.step')} center />
           </div>
         </div>
         <div className="formula">
-          <div className="formula-name">Damage Resistance</div>
+          <div className="formula-name">{t('core.dr')}</div>
           <div className="formula-row">
-            <Input path={['dr', 'armor']} label="Armor" center />
+            <Input path={['dr', 'armor']} label={t('core.armor')} center />
             <span className="op">+</span>
-            <Input path={['dr', 'buffs']} label="Buffs" className="grow" />
+            <Input path={['dr', 'buffs']} label={t('core.buffs')} className="grow" />
             <span className="op eq">=</span>
             <div className="field total">
-              <span className="lbl">DR Total</span>
+              <span className="lbl">{t('core.drTotal')}</span>
               <output className="total-val">{drTotal === null ? '—' : drTotal}</output>
             </div>
           </div>
           <div className="formula-extra">
-            <Input path={['dr', 'aiFavor']} label="AI Favor" center />
-            <Input path={['dr', 'size']} label="Size" center />
+            <Input path={['dr', 'aiFavor']} label={t('core.aiFavor')} center />
+            <Input path={['dr', 'size']} label={t('core.size')} center />
           </div>
         </div>
       </Section>
 
-      <Section title="Mana & Buffs" className="span-mana">
+      <Section title={t('core.manaBuffs')} className="span-mana">
         <div className="mana">
           <div className="field">
-            <span className="lbl">Mana (current / max)</span>
+            <span className="lbl">{t('core.mana')}</span>
             <div className="mana-pair">
-              <Input path={['manaCurrent']} ariaLabel="Current mana" center big numeric />
+              <Input path={['manaCurrent']} ariaLabel={t('core.manaCurrent')} center big numeric />
               <span className="slash">/</span>
-              <Input path={['manaMax']} ariaLabel="Max mana" center big numeric />
+              <Input path={['manaMax']} ariaLabel={t('core.manaMax')} center big numeric />
             </div>
           </div>
-          <Area path={['debuffs']} label="Debuffs" rows={2} />
+          <Area path={['debuffs']} label={t('core.debuffs')} rows={2} />
         </div>
-        <div className="sub-lbl">External Buffs (max 3)</div>
+        <div className="sub-lbl">{t('core.extBuffs')}</div>
         <ol className="numbered">
           {[0, 1, 2].map((i) => (
             <li key={i}>
-              <Input path={['externalBuffs', i]} ariaLabel={`External buff ${i + 1}`} />
+              <Input path={['externalBuffs', i]} ariaLabel={t('core.extBuff', { n: i + 1 })} />
             </li>
           ))}
         </ol>
       </Section>
 
-      <Section title="Attacks" className="span-attacks">
+      <Section title={t('core.attacks')} className="span-attacks">
         <ListRows<Attack>
           path={['attacks']}
           make={emptyAttack}
-          addLabel="Add attack"
+          addLabel={t('atk.add')}
           className="attacks"
           header={
             <div className="list-head attacks-cols">
-              <span>Name</span>
-              <span>To Hit (Rank + Stat Mod)</span>
-              <span>Damage (Dice + Stat Mod)</span>
-              <span>Effects</span>
+              <span>{t('atk.name')}</span>
+              <span>{t('atk.toHit')}</span>
+              <span>{t('atk.damage')}</span>
+              <span>{t('atk.effects')}</span>
             </div>
           }
         >
           {(i) => (
             <div className="attacks-cols">
-              <Input path={['attacks', i, 'name']} ariaLabel="Attack name" placeholder="Attack" />
+              <Input path={['attacks', i, 'name']} ariaLabel={t('atk.name')} placeholder={t('atk.phAttack')} />
               <div className="pair">
-                <Input path={['attacks', i, 'rank']} ariaLabel="Rank" placeholder="Rank" center />
+                <Input path={['attacks', i, 'rank']} ariaLabel={t('atk.phRank')} placeholder={t('atk.phRank')} center />
                 <span className="op">+</span>
-                <Input path={['attacks', i, 'statMod']} ariaLabel="To hit stat mod" placeholder="Mod" center />
+                <Input
+                  path={['attacks', i, 'statMod']}
+                  ariaLabel={t('atk.hitMod')}
+                  placeholder={t('atk.phMod')}
+                  center
+                />
               </div>
               <div className="pair">
-                <Input path={['attacks', i, 'dice']} ariaLabel="Damage dice" placeholder="Dice" center />
+                <Input path={['attacks', i, 'dice']} ariaLabel={t('atk.phDice')} placeholder={t('atk.phDice')} center />
                 <span className="op">+</span>
-                <Input path={['attacks', i, 'dmgMod']} ariaLabel="Damage stat mod" placeholder="Mod" center />
+                <Input
+                  path={['attacks', i, 'dmgMod']}
+                  ariaLabel={t('atk.dmgMod')}
+                  placeholder={t('atk.phMod')}
+                  center
+                />
               </div>
-              <Input path={['attacks', i, 'effects']} ariaLabel="Effects" placeholder="Effects" />
+              <Input path={['attacks', i, 'effects']} ariaLabel={t('atk.effects')} placeholder={t('atk.effects')} />
             </div>
           )}
         </ListRows>
@@ -159,60 +180,62 @@ export function CoreTab() {
 /** DEX mod on the Evade line: falls back to the Dexterity stat mod when left empty. */
 function DexModInput({ placeholder }: { placeholder: string }) {
   const { data, set, locked } = useSheet();
+  const { t } = useI18n();
   return (
     <input
       className="in center"
       value={data.evade.dexMod}
       readOnly={locked}
       placeholder={placeholder || ''}
-      title="Leave empty to use your Dexterity mod"
+      title={t('core.dexModHint')}
       onChange={(e) => set(['evade', 'dexMod'], e.target.value)}
     />
   );
 }
 
 /* ---------------- Page 2: Gear & Hotlist ---------------- */
-const GEAR: [keyof SheetData['gear'], string, number][] = [
-  ['head', 'Head', 1],
-  ['torso', 'Torso', 1],
-  ['arms', 'Arms', 1],
-  ['hands', 'Hands / Holding', 2],
-  ['legs', 'Legs', 1],
-  ['feet', 'Feet', 1],
-  ['accessories', 'Accessories (max 10)', 6],
+const GEAR: [keyof SheetData['gear'], MsgKey, number][] = [
+  ['head', 'gear.head', 1],
+  ['torso', 'gear.torso', 1],
+  ['arms', 'gear.arms', 1],
+  ['hands', 'gear.hands', 2],
+  ['legs', 'gear.legs', 1],
+  ['feet', 'gear.feet', 1],
+  ['accessories', 'gear.accessories', 6],
 ];
 
 export function GearTab() {
+  const { t } = useI18n();
   return (
     <div className="gear-grid">
-      <Section title="Hotlist" tone="red" className="span-full">
+      <Section title={t('gear.hotlist')} tone="red" className="span-full">
         <div className="hotlist">
           {Array.from({ length: 10 }, (_, i) => (
-            <Area key={i} path={['hotlist', i]} rows={3} placeholder={`Slot ${i + 1}`} />
+            <Area key={i} path={['hotlist', i]} rows={3} placeholder={t('gear.slot', { n: i + 1 })} />
           ))}
         </div>
       </Section>
-      <Section title="Gear Slots / Tattoos / Patches" className="span-gear">
+      <Section title={t('gear.title')} className="span-gear">
         <div className="gear">
           {GEAR.map(([key, label, rows]) => (
-            <Area key={key} path={['gear', key]} label={label} rows={rows} />
+            <Area key={key} path={['gear', key]} label={t(label)} rows={rows} />
           ))}
         </div>
       </Section>
       <div className="side-notes">
-        <Section title="Popularity">
+        <Section title={t('gear.popularity')}>
           <Area path={['popularity']} rows={2} />
         </Section>
-        <Section title="Past Trauma">
+        <Section title={t('gear.pastTrauma')}>
           <Area path={['pastTrauma']} rows={3} />
         </Section>
-        <Section title="Loose Ends">
+        <Section title={t('gear.looseEnds')}>
           <Area path={['looseEnds']} rows={3} />
         </Section>
-        <Section title="Regrets">
+        <Section title={t('gear.regrets')}>
           <Area path={['regrets']} rows={3} />
         </Section>
-        <Section title="Notes">
+        <Section title={t('gear.notes')}>
           <Area path={['notes']} rows={5} />
         </Section>
       </div>
@@ -222,32 +245,42 @@ export function GearTab() {
 
 /* ---------------- Page 3: Skills ---------------- */
 export function SkillsTab() {
+  const { t } = useI18n();
   return (
-    <Section title="Skills">
+    <Section title={t('skills.title')}>
       <ListRows<Skill>
         path={['skills']}
         make={emptySkill}
-        addLabel="Add skill"
+        addLabel={t('skills.add')}
         className="skills"
         header={
           <div className="list-head skills-cols">
-            <span>Name</span>
-            <span>Rank</span>
-            <span>Stat &amp; Mod</span>
-            <span>Check Type</span>
-            <span>Notes &amp; Upgrades</span>
+            <span>{t('skills.name')}</span>
+            <span>{t('skills.rank')}</span>
+            <span>{t('skills.statMod')}</span>
+            <span>{t('skills.checkType')}</span>
+            <span>{t('skills.notes')}</span>
             <span className="center">✔</span>
           </div>
         }
       >
         {(i) => (
           <div className="skills-cols">
-            <Input path={['skills', i, 'name']} ariaLabel="Skill name" placeholder="Skill" />
-            <Input path={['skills', i, 'rank']} ariaLabel="Rank" placeholder="Rank" center />
-            <Input path={['skills', i, 'statMod']} ariaLabel="Stat and mod" placeholder="Stat" center />
-            <Input path={['skills', i, 'checkType']} ariaLabel="Check type" placeholder="Check type" />
-            <Input path={['skills', i, 'notes']} ariaLabel="Notes and upgrades" placeholder="Notes & upgrades" />
-            <Check path={['skills', i, 'done']} label="Checked" />
+            <Input path={['skills', i, 'name']} ariaLabel={t('skills.name')} placeholder={t('skills.phSkill')} />
+            <Input path={['skills', i, 'rank']} ariaLabel={t('skills.rank')} placeholder={t('skills.rank')} center />
+            <Input
+              path={['skills', i, 'statMod']}
+              ariaLabel={t('skills.statMod')}
+              placeholder={t('skills.phStat')}
+              center
+            />
+            <Input
+              path={['skills', i, 'checkType']}
+              ariaLabel={t('skills.checkType')}
+              placeholder={t('skills.checkType')}
+            />
+            <Input path={['skills', i, 'notes']} ariaLabel={t('skills.notes')} placeholder={t('skills.notes')} />
+            <Check path={['skills', i, 'done']} label={t('skills.checked')} />
           </div>
         )}
       </ListRows>
@@ -257,26 +290,33 @@ export function SkillsTab() {
 
 /* ---------------- Page 4: Inventory ---------------- */
 export function InventoryTab() {
+  const { t } = useI18n();
   return (
-    <Section title="Inventory">
+    <Section title={t('inv.title')}>
       <ListRows<Item>
         path={['inventory']}
         make={emptyItem}
-        addLabel="Add item"
+        addLabel={t('inv.add')}
         className="inventory"
         header={
           <div className="list-head inv-cols">
-            <span>Item</span>
-            <span className="center">Qty</span>
-            <span>Notes</span>
+            <span>{t('inv.item')}</span>
+            <span className="center">{t('inv.qty')}</span>
+            <span>{t('inv.notes')}</span>
           </div>
         }
       >
         {(i) => (
           <div className="inv-cols">
-            <Input path={['inventory', i, 'item']} ariaLabel="Item" placeholder="Item" />
-            <Input path={['inventory', i, 'qty']} ariaLabel="Quantity" placeholder="Qty" center numeric />
-            <Input path={['inventory', i, 'notes']} ariaLabel="Notes" placeholder="Notes" />
+            <Input path={['inventory', i, 'item']} ariaLabel={t('inv.item')} placeholder={t('inv.item')} />
+            <Input
+              path={['inventory', i, 'qty']}
+              ariaLabel={t('inv.quantity')}
+              placeholder={t('inv.qty')}
+              center
+              numeric
+            />
+            <Input path={['inventory', i, 'notes']} ariaLabel={t('inv.notes')} placeholder={t('inv.notes')} />
           </div>
         )}
       </ListRows>
@@ -286,63 +326,64 @@ export function InventoryTab() {
 
 /* ---------------- Page 5: Companions & the rest ---------------- */
 export function CompanionsTab() {
+  const { t } = useI18n();
   return (
     <div className="comp-grid">
       <div className="col">
-        <Section title="Pet">
-          <Input path={['pet', 'name']} label="Name" />
-          <div className="sub-lbl">Health</div>
+        <Section title={t('pet.title')}>
+          <Input path={['pet', 'name']} label={t('pet.name')} />
+          <div className="sub-lbl">{t('core.health')}</div>
           <HealthTrack path={['pet', 'health']} rows={2} />
           <div className="pet-stats">
             <div className="kv-col">
               {STATS.map((s) => (
-                <Input key={s.key} path={['pet', 'stats', s.key]} label={s.label} center className="kv" />
+                <Input key={s.key} path={['pet', 'stats', s.key]} label={t(statLabel(s.key))} center className="kv" />
               ))}
             </div>
             <div className="kv-col">
-              <Input path={['pet', 'level']} label="Level" center className="kv" />
-              <Input path={['pet', 'dr']} label="DR" center className="kv" />
-              <Input path={['pet', 'evade']} label="Evade" center className="kv" />
-              <Input path={['pet', 'move']} label="Move" center className="kv" />
-              <Input path={['pet', 'size']} label="Size" center className="kv" />
+              <Input path={['pet', 'level']} label={t('core.level')} center className="kv" />
+              <Input path={['pet', 'dr']} label={t('pet.dr')} center className="kv" />
+              <Input path={['pet', 'evade']} label={t('core.evade')} center className="kv" />
+              <Input path={['pet', 'move']} label={t('core.move')} center className="kv" />
+              <Input path={['pet', 'size']} label={t('core.size')} center className="kv" />
             </div>
           </div>
-          <Input path={['pet', 'attack1']} label="Attack" className="kv wide" />
-          <Input path={['pet', 'attack2']} label="Attack" className="kv wide" />
-          <Area path={['pet', 'special']} label="Special" rows={2} />
+          <Input path={['pet', 'attack1']} label={t('pet.attack')} className="kv wide" />
+          <Input path={['pet', 'attack2']} label={t('pet.attack')} className="kv wide" />
+          <Area path={['pet', 'special']} label={t('pet.special')} rows={2} />
         </Section>
-        <Section title="Mount / Vehicle">
-          <Input path={['mount', 'name']} label="Name" />
-          <div className="sub-lbl">Health</div>
+        <Section title={t('mount.title')}>
+          <Input path={['mount', 'name']} label={t('pet.name')} />
+          <div className="sub-lbl">{t('core.health')}</div>
           <HealthTrack path={['mount', 'health']} rows={2} />
           <div className="mount-grid">
-            <Input path={['mount', 'size']} label="Size" />
-            <Input path={['mount', 'move']} label="Move" center />
-            <Input path={['mount', 'occupants']} label="Occupants" />
-            <Input path={['mount', 'dr']} label="DR" center />
+            <Input path={['mount', 'size']} label={t('core.size')} />
+            <Input path={['mount', 'move']} label={t('core.move')} center />
+            <Input path={['mount', 'occupants']} label={t('mount.occupants')} />
+            <Input path={['mount', 'dr']} label={t('pet.dr')} center />
           </div>
-          <Area path={['mount', 'accessories']} label="Accessories" rows={3} />
+          <Area path={['mount', 'accessories']} label={t('mount.accessories')} rows={3} />
         </Section>
       </div>
       <div className="col">
-        <Section title="Important Things I've Killed">
-          <ListRows<string> path={['kills']} make={() => ''} addLabel="Add kill" className="simple">
-            {(i) => <Input path={['kills', i]} ariaLabel={`Kill ${i + 1}`} placeholder="…" />}
+        <Section title={t('kills.title')}>
+          <ListRows<string> path={['kills']} make={() => ''} addLabel={t('kills.add')} className="simple">
+            {(i) => <Input path={['kills', i]} ariaLabel={t('kills.item', { n: i + 1 })} placeholder="…" />}
           </ListRows>
         </Section>
-        <Section title="Clubs, Societies, Guilds, etc.">
-          <ListRows<string> path={['clubs']} make={() => ''} addLabel="Add club" className="simple">
-            {(i) => <Input path={['clubs', i]} ariaLabel={`Club ${i + 1}`} placeholder="…" />}
+        <Section title={t('clubs.title')}>
+          <ListRows<string> path={['clubs']} make={() => ''} addLabel={t('clubs.add')} className="simple">
+            {(i) => <Input path={['clubs', i]} ariaLabel={t('clubs.item', { n: i + 1 })} placeholder="…" />}
           </ListRows>
         </Section>
       </div>
       <div className="col">
-        <Section title="Personal Space">
-          <Input path={['personalSpace', 'tier']} label="Tier" className="kv wide" />
-          <Input path={['personalSpace', 'size']} label="Size" className="kv wide" />
-          <Area path={['personalSpace', 'amenities']} label="Amenities" rows={6} />
+        <Section title={t('space.title')}>
+          <Input path={['personalSpace', 'tier']} label={t('space.tier')} className="kv wide" />
+          <Input path={['personalSpace', 'size']} label={t('core.size')} className="kv wide" />
+          <Area path={['personalSpace', 'amenities']} label={t('space.amenities')} rows={6} />
         </Section>
-        <Section title="Deity">
+        <Section title={t('deity.title')}>
           <Area path={['deity']} rows={5} />
         </Section>
       </div>
@@ -352,17 +393,18 @@ export function CompanionsTab() {
 
 /* ---------------- Page 6: Abilities & Sponsors ---------------- */
 export function AbilitiesTab() {
+  const { t } = useI18n();
   return (
     <div className="abil-grid">
-      <Section title="Racial Abilities">
+      <Section title={t('abil.racial')}>
         <Area path={['racialAbilities']} rows={14} />
       </Section>
-      <Section title="Class Abilities">
+      <Section title={t('abil.class')}>
         <Area path={['classAbilities']} rows={14} />
       </Section>
       <div className="col">
         {[0, 1, 2].map((i) => (
-          <Section key={i} title={`Sponsor ${i + 1}`}>
+          <Section key={i} title={t('abil.sponsor', { n: i + 1 })}>
             <Area path={['sponsors', i]} rows={4} />
           </Section>
         ))}

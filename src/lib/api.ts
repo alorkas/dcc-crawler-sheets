@@ -31,6 +31,10 @@ export class ApiError extends Error {
   ) {
     super(message);
   }
+  /** Stable machine-readable error code from the server, used for translation. */
+  get code(): string | undefined {
+    return typeof this.body.code === 'string' ? this.body.code : undefined;
+  }
 }
 
 async function request<T>(method: string, url: string, body?: unknown): Promise<T> {

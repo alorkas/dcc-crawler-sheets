@@ -64,24 +64,25 @@ export function createApp({ db, jwtSecret, allowRegistration = true, cookieSecur
 
   function auth(req, res, next) {
     const token = req.cookies[COOKIE];
-    if (!token) return res.status(401).json({ error: 'Not logged in' });
+    if (!token) return res.status(401).json({ error: 'Not logged in', code: 'not_logged_in' });
     try {
       const { uid } = jwt.verify(token, jwtSecret);
       const user = q.userById.get(uid);
-      if (!user) return res.status(401).json({ error: 'Account no longer exists' });
+      if (!user) return res.status(401).json({ error: 'Account no longer exists', code: 'account_gone' });
       req.user = user;
       next();
     } catch {
-      res.status(401).json({ error: 'Session expired' });
+      res.status(401).json({ error: 'Session expired', code: 'session_expired' });
     }
   }
 
-  const adminOnly = (req, res, next) => (req.user.is_admin ? next() : res.status(403).json({ error: 'Admin only' }));
+  const adminOnly = (req, res, next) =>
+    req.user.is_admin ? next() : res.status(403).json({ error: 'Admin only', code: 'admin_only' });
 
   function loadChar(req, res, next) {
     const row = q.charById.get(Number(req.params.id));
     if (!row || (row.owner_id !== req.user.id && !req.user.is_admin)) {
-      return res.status(404).json({ error: 'Character not found' });
+      return res.status(404).json({ error: 'Character not found', code: 'char_not_found' });
     }
     req.char = row;
     next();
@@ -94,7 +95,8 @@ export function createApp({ db, jwtSecret, allowRegistration = true, cookieSecur
     const now = Date.now();
     const a = attempts.get(key) || { n: 0, t: now };
     if (now - a.t > 15 * 60 * 1000) Object.assign(a, { n: 0, t: now });
-    if (a.n >= 20) return res.status(429).json({ error: 'Too many attempts, try again later' });
+    if (a.n >= 20)
+      return res.status(429).json({ error: 'Too many attempts, try again later', code: 'too_many_attempts' });
     a.n++;
     attempts.set(key, a);
     next();
@@ -104,13 +106,18 @@ export function createApp({ db, jwtSecret, allowRegistration = true, cookieSecur
   app.get('/api/config', (_req, res) => res.json({ allowRegistration }));
 
   app.post('/api/auth/register', throttle, (req, res) => {
-    if (!allowRegistration) return res.status(403).json({ error: 'Registration is closed' });
+    if (!allowRegistration)
+      return res.status(403).json({ error: 'Registration is closed', code: 'registration_closed' });
     const { username = '', password = '' } = req.body || {};
     if (!USERNAME_RE.test(username)) {
-      return res.status(400).json({ error: 'Username must be 3–32 characters: letters, numbers, _ . -' });
+      return res
+        .status(400)
+        .json({ error: 'Username must be 3–32 characters: letters, numbers, _ . -', code: 'username_invalid' });
     }
-    if (password.length < 8) return res.status(400).json({ error: 'Password must be at least 8 characters' });
-    if (q.userByName.get(username)) return res.status(409).json({ error: 'Username already taken' });
+    if (password.length < 8)
+      return res.status(400).json({ error: 'Password must be at least 8 characters', code: 'password_short' });
+    if (q.userByName.get(username))
+      return res.status(409).json({ error: 'Username already taken', code: 'username_taken' });
     const r = q.insertUser.run(username, bcrypt.hashSync(password, 10));
     const user = q.userById.get(r.lastInsertRowid);
     issue(res, user);
@@ -121,7 +128,7 @@ export function createApp({ db, jwtSecret, allowRegistration = true, cookieSecur
     const { username = '', password = '' } = req.body || {};
     const user = q.userByName.get(username);
     if (!user || !bcrypt.compareSync(password, user.password_hash)) {
-      return res.status(401).json({ error: 'Invalid username or password' });
+      return res.status(401).json({ error: 'Invalid username or password', code: 'invalid_login' });
     }
     attempts.delete(req.ip);
     issue(res, user);
@@ -139,9 +146,10 @@ export function createApp({ db, jwtSecret, allowRegistration = true, cookieSecur
     const { currentPassword = '', newPassword = '' } = req.body || {};
     const full = q.userByName.get(req.user.username);
     if (!bcrypt.compareSync(currentPassword, full.password_hash)) {
-      return res.status(400).json({ error: 'Current password is incorrect' });
+      return res.status(400).json({ error: 'Current password is incorrect', code: 'wrong_current_password' });
     }
-    if (newPassword.length < 8) return res.status(400).json({ error: 'Password must be at least 8 characters' });
+    if (newPassword.length < 8)
+      return res.status(400).json({ error: 'Password must be at least 8 characters', code: 'password_short' });
     db.prepare('UPDATE users SET password_hash = ? WHERE id = ?').run(bcrypt.hashSync(newPassword, 10), full.id);
     res.json({ ok: true });
   });
@@ -168,7 +176,8 @@ export function createApp({ db, jwtSecret, allowRegistration = true, cookieSecur
   app.post('/api/characters', auth, (req, res) => {
     let ownerId = req.user.id;
     if (req.user.is_admin && req.body?.ownerId) {
-      if (!q.userById.get(Number(req.body.ownerId))) return res.status(400).json({ error: 'Unknown owner' });
+      if (!q.userById.get(Number(req.body.ownerId)))
+        return res.status(400).json({ error: 'Unknown owner', code: 'unknown_owner' });
       ownerId = Number(req.body.ownerId);
     }
     const data = req.body?.data && typeof req.body.data === 'object' ? req.body.data : {};
@@ -180,10 +189,14 @@ export function createApp({ db, jwtSecret, allowRegistration = true, cookieSecur
 
   app.put('/api/characters/:id', auth, loadChar, (req, res) => {
     const { data, version } = req.body || {};
-    if (!data || typeof data !== 'object') return res.status(400).json({ error: 'Missing sheet data' });
-    if (req.char.locked) return res.status(423).json({ error: 'Sheet is locked', character: toChar(req.char) });
+    if (!data || typeof data !== 'object')
+      return res.status(400).json({ error: 'Missing sheet data', code: 'missing_data' });
+    if (req.char.locked)
+      return res.status(423).json({ error: 'Sheet is locked', code: 'sheet_locked', character: toChar(req.char) });
     if (Number(version) !== req.char.version) {
-      return res.status(409).json({ error: 'Sheet was changed elsewhere', character: toChar(req.char) });
+      return res
+        .status(409)
+        .json({ error: 'Sheet was changed elsewhere', code: 'sheet_conflict', character: toChar(req.char) });
     }
     db.prepare(`UPDATE characters SET data = ?, version = version + 1, updated_at = datetime('now') WHERE id = ?`).run(
       JSON.stringify(data),
@@ -202,14 +215,15 @@ export function createApp({ db, jwtSecret, allowRegistration = true, cookieSecur
   });
 
   app.delete('/api/characters/:id', auth, loadChar, (req, res) => {
-    if (req.char.locked) return res.status(423).json({ error: 'Unlock the sheet before deleting it' });
+    if (req.char.locked)
+      return res.status(423).json({ error: 'Unlock the sheet before deleting it', code: 'unlock_to_delete' });
     db.prepare('DELETE FROM characters WHERE id = ?').run(req.char.id);
     res.json({ ok: true });
   });
 
   app.patch('/api/characters/:id/owner', auth, adminOnly, loadChar, (req, res) => {
     const owner = q.userById.get(Number(req.body?.ownerId));
-    if (!owner) return res.status(400).json({ error: 'Unknown owner' });
+    if (!owner) return res.status(400).json({ error: 'Unknown owner', code: 'unknown_owner' });
     db.prepare('UPDATE characters SET owner_id = ? WHERE id = ?').run(owner.id, req.char.id);
     res.json(toChar(q.charById.get(req.char.id), false));
   });
@@ -228,17 +242,17 @@ export function createApp({ db, jwtSecret, allowRegistration = true, cookieSecur
 
   app.patch('/api/users/:id', auth, adminOnly, (req, res) => {
     const target = q.userById.get(Number(req.params.id));
-    if (!target) return res.status(404).json({ error: 'User not found' });
+    if (!target) return res.status(404).json({ error: 'User not found', code: 'user_not_found' });
     const { isAdmin, password } = req.body || {};
     if (typeof isAdmin === 'boolean') {
       if (target.id === req.user.id && !isAdmin) {
-        return res.status(400).json({ error: "You can't remove your own admin rights" });
+        return res.status(400).json({ error: "You can't remove your own admin rights", code: 'cant_demote_self' });
       }
       db.prepare('UPDATE users SET is_admin = ? WHERE id = ?').run(isAdmin ? 1 : 0, target.id);
     }
     if (password !== undefined) {
       if (String(password).length < 8) {
-        return res.status(400).json({ error: 'Password must be at least 8 characters' });
+        return res.status(400).json({ error: 'Password must be at least 8 characters', code: 'password_short' });
       }
       db.prepare('UPDATE users SET password_hash = ? WHERE id = ?').run(bcrypt.hashSync(password, 10), target.id);
     }
@@ -247,12 +261,13 @@ export function createApp({ db, jwtSecret, allowRegistration = true, cookieSecur
 
   app.delete('/api/users/:id', auth, adminOnly, (req, res) => {
     const id = Number(req.params.id);
-    if (id === req.user.id) return res.status(400).json({ error: "You can't delete yourself" });
+    if (id === req.user.id)
+      return res.status(400).json({ error: "You can't delete yourself", code: 'cant_delete_self' });
     db.prepare('DELETE FROM users WHERE id = ?').run(id);
     res.json({ ok: true });
   });
 
-  app.use('/api', (_req, res) => res.status(404).json({ error: 'Not found' }));
+  app.use('/api', (_req, res) => res.status(404).json({ error: 'Not found', code: 'not_found' }));
 
   // ---------- SPA ----------
   if (staticDir && fs.existsSync(staticDir)) {

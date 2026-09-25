@@ -6,32 +6,36 @@ import { normalize, setIn, type SheetData } from '../lib/sheet';
 import { SheetCtx, type Path } from '../components/fields';
 import { AbilitiesTab, CompanionsTab, CoreTab, GearTab, InventoryTab, SkillsTab } from '../components/SheetTabs';
 import { LockIcon, UnlockIcon } from '../components/icons';
+import { useI18n, type MsgKey } from '../lib/i18n';
 
 const TABS = [
-  { id: 'core', label: 'Core', el: CoreTab },
-  { id: 'gear', label: 'Gear & Hotlist', el: GearTab },
-  { id: 'skills', label: 'Skills', el: SkillsTab },
-  { id: 'inventory', label: 'Inventory', el: InventoryTab },
-  { id: 'companions', label: 'Pets & More', el: CompanionsTab },
-  { id: 'abilities', label: 'Abilities & Sponsors', el: AbilitiesTab },
+  { id: 'core', label: 'tab.core', el: CoreTab },
+  { id: 'gear', label: 'tab.gear', el: GearTab },
+  { id: 'skills', label: 'tab.skills', el: SkillsTab },
+  { id: 'inventory', label: 'tab.inventory', el: InventoryTab },
+  { id: 'companions', label: 'tab.companions', el: CompanionsTab },
+  { id: 'abilities', label: 'tab.abilities', el: AbilitiesTab },
 ] as const;
 
 type SaveState = 'idle' | 'dirty' | 'saving' | 'saved' | 'error';
+/** Either a translation key or an API error to translate at render time (so switching language updates it). */
+type ErrState = { key: MsgKey } | { error: unknown } | null;
 
 export default function SheetPage() {
   const { id } = useParams();
   const charId = Number(id);
   const { user } = useAuth();
+  const { t, err } = useI18n();
   const navigate = useNavigate();
   const [params, setParams] = useSearchParams();
-  const tab = TABS.find((t) => t.id === params.get('tab')) ?? TABS[0];
+  const tab = TABS.find((x) => x.id === params.get('tab')) ?? TABS[0];
 
   const [meta, setMeta] = useState<Omit<Character, 'data'> | null>(null);
   const [data, setData] = useState<SheetData | null>(null);
   const [locked, setLocked] = useState(false);
-  const [loadError, setLoadError] = useState('');
+  const [loadError, setLoadError] = useState<unknown>(null);
   const [saveState, setSaveState] = useState<SaveState>('idle');
-  const [saveError, setSaveError] = useState('');
+  const [saveError, setSaveError] = useState<ErrState>(null);
   const [conflict, setConflict] = useState<Character | null>(null);
   const [users, setUsers] = useState<AdminUser[]>([]);
 
@@ -56,7 +60,7 @@ export default function SheetPage() {
     api
       .getCharacter(charId)
       .then(applyServer)
-      .catch((e) => setLoadError(e.message));
+      .catch((e) => setLoadError(e ?? new Error()));
   }, [charId, applyServer]);
 
   useEffect(() => {
@@ -81,7 +85,7 @@ export default function SheetPage() {
         const res = await api.saveCharacter(charId, snapshot, versionRef.current);
         versionRef.current = res.version;
         setMeta((m) => (m ? { ...m, ...res } : m));
-        setSaveError('');
+        setSaveError(null);
         setSaveState(dirtyRef.current ? 'dirty' : 'saved');
       } catch (e) {
         dirtyRef.current = true;
@@ -90,9 +94,9 @@ export default function SheetPage() {
           const server = e.body.character as Character | undefined;
           if (e.status === 423) setLocked(true);
           if (server) setConflict(server);
-          setSaveError(e.status === 423 ? 'This sheet was locked elsewhere.' : 'This sheet was changed elsewhere.');
+          setSaveError({ key: e.status === 423 ? 'sheet.lockedElsewhere' : 'sheet.changedElsewhere' });
         } else {
-          setSaveError(e instanceof Error ? e.message : 'Save failed');
+          setSaveError(e instanceof ApiError ? { error: e } : { key: 'err.saveFailed' });
         }
       }
     })();
@@ -104,8 +108,8 @@ export default function SheetPage() {
   // debounced autosave
   useEffect(() => {
     if (saveState !== 'dirty') return;
-    const t = setTimeout(save, 700);
-    return () => clearTimeout(t);
+    const timer = setTimeout(save, 700);
+    return () => clearTimeout(timer);
   }, [data, saveState, save]);
 
   // warn before leaving with unsaved changes
@@ -137,19 +141,19 @@ export default function SheetPage() {
       setLocked(res.locked);
       setMeta((m) => (m ? { ...m, ...res } : m));
     } catch (e) {
-      setSaveError(e instanceof Error ? e.message : 'Could not change lock');
+      setSaveError(e instanceof ApiError ? { error: e } : { key: 'err.lockFailed' });
     }
   }
 
   async function remove() {
     if (!meta) return;
-    const name = data?.name || 'this crawler';
-    if (!confirm(`Delete ${name}? This cannot be undone.`)) return;
+    const name = data?.name || t('sheet.thisCrawler');
+    if (!confirm(t('sheet.deleteConfirm', { name }))) return;
     try {
       await api.deleteCharacter(charId);
       navigate('/');
     } catch (e) {
-      alert(e instanceof Error ? e.message : 'Delete failed');
+      alert(err(e, 'err.deleteFailed'));
     }
   }
 
@@ -168,21 +172,21 @@ export default function SheetPage() {
       const res = await api.setOwner(charId, ownerId);
       setMeta((m) => (m ? { ...m, ...res } : m));
     } catch (e) {
-      alert(e instanceof Error ? e.message : 'Could not change owner');
+      alert(err(e, 'err.ownerFailed'));
     }
   }
 
   if (loadError) {
     return (
       <div className="center-page">
-        <p className="error">{loadError}</p>
+        <p className="error">{err(loadError)}</p>
         <Link to="/" className="btn">
-          Back to my crawlers
+          {t('sheet.backToList')}
         </Link>
       </div>
     );
   }
-  if (!data || !meta || !ctx) return <div className="center-page dim">Loading sheet…</div>;
+  if (!data || !meta || !ctx) return <div className="center-page dim">{t('sheet.loading')}</div>;
 
   const isOther = user && meta.ownerId !== user.id;
   const Tab = tab.el;
@@ -192,16 +196,21 @@ export default function SheetPage() {
       <div className={`sheet ${locked ? 'is-locked' : ''}`}>
         <div className="sheet-bar">
           <div className="sheet-title">
-            <Link to="/" className="back" aria-label="Back">
+            <Link to="/" className="back" aria-label={t('sheet.back')}>
               ←
             </Link>
             <div>
-              <h1>{data.name || 'Unnamed crawler'}</h1>
+              <h1>{data.name || t('dash.unnamed')}</h1>
               <div className="dim small">
-                {[data.race, data.class, data.level && `Lvl ${data.level}`, data.floor && `Floor ${data.floor}`]
+                {[
+                  data.race,
+                  data.class,
+                  data.level && t('dash.lvl', { n: data.level }),
+                  data.floor && t('dash.floor', { n: data.floor }),
+                ]
                   .filter(Boolean)
-                  .join(' · ') || 'New crawler'}
-                {isOther && <span className="owner-tag"> · owned by {meta.ownerName}</span>}
+                  .join(' · ') || t('sheet.newCrawler')}
+                {isOther && <span className="owner-tag"> · {t('sheet.ownedBy', { name: meta.ownerName })}</span>}
               </div>
             </div>
           </div>
@@ -211,25 +220,25 @@ export default function SheetPage() {
               type="button"
               className={`btn lock-btn ${locked ? 'locked' : ''}`}
               onClick={toggleLock}
-              title={locked ? 'Unlock to edit' : 'Lock to prevent accidental changes'}
+              title={t(locked ? 'sheet.unlockTitle' : 'sheet.lockTitle')}
             >
               {locked ? <LockIcon /> : <UnlockIcon />}
-              {locked ? 'Unlock' : 'Lock'}
+              {t(locked ? 'sheet.unlock' : 'sheet.lock')}
             </button>
             <details className="menu">
-              <summary className="btn ghost" aria-label="More actions">
+              <summary className="btn ghost" aria-label={t('sheet.more')}>
                 ⋯
               </summary>
               <div className="menu-pop">
                 <button type="button" onClick={exportJson}>
-                  Export JSON
+                  {t('sheet.export')}
                 </button>
                 <button type="button" onClick={() => window.print()}>
-                  Print
+                  {t('sheet.print')}
                 </button>
                 {user?.isAdmin && users.length > 0 && (
                   <label className="menu-field">
-                    <span>Owner</span>
+                    <span>{t('sheet.owner')}</span>
                     <select value={meta.ownerId} onChange={(e) => changeOwner(Number(e.target.value))}>
                       {users.map((u) => (
                         <option key={u.id} value={u.id}>
@@ -240,7 +249,7 @@ export default function SheetPage() {
                   </label>
                 )}
                 <button type="button" className="danger" onClick={remove} disabled={locked}>
-                  {locked ? 'Unlock to delete' : 'Delete crawler'}
+                  {t(locked ? 'sheet.unlockToDelete' : 'sheet.delete')}
                 </button>
               </div>
             </details>
@@ -249,16 +258,16 @@ export default function SheetPage() {
 
         {locked && (
           <div className="banner lock-banner">
-            <LockIcon /> This sheet is locked. Unlock it to make changes.
+            <LockIcon /> {t('sheet.lockedBanner')}
           </div>
         )}
         {saveError && (
           <div className="banner error-banner">
-            <span>{saveError}</span>
+            <span>{'key' in saveError ? t(saveError.key) : err(saveError.error)}</span>
             {conflict && (
               <span className="banner-actions">
                 <button type="button" className="btn small" onClick={() => applyServer(conflict)}>
-                  Load latest version
+                  {t('sheet.loadLatest')}
                 </button>
                 {!conflict.locked && (
                   <button
@@ -267,34 +276,34 @@ export default function SheetPage() {
                     onClick={() => {
                       versionRef.current = conflict.version;
                       setConflict(null);
-                      setSaveError('');
+                      setSaveError(null);
                       dirtyRef.current = true;
                       setSaveState('dirty');
                     }}
                   >
-                    Keep my changes
+                    {t('sheet.keepMine')}
                   </button>
                 )}
               </span>
             )}
             {!conflict && saveState === 'error' && (
               <button type="button" className="btn small" onClick={save}>
-                Retry
+                {t('sheet.retry')}
               </button>
             )}
           </div>
         )}
 
         <nav className="tabs" role="tablist">
-          {TABS.map((t) => (
+          {TABS.map((x) => (
             <button
-              key={t.id}
+              key={x.id}
               role="tab"
-              aria-selected={t.id === tab.id}
-              className={t.id === tab.id ? 'active' : ''}
-              onClick={() => setParams(t.id === 'core' ? {} : { tab: t.id }, { replace: true })}
+              aria-selected={x.id === tab.id}
+              className={x.id === tab.id ? 'active' : ''}
+              onClick={() => setParams(x.id === 'core' ? {} : { tab: x.id }, { replace: true })}
             >
-              {t.label}
+              {t(x.label)}
             </button>
           ))}
         </nav>
@@ -308,13 +317,14 @@ export default function SheetPage() {
 }
 
 function SaveBadge({ state }: { state: SaveState | 'locked' }) {
-  const text: Record<string, string> = {
-    idle: 'All changes saved',
-    saved: 'All changes saved',
-    dirty: 'Unsaved…',
-    saving: 'Saving…',
-    error: 'Not saved',
-    locked: 'Locked',
+  const { t } = useI18n();
+  const key: Record<SaveState | 'locked', MsgKey> = {
+    idle: 'save.saved',
+    saved: 'save.saved',
+    dirty: 'save.dirty',
+    saving: 'save.saving',
+    error: 'save.error',
+    locked: 'save.locked',
   };
-  return <span className={`save-badge s-${state}`}>{text[state]}</span>;
+  return <span className={`save-badge s-${state}`}>{t(key[state])}</span>;
 }

@@ -1417,3 +1417,49 @@ main {
     print-color-adjust: exact;
   }
 }
+
+/* ---------- Language switcher ---------- */
+.lang-switch {
+  display: inline-flex;
+  padding: 3px;
+  gap: 2px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--bg-2);
+}
+.lang-switch button {
+  font: 600 0.72rem/1 var(--font-label);
+  letter-spacing: 0.08em;
+  color: var(--dim);
+  background: none;
+  border: 0;
+  border-radius: 5px;
+  padding: 0.45rem 0.55rem;
+  cursor: pointer;
+}
+.lang-switch button:hover {
+  color: var(--text);
+}
+.lang-switch button.active {
+  color: #111;
+  background: var(--gold);
+}
+.auth-card {
+  position: relative;
+}
+.auth-lang {
+  position: absolute;
+  top: 0.9rem;
+  right: 0.9rem;
+}
+.auth-card .brand.big {
+  margin-top: 1rem;
+}
+@media (max-width: 640px) {
+  .top-lang {
+    margin-left: auto;
+  }
+  .top-lang + .user-menu {
+    margin-left: 0;
+  }
+}
