@@ -118,3 +118,93 @@ test('catalog: lookups by name for everyone, full list only for admins', async (
   assert.ok(all.spells.length > 40 && all.items.length > 20);
   assert.equal((await client()('GET', '/api/catalog/lookup?name=Fireball')).status, 401);
 });
+
+test('party: GM picks members, everyone sees their HP, mana only for owner and GM', async () => {
+  const p1 = client();
+  const p2 = client();
+  const dm = client();
+  await p1('POST', '/api/auth/register', { username: 'donut', password: 'password1' });
+  await p2('POST', '/api/auth/register', { username: 'mordecai', password: 'password1' });
+  await dm('POST', '/api/auth/login', { username: 'dm', password: 'adminpass123' });
+  const a = await p1('POST', '/api/characters', {
+    data: { name: 'Donut', hbLost: 3, manaCurrent: '7', spells: 'secret' },
+  });
+  const b = await p2('POST', '/api/characters', { data: { name: 'Mordecai' } });
+
+  assert.equal((await p1('PATCH', `/api/characters/${a.body.id}/party`, { inParty: true })).status, 403);
+  assert.equal((await dm('PATCH', `/api/characters/${a.body.id}/party`, { inParty: true })).status, 200);
+  assert.equal((await dm('PATCH', `/api/characters/${b.body.id}/party`, { inParty: true })).status, 200);
+
+  const seen = (await p2('GET', '/api/party')).body;
+  assert.deepEqual(
+    seen.map((m) => m.view.name),
+    ['Donut', 'Mordecai'],
+  );
+  const donut = seen[0];
+  assert.equal(donut.view.hbLost, 3);
+  assert.equal(donut.view.manaCurrent, undefined, 'other players do not see mana');
+  assert.equal(donut.view.spells, undefined, 'only the party fields are shared');
+  assert.equal((await p1('GET', '/api/party')).body[0].view.manaCurrent, '7');
+  assert.equal((await dm('GET', '/api/party')).body[0].view.manaCurrent, '7');
+  assert.equal((await dm('GET', '/api/characters?scope=all')).body.find((c) => c.id === a.body.id).inParty, true);
+
+  await dm('PATCH', `/api/characters/${b.body.id}/party`, { inParty: false });
+  assert.equal((await p1('GET', '/api/party')).body.length, 1);
+});
+
+test('messages: rolls happen on the server, GM-only messages stay private, events stream', async () => {
+  const p1 = client();
+  const p2 = client();
+  const dm = client();
+  await p1('POST', '/api/auth/register', { username: 'katia', password: 'password1' });
+  await p2('POST', '/api/auth/register', { username: 'brandon', password: 'password1' });
+  await dm('POST', '/api/auth/login', { username: 'dm', password: 'adminpass123' });
+  const k = await p1('POST', '/api/characters', { data: { name: 'Katia' } });
+  const other = await p2('POST', '/api/characters', { data: { name: 'Brandon' } });
+
+  // live stream for p2
+  const login = await fetch(base + '/api/auth/login', {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ username: 'brandon', password: 'password1' }),
+  });
+  const ctrl = new AbortController();
+  const stream = await fetch(base + '/api/events', {
+    headers: { cookie: login.headers.get('set-cookie').split(';')[0] },
+    signal: ctrl.signal,
+  });
+  assert.match(stream.headers.get('content-type'), /^text\/event-stream/);
+  const reader = stream.body.getReader();
+
+  const chat = await p1('POST', '/api/messages', { text: 'Hello crawlers', characterId: k.body.id });
+  assert.equal(chat.status, 201);
+  assert.equal(chat.body.characterName, 'Katia');
+  assert.equal((await p1('POST', '/api/messages', { text: 'hi', characterId: other.body.id })).status, 404);
+
+  const roll = await p1('POST', '/api/messages', { roll: { expr: 'd20+5', label: 'Longsword' } });
+  assert.equal(roll.body.kind, 'roll');
+  assert.ok(roll.body.roll.total >= 6 && roll.body.roll.total <= 25);
+  assert.equal(roll.body.roll.label, 'Longsword');
+  const cmd = await p1('POST', '/api/messages', { text: '/roll 2d6+1 # damage' });
+  assert.equal(cmd.body.roll.expr, '2d6+1');
+  assert.equal(cmd.body.roll.label, 'damage');
+  assert.equal((await p1('POST', '/api/messages', { roll: { expr: 'fireball' } })).status, 400);
+  assert.equal((await p1('POST', '/api/messages', { text: '   ' })).status, 400);
+
+  await dm('POST', '/api/messages', { roll: { expr: 'd20', label: 'Ambush?' }, gmOnly: true });
+  const forP2 = (await p2('GET', '/api/messages')).body;
+  assert.ok(forP2.some((m) => m.text === 'Hello crawlers'));
+  assert.ok(!forP2.some((m) => m.roll?.label === 'Ambush?'), 'players do not see GM-only rolls');
+  assert.ok((await dm('GET', '/api/messages')).body.some((m) => m.roll?.label === 'Ambush?'));
+
+  // the stream delivered the chat message
+  let text = '';
+  while (!text.includes('Hello crawlers')) text += new TextDecoder().decode((await reader.read()).value);
+  assert.ok(text.includes('event: message'));
+  assert.ok(!text.includes('Ambush?'));
+  ctrl.abort();
+
+  assert.equal((await p1('DELETE', '/api/messages')).status, 403);
+  assert.equal((await dm('DELETE', '/api/messages')).status, 200);
+  assert.equal((await p1('GET', '/api/messages')).body.length, 0);
+});

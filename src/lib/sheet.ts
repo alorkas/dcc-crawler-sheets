@@ -29,6 +29,8 @@ export type Skill = {
   done: boolean; // advancement mark
   /** Combat skills and attack spells pinned to the Attacks list on the Core tab. */
   pinned: boolean;
+  /** Homebrew skill: not looked up in the book (no auto-sorting, no "Fill from book"). */
+  custom: boolean;
   // Attack Skill / Spell details (book entry fields)
   attackType: '' | 'melee' | 'ranged';
   manaCost: string;
@@ -149,6 +151,7 @@ export const emptySkill = (): Skill => ({
   notes: '',
   done: false,
   pinned: false,
+  custom: false,
   attackType: '',
   manaCost: '',
   range: '',

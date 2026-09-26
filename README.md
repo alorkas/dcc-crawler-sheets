@@ -12,6 +12,9 @@ Interactive, mobile-friendly character sheets for a **Dungeon Crawler Carl RPG**
 - New-crawler wizard following the Core Rulebook: basics (random crawler number, human or animal with size), background tables (pick or roll, choose 2 of 3 skills, no duplicates), main attack (weapon with an optional custom name such as "Tire Iron (Club)", starter spell, or hand-to-hand), stats (standard array or roll), starting gear kits, and a review. "Skip: blank sheet" is still available
 - "Fill from book": skill cards and inventory rows fill empty fields from the Core Rulebook (weapons, spells, utility skills, items)
 - Spoiler-safe book catalog: spells and items live only on the server. Players can look up an entry by its exact name (the one on their sheet), but only admins can list or autocomplete the whole catalog
+- Party panel (left, collapsible): the GM marks which crawlers are in the party (party button on the sheet or on the crawler cards) and everyone sees their Health Bar, Dying state and debuffs live. Mana is shown only to the owner and the GM
+- Log & chat panel (right, collapsible): shared, live dice log and chat. Click any roll total on a sheet (skill checks, to-hit, damage) or use `/roll 2d6+3 # label` (also `2d20kh1`, `2d20kl1`). Rolls happen on the server. Speak as one of your crawlers; "To GM only" / "Hidden" keeps a message between you and the GM. The GM can clear the log
+- Custom (homebrew) skills in every category; name suggestions are filtered to the section's own category
 - A single container with a SQLite database kept in the `/data` volume
 
 ## Deploy (Komodo / docker compose)
@@ -31,6 +34,10 @@ Environment variables (in `docker-compose.yml` the admin and JWT values come fro
 
 Back up the `crawler-data` volume (`/data/crawlers.db`) to keep every sheet.
 
+### Reverse proxy note
+
+The party and log panels use Server-Sent Events on `/api/events`. Caddy works out of the box. With nginx, the app sends `X-Accel-Buffering: no`; if updates still arrive late, add `proxy_buffering off;` for that location.
+
 ## Local development
 
 ```bash
@@ -44,6 +51,7 @@ Checks: `npm run lint`, `npx prettier --check .`, `npm run build`, `npm test`.
 ## Structure
 
 - `server/`: Express API (`app.js`), SQLite schema (`db.js`), entrypoint (`index.js`)
+- `server/live.js`: party panel, roll log/chat and the Server-Sent Events stream (`/api/events`); `server/dice.js`: dice parser
 - `server/catalog/`: Core Rulebook weapons, spells, utility skills and items (server-side only, so spells and items aren't in the browser bundle)
 - `src/lib/creation.ts` + `src/pages/CreatePage.tsx`: the character creation wizard (background tables, starter options, sheet builder)
 - `src/lib/sheet.ts`: the sheet data model (every field from the PDF)

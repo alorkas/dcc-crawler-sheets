@@ -26,7 +26,21 @@ export function openDb(file) {
       updated_at TEXT NOT NULL DEFAULT (datetime('now'))
     );
     CREATE INDEX IF NOT EXISTS idx_characters_owner ON characters(owner_id);
+    CREATE TABLE IF NOT EXISTS messages (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+      character_id INTEGER REFERENCES characters(id) ON DELETE SET NULL,
+      char_name TEXT NOT NULL DEFAULT '',
+      kind TEXT NOT NULL DEFAULT 'chat',
+      text TEXT NOT NULL DEFAULT '',
+      roll TEXT,
+      gm_only INTEGER NOT NULL DEFAULT 0,
+      created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))
+    );
   `);
+  // added later: party membership (NULL = not in the party; otherwise when they joined, for ordering)
+  const cols = db.prepare('PRAGMA table_info(characters)').all();
+  if (!cols.some((c) => c.name === 'party_since')) db.exec('ALTER TABLE characters ADD COLUMN party_since TEXT');
   return db;
 }
 

@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import {
   addDebuff,
+  damageExpr,
   annotateDamage,
   canPin,
   pinnedAttacks,
@@ -265,5 +266,20 @@ describe('pinned attacks', () => {
     const s = newSheet();
     s.stats.str = { enhanced: '6', unenhanced: '6', mod: '' };
     expect(annotateDamage('1d4 + Str Bludgeoning', derive(s))).toBe('1d4 + Str (+3) Bludgeoning');
+  });
+});
+
+describe('damageExpr', () => {
+  const d = newSheet();
+  d.stats.str.enhanced = '6';
+  d.stats.int.enhanced = '3';
+  const der = derive(d);
+  it('turns damage text into a dice expression', () => {
+    const str = der.mods.str!;
+    expect(damageExpr('1d6 + Str Bludgeoning', der, '1')).toBe(`1d6+${str}`);
+    expect(damageExpr('2d12+F Electric', der, '3')).toBe('2d12+3');
+    expect(damageExpr('1d4 Piercing', der, '1')).toBe('1d4');
+    expect(damageExpr('Stuns the target', der, '1')).toBeNull();
+    expect(damageExpr('1d8 + Dex Mod Slashing', der, '1')).toBeNull(); // Dex not filled in
   });
 });

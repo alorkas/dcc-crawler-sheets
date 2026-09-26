@@ -2,7 +2,8 @@ import { useEffect, useMemo, useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import { api, type CharacterSummary } from '../lib/api';
 import { useAuth } from '../lib/auth';
-import { LockIcon } from '../components/icons';
+import { LockIcon, PartyIcon } from '../components/icons';
+import { PartyToggle } from '../components/LivePanels';
 import { useI18n } from '../lib/i18n';
 
 export default function Dashboard({ scope }: { scope: 'mine' | 'all' }) {
@@ -80,7 +81,13 @@ export default function Dashboard({ scope }: { scope: 'mine' | 'all' }) {
             )}
             <div className="char-grid">
               {g.items.map((c) => (
-                <CharCard key={c.id} c={c} />
+                <CharCard
+                  key={c.id}
+                  c={c}
+                  onParty={(inParty) =>
+                    setChars((list) => (list ?? []).map((x) => (x.id === c.id ? { ...x, inParty } : x)))
+                  }
+                />
               ))}
             </div>
           </div>
@@ -90,8 +97,9 @@ export default function Dashboard({ scope }: { scope: 'mine' | 'all' }) {
   );
 }
 
-function CharCard({ c }: { c: CharacterSummary }) {
+function CharCard({ c, onParty }: { c: CharacterSummary; onParty: (v: boolean) => void }) {
   const s = c.summary;
+  const { user } = useAuth();
   const { t, locale } = useI18n();
   const initials = (s.name || '?')
     .split(/\s+/)
@@ -109,6 +117,15 @@ function CharCard({ c }: { c: CharacterSummary }) {
             <span className="lock-pill" title={t('dash.locked')}>
               <LockIcon />
             </span>
+          )}
+          {user?.isAdmin ? (
+            <PartyToggle id={c.id} inParty={c.inParty} onChange={onParty} compact />
+          ) : (
+            c.inParty && (
+              <span className="party-pill" title={t('party.inParty')}>
+                <PartyIcon />
+              </span>
+            )
           )}
         </div>
         <div className="dim small">{[s.race, s.class].filter(Boolean).join(' · ') || t('dash.noRaceClass')}</div>

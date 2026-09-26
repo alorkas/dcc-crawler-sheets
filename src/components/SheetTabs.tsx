@@ -1,13 +1,14 @@
 import { Area, Input, Section, useSheet } from './fields';
 import { ListRows, Portrait } from './widgets';
 import { AutoNumber, DebuffPanel, HealthBar, HealthTools, ManaTools, useStatMod } from './rulesWidgets';
-import { MAX_ACCESSORIES, annotateDamage, num, pinnedAttacks, statModFromScore } from '../lib/rules';
+import { MAX_ACCESSORIES, annotateDamage, damageExpr, num, pinnedAttacks, statModFromScore } from '../lib/rules';
 import { useSearchParams } from 'react-router-dom';
 import { useEffect, useState } from 'react';
 import { fillItem, lookup } from '../lib/catalog';
 import { api } from '../lib/api';
 import { useAuth } from '../lib/auth';
 import { CastButton } from './SkillsTab';
+import { RollButton } from './RollButton';
 import { useI18n, type MsgKey } from '../lib/i18n';
 import { STATS, emptyItem, signed, type Item, type SheetData, type StatKey } from '../lib/sheet';
 
@@ -200,6 +201,7 @@ function PinnedRow({ i, der, onEdit }: { i: number; der: ReturnType<typeof useSh
   const toHit = rank === null && mod === null ? null : (rank ?? 0) + (mod ?? 0) + der.penalty;
   const statLbl = s.stat && s.stat !== 'none' ? t(`stat.${s.stat}.short` as MsgKey) : '';
   const spell = s.category === 'spell';
+  const dmgExpr = s.baseDamage ? damageExpr(s.baseDamage, der, data.floor) : null;
   const typeLbl = s.subtype
     ? t(`skillsub.${s.category}.${s.subtype}` as MsgKey)
     : t(`skillcat.${s.category}` as MsgKey);
@@ -215,14 +217,33 @@ function PinnedRow({ i, der, onEdit }: { i: number; der: ReturnType<typeof useSh
         </span>
       </div>
       <div className="pin-hit">
-        <strong>{toHit === null ? '—' : `d20 ${signed(toHit)}`}</strong>
+        {toHit === null ? (
+          <strong>—</strong>
+        ) : (
+          <RollButton
+            expr={`d20${signed(toHit)}`}
+            text={`d20 ${signed(toHit)}`}
+            label={t('roll.toHit', { name: s.name || t('skills.phSkill') })}
+            className="pin-roll"
+          />
+        )}
         <span className="dim tiny">
           {[rank !== null && `${t('skills.rank')} ${rank}`, statLbl && mod !== null && `${statLbl} ${signed(mod)}`]
             .filter(Boolean)
             .join(' · ')}
         </span>
       </div>
-      <div className="pin-dmg">{s.baseDamage ? annotateDamage(s.baseDamage, der) : '—'}</div>
+      <div className="pin-dmg">
+        {s.baseDamage ? annotateDamage(s.baseDamage, der) : '—'}
+        {dmgExpr && (
+          <RollButton
+            expr={dmgExpr}
+            text={t('roll.damage')}
+            label={t('roll.damageOf', { name: s.name || t('skills.phSkill') })}
+            className="dmg-roll"
+          />
+        )}
+      </div>
       <div className="pin-range">
         {rangeText(s.attackType ? t(`skill.${s.attackType}` as MsgKey) : '', s.range) || '—'}
       </div>

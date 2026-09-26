@@ -8,6 +8,8 @@ import Dashboard from './pages/Dashboard';
 import SheetPage from './pages/SheetPage';
 import PlayersPage from './pages/PlayersPage';
 import CreatePage from './pages/CreatePage';
+import { LiveProvider } from './lib/live';
+import { LogPanel, PartyPanel } from './components/LivePanels';
 
 export default function App() {
   return (
@@ -27,16 +29,18 @@ function Shell() {
   if (loading) return <div className="center-page dim">{t('common.loading')}</div>;
   if (!user) return <LoginPage />;
   return (
-    <Layout>
-      <Routes>
-        <Route path="/" element={<Dashboard scope="mine" />} />
-        <Route path="/new" element={<CreatePage />} />
-        <Route path="/sheet/:id" element={<SheetPage />} />
-        {user.isAdmin && <Route path="/admin/crawlers" element={<Dashboard scope="all" />} />}
-        {user.isAdmin && <Route path="/admin/players" element={<PlayersPage />} />}
-        <Route path="*" element={<Navigate to="/" replace />} />
-      </Routes>
-    </Layout>
+    <LiveProvider>
+      <Layout>
+        <Routes>
+          <Route path="/" element={<Dashboard scope="mine" />} />
+          <Route path="/new" element={<CreatePage />} />
+          <Route path="/sheet/:id" element={<SheetPage />} />
+          {user.isAdmin && <Route path="/admin/crawlers" element={<Dashboard scope="all" />} />}
+          {user.isAdmin && <Route path="/admin/players" element={<PlayersPage />} />}
+          <Route path="*" element={<Navigate to="/" replace />} />
+        </Routes>
+      </Layout>
+    </LiveProvider>
   );
 }
 
@@ -74,7 +78,11 @@ function Layout({ children }: { children: ReactNode }) {
           </div>
         </details>
       </header>
-      <main>{children}</main>
+      <div className="workspace">
+        <PartyPanel />
+        <main>{children}</main>
+        <LogPanel />
+      </div>
       {pwOpen && <PasswordDialog onClose={() => setPwOpen(false)} />}
     </div>
   );

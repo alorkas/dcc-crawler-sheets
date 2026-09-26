@@ -8,6 +8,8 @@ import { SKILL_CATEGORIES, isCategory, isValidType, type SkillCategory } from '.
 import { fillSkill, hitType, lookup } from '../lib/catalog';
 import { api } from '../lib/api';
 import { useAuth } from '../lib/auth';
+import { STARTER_SPELLS } from '../lib/creation';
+import { RollButton } from './RollButton';
 
 const catKey = (c: string) => `skillcat.${c}` as MsgKey;
 const subKey = (c: string, s: string) => `skillsub.${c}.${s}` as MsgKey;
@@ -33,7 +35,7 @@ export function SkillsTab() {
   useEffect(() => {
     if (resolved.current || locked) return;
     resolved.current = true;
-    const pending = data.skills.filter((s) => s.name.trim() && (!s.category || !s.subtype));
+    const pending = data.skills.filter((s) => !s.custom && s.name.trim() && (!s.category || !s.subtype));
     pending.forEach((s) => {
       lookup(s.name)
         .then((hit) => {
@@ -42,7 +44,7 @@ export function SkillsTab() {
           update((d) => ({
             ...d,
             skills: d.skills.map((x) =>
-              x.name === s.name && (!x.category || !x.subtype)
+              !x.custom && x.name === s.name && (!x.category || !x.subtype)
                 ? { ...x, ...type, stat: x.stat || fillSkill(x, hit).stat || '' }
                 : x,
             ),
@@ -52,9 +54,9 @@ export function SkillsTab() {
     });
   }, [data.skills, locked, update]);
 
-  const addSkill = (category: SkillCategory) => {
+  const addSkill = (category: SkillCategory, custom = false) => {
     const index = data.skills.length;
-    update((d) => ({ ...d, skills: [...d.skills, { ...emptySkill(), category }] }));
+    update((d) => ({ ...d, skills: [...d.skills, { ...emptySkill(), category, custom }] }));
     setOpen((o) => new Set(o).add(index));
   };
   const removeSkill = (i: number) => {
@@ -120,9 +122,19 @@ export function SkillsTab() {
               ))}
             {rows.length === 0 && <p className="dim small">{t('skills.emptyCat')}</p>}
             {!locked && (
-              <button type="button" className="btn ghost add-row" onClick={() => addSkill(cat.id)}>
-                + {t(`skills.add.${cat.id}` as MsgKey)}
-              </button>
+              <div className="add-row-group">
+                <button type="button" className="btn ghost add-row" onClick={() => addSkill(cat.id)}>
+                  + {t(`skills.add.${cat.id}` as MsgKey)}
+                </button>
+                <button
+                  type="button"
+                  className="btn ghost add-row add-custom"
+                  onClick={() => addSkill(cat.id, true)}
+                  title={t('skills.customHint')}
+                >
+                  + {t('skills.addCustom')}
+                </button>
+              </div>
             )}
           </Section>
         );
@@ -231,7 +243,7 @@ function NameInput({ i }: { i: number }) {
   const { t } = useI18n();
   const s = data.skills[i];
   const autoClassify = () => {
-    if (locked || (s.subtype && s.stat) || !s.name.trim()) return;
+    if (locked || s.custom || (s.subtype && s.stat) || !s.name.trim()) return;
     const name = s.name;
     lookup(name)
       .then((hit) => {
@@ -252,37 +264,79 @@ function NameInput({ i }: { i: number }) {
       })
       .catch(() => {});
   };
+  // suggestions only from the book list of this skill's own category; custom skills get none
+  const list = s.custom ? undefined : isCategory(s.category) ? `skill-names-${s.category}` : 'skill-names-all';
   return (
     <div onBlur={autoClassify} className="name-cell">
       <Input
         path={['skills', i, 'name']}
         ariaLabel={t('skills.name')}
-        placeholder={t('skills.phSkill')}
-        list="skill-names"
+        placeholder={t(s.custom ? 'skills.phCustom' : 'skills.phSkill')}
+        list={list}
       />
+      {s.custom && <CustomTag i={i} />}
     </div>
   );
 }
 
 /**
- * Name suggestions: weapons and utility skills for everyone (they're in the player books);
- * the GM also gets every spell so they can hand spells out quickly.
+ * Name suggestions, one list per category: weapons (combat) and utility skills for everyone (they're in the
+ * player books) and the starter spells; the GM also gets every spell so they can hand spells out quickly.
  */
 function SkillNameList() {
   const { user } = useAuth();
-  const [names, setNames] = useState<string[]>([]);
+  const [lists, setLists] = useState<Record<SkillCategory, string[]>>({ combat: [], utility: [], spell: [] });
   useEffect(() => {
+    const sorted = (n: string[]) => [...new Set(n)].sort((a, b) => a.localeCompare(b));
     const load = user?.isAdmin
-      ? api.fullCatalog().then((c) => [...c.weapons, ...c.utility, ...c.spells].map((e) => e.name))
-      : api.publicSkills().then((l) => l.map((e) => e.name));
-    load.then((n) => setNames([...new Set(n)].sort())).catch(() => {});
+      ? api.fullCatalog().then((c) => ({
+          combat: c.weapons.map((e) => e.name),
+          utility: c.utility.map((e) => e.name),
+          spell: c.spells.map((e) => e.name),
+        }))
+      : api.publicSkills().then((l) => ({
+          combat: l.filter((e) => e.category === 'combat').map((e) => e.name),
+          utility: l.filter((e) => e.category === 'utility').map((e) => e.name),
+          spell: [...STARTER_SPELLS, 'Heal'],
+        }));
+    load
+      .then((x) => setLists({ combat: sorted(x.combat), utility: sorted(x.utility), spell: sorted(x.spell) }))
+      .catch(() => {});
   }, [user?.isAdmin]);
+  const all = [...lists.combat, ...lists.utility, ...lists.spell];
   return (
-    <datalist id="skill-names">
-      {names.map((n) => (
-        <option key={n} value={n} />
+    <>
+      {(Object.keys(lists) as SkillCategory[]).map((cat) => (
+        <datalist key={cat} id={`skill-names-${cat}`}>
+          {lists[cat].map((n) => (
+            <option key={n} value={n} />
+          ))}
+        </datalist>
       ))}
-    </datalist>
+      <datalist id="skill-names-all">
+        {all.map((n) => (
+          <option key={n} value={n} />
+        ))}
+      </datalist>
+    </>
+  );
+}
+
+/** "Custom" tag on homebrew skills; click to turn it back into a normal (book) skill. */
+function CustomTag({ i }: { i: number }) {
+  const { locked } = useSheet();
+  const { t } = useI18n();
+  const patch = usePatch(i);
+  return (
+    <button
+      type="button"
+      className="custom-tag"
+      disabled={locked}
+      title={t('skills.customTagHint')}
+      onClick={() => patch({ custom: false })}
+    >
+      {t('skills.custom')}
+    </button>
   );
 }
 
@@ -292,7 +346,7 @@ function FillButton({ i }: { i: number }) {
   const { t } = useI18n();
   const [msg, setMsg] = useState('');
   const s = data.skills[i];
-  if (locked || !s.name.trim()) return null;
+  if (locked || s.custom || !s.name.trim()) return null;
   const fill = async () => {
     setMsg('');
     try {
@@ -316,6 +370,20 @@ function FillButton({ i }: { i: number }) {
       </button>
       {msg && <span className="dim small">{msg}</span>}
     </div>
+  );
+}
+
+/** The skill's check total; click it to roll to the shared log. */
+function SkillRoll({ s, total }: { s: Skill; total: number | null }) {
+  const { t } = useI18n();
+  if (total === null) return <output className="roll-total center" />;
+  return (
+    <RollButton
+      expr={`d20${signed(total)}`}
+      text={`d20 ${signed(total)}`}
+      label={s.name || t('skills.phSkill')}
+      className="center"
+    />
   );
 }
 
@@ -371,9 +439,7 @@ function UtilityRow({ i, onRemove }: { i: number; onRemove: (i: number) => void 
         </div>
         <StatMod statPath={['skills', i, 'stat']} legacyPath={['skills', i, 'statMod']} label={t('skills.statMod')} />
         <Input path={['skills', i, 'notes']} ariaLabel={t('skills.notes')} placeholder={t('skills.notes')} />
-        <output className="roll-total center" title={t('skills.totalHint')}>
-          {total === null ? '' : `d20 ${signed(total)}`}
-        </output>
+        <SkillRoll s={s} total={total} />
         <Check path={['skills', i, 'done']} label={t('skills.checked')} />
       </div>
       <RemoveBtn i={i} onRemove={onRemove} />
@@ -437,9 +503,7 @@ function SkillCard({
           <RankBadge rank={s.rank} />
         </div>
         <StatMod statPath={f('stat')} legacyPath={f('statMod')} label={t('skills.statMod')} />
-        <output className="roll-total center" title={t('skills.totalHint')}>
-          {total === null ? '' : `d20 ${signed(total)}`}
-        </output>
+        <SkillRoll s={s} total={total} />
         <PinButton i={i} />
         <Check path={f('done')} label={t('skills.checked')} />
         <RemoveBtn i={i} onRemove={onRemove} />

@@ -493,6 +493,36 @@ export function annotateDamage(text: string, der: Derived): string {
   });
 }
 
+/**
+ * Turn a damage entry into a rollable expression: "1d6 + Str Bludgeoning" → "1d6+3",
+ * "2d12+F Electric" → "2d12+2" (F = Floor). Returns null when there are no dice to roll.
+ */
+export function damageExpr(text: string, der: Derived, floor: string): string | null {
+  const map: Record<string, StatKey> = { str: 'str', int: 'int', con: 'con', dex: 'dex', cha: 'cha' };
+  let missing = false;
+  const replaced = text
+    .replace(/\b(Str|Int|Con|Dex|Cha)(\s*Mod)?\b/gi, (_m, s: string) => {
+      const mod = der.mods[map[s.toLowerCase()]];
+      if (mod === null) missing = true;
+      return mod === null ? '' : `${mod >= 0 ? '+' : ''}${mod}`;
+    })
+    .replace(/\bF\b/g, () => {
+      const f = num(floor);
+      if (f === null) missing = true;
+      return f === null ? '' : String(f);
+    });
+  if (missing) return null;
+  const m = replaced.match(/^[\s\dd+\-−]+/i);
+  if (!m) return null;
+  const expr = m[0]
+    .replace(/\s+/g, '')
+    .replace(/−/g, '-')
+    .replace(/\+\+/g, '+')
+    .replace(/\+-/g, '-')
+    .replace(/[+-]+$/, '');
+  return /\d*d\d+/i.test(expr) ? expr : null;
+}
+
 /** Fill in category/subtype from the book's skill list when the row doesn't have one yet. */
 export function classifyRow<T extends { name: string; category: string; subtype: string }>(s: T): T {
   if (s.category) return s;

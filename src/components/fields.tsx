@@ -5,6 +5,8 @@ import type { Derived } from '../lib/rules';
 export type Path = (string | number)[];
 
 type SheetCtxValue = {
+  /** Server id of the character (used to post rolls as this character). */
+  charId?: number;
   data: SheetData;
   /** Values calculated from the rules (stat mods, max mana, HB slot value, totals…). */
   der: Derived;

@@ -8,6 +8,7 @@ export type CharacterSummary = {
   ownerId: number;
   ownerName: string;
   locked: boolean;
+  inParty: boolean;
   version: number;
   createdAt: string;
   updatedAt: string;
@@ -50,6 +51,38 @@ export type FullCatalog = {
   utility: CatalogEntry[];
   spells: CatalogEntry[];
   items: CatalogEntry[];
+};
+
+/** What the party panel gets for each member (a small slice of the sheet; mana only for owner and GM). */
+export type PartyMember = { id: number; ownerId: number; ownerName: string; mine: boolean; view: Partial<SheetData> };
+
+export type RollPart = {
+  sign: number;
+  value: number;
+  dice?: string;
+  sides?: number;
+  rolls?: number[];
+  kept?: boolean[];
+};
+export type RollResult = { expr: string; total: number; parts: RollPart[]; natural: number | null; label: string };
+export type Message = {
+  id: number;
+  kind: 'chat' | 'roll';
+  text: string;
+  roll: RollResult | null;
+  gmOnly: boolean;
+  userId: number;
+  userName: string;
+  isAdmin: boolean;
+  characterId: number | null;
+  characterName: string;
+  createdAt: string;
+};
+export type NewMessage = {
+  text?: string;
+  roll?: { expr: string; label?: string };
+  characterId?: number | null;
+  gmOnly?: boolean;
 };
 
 export class ApiError extends Error {
@@ -98,6 +131,13 @@ export const api = {
   deleteCharacter: (id: number) => request('DELETE', `/api/characters/${id}`),
   setOwner: (id: number, ownerId: number) =>
     request<CharacterSummary>('PATCH', `/api/characters/${id}/owner`, { ownerId }),
+
+  setInParty: (id: number, inParty: boolean) =>
+    request<{ id: number; inParty: boolean }>('PATCH', `/api/characters/${id}/party`, { inParty }),
+  party: () => request<PartyMember[]>('GET', '/api/party'),
+  messages: () => request<Message[]>('GET', '/api/messages'),
+  postMessage: (m: NewMessage) => request<Message>('POST', '/api/messages', m),
+  clearMessages: () => request('DELETE', '/api/messages'),
 
   listUsers: () => request<AdminUser[]>('GET', '/api/users'),
   updateUser: (id: number, patch: { isAdmin?: boolean; password?: string }) =>

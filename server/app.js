@@ -5,6 +5,7 @@ import jwt from 'jsonwebtoken';
 import path from 'node:path';
 import fs from 'node:fs';
 import { fullCatalog, lookup, publicSkills } from './catalog/index.js';
+import { mountLive } from './live.js';
 
 const COOKIE = 'dcc_session';
 const USERNAME_RE = /^[a-zA-Z0-9_.-]{3,32}$/;
@@ -36,6 +37,7 @@ export function createApp({ db, jwtSecret, allowRegistration = true, cookieSecur
       ownerId: row.owner_id,
       ownerName: row.owner_name,
       locked: !!row.locked,
+      inParty: !!row.party_since,
       version: row.version,
       createdAt: row.created_at,
       updatedAt: row.updated_at,
@@ -203,6 +205,7 @@ export function createApp({ db, jwtSecret, allowRegistration = true, cookieSecur
       JSON.stringify(data),
       req.char.id,
     );
+    live.characterChanged(req.char, JSON.parse(req.char.data || '{}'), data);
     res.json(toChar(q.charById.get(req.char.id), false));
   });
 
@@ -219,6 +222,7 @@ export function createApp({ db, jwtSecret, allowRegistration = true, cookieSecur
     if (req.char.locked)
       return res.status(423).json({ error: 'Unlock the sheet before deleting it', code: 'unlock_to_delete' });
     db.prepare('DELETE FROM characters WHERE id = ?').run(req.char.id);
+    live.characterChanged(req.char, JSON.parse(req.char.data || '{}'), null);
     res.json({ ok: true });
   });
 
@@ -267,6 +271,9 @@ export function createApp({ db, jwtSecret, allowRegistration = true, cookieSecur
     db.prepare('DELETE FROM users WHERE id = ?').run(id);
     res.json({ ok: true });
   });
+
+  // ---------- party, roll log & chat (live) ----------
+  const live = mountLive(app, { db, auth, adminOnly, loadChar });
 
   // ---------- book catalog ----------
   // Anyone logged in can look up an entry by its exact name (spells and items stay hidden until named).

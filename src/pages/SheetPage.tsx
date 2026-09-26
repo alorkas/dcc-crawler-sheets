@@ -8,6 +8,8 @@ import { SheetCtx, type Path } from '../components/fields';
 import { AbilitiesTab, CompanionsTab, CoreTab, GearTab, InventoryTab, SkillsTab } from '../components/SheetTabs';
 import { LockIcon, UnlockIcon } from '../components/icons';
 import { useI18n, type MsgKey } from '../lib/i18n';
+import { useLive } from '../lib/live';
+import { PartyToggle } from '../components/LivePanels';
 
 const TABS = [
   { id: 'core', label: 'tab.core', el: CoreTab },
@@ -150,10 +152,18 @@ export default function SheetPage() {
     [locked, conflict],
   );
 
+  // chat and sheet rolls default to this character while its sheet is open
+  const { setActiveChar } = useLive();
+  const sheetName = data?.name ?? '';
+  useEffect(() => {
+    if (meta) setActiveChar({ id: charId, name: sheetName || t('dash.unnamed') });
+  }, [meta, charId, sheetName, setActiveChar, t]);
+  useEffect(() => () => setActiveChar(null), [setActiveChar]);
+
   const der = useMemo(() => (data ? derive(data) : null), [data]);
   const ctx = useMemo(
-    () => (data && der ? { data, der, set, update, locked: locked || !!conflict } : null),
-    [data, der, set, update, locked, conflict],
+    () => (data && der ? { charId, data, der, set, update, locked: locked || !!conflict } : null),
+    [charId, data, der, set, update, locked, conflict],
   );
 
   async function toggleLock() {
@@ -239,6 +249,13 @@ export default function SheetPage() {
           </div>
           <div className="sheet-actions">
             <SaveBadge state={locked ? 'locked' : saveState} />
+            {user?.isAdmin && (
+              <PartyToggle
+                id={charId}
+                inParty={meta.inParty}
+                onChange={(inParty) => setMeta((m) => (m ? { ...m, inParty } : m))}
+              />
+            )}
             <button
               type="button"
               className={`btn lock-btn ${locked ? 'locked' : ''}`}
