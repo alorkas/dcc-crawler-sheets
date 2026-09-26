@@ -3,6 +3,10 @@ import { ListRows, Portrait } from './widgets';
 import { AutoNumber, DebuffPanel, HealthBar, HealthTools, ManaTools, useStatMod } from './rulesWidgets';
 import { MAX_ACCESSORIES, annotateDamage, num, pinnedAttacks, statModFromScore } from '../lib/rules';
 import { useSearchParams } from 'react-router-dom';
+import { useEffect, useState } from 'react';
+import { fillItem, lookup } from '../lib/catalog';
+import { api } from '../lib/api';
+import { useAuth } from '../lib/auth';
 import { CastButton } from './SkillsTab';
 import { useI18n, type MsgKey } from '../lib/i18n';
 import { STATS, emptyItem, signed, type Item, type SheetData, type StatKey } from '../lib/sheet';
@@ -312,6 +316,7 @@ export function InventoryTab() {
   const { t } = useI18n();
   return (
     <Section title={t('inv.title')}>
+      <ItemNameList />
       <ListRows<Item>
         path={['inventory']}
         make={emptyItem}
@@ -322,24 +327,72 @@ export function InventoryTab() {
             <span>{t('inv.item')}</span>
             <span className="center">{t('inv.qty')}</span>
             <span>{t('inv.notes')}</span>
+            <span />
           </div>
         }
       >
-        {(i) => (
-          <div className="inv-cols">
-            <Input path={['inventory', i, 'item']} ariaLabel={t('inv.item')} placeholder={t('inv.item')} />
-            <Input
-              path={['inventory', i, 'qty']}
-              ariaLabel={t('inv.quantity')}
-              placeholder={t('inv.qty')}
-              center
-              numeric
-            />
-            <Input path={['inventory', i, 'notes']} ariaLabel={t('inv.notes')} placeholder={t('inv.notes')} />
-          </div>
-        )}
+        {(i) => <InventoryRow i={i} />}
       </ListRows>
     </Section>
+  );
+}
+
+function InventoryRow({ i }: { i: number }) {
+  const { data, locked, update } = useSheet();
+  const { t } = useI18n();
+  const [msg, setMsg] = useState('');
+  const it = data.inventory[i];
+  const fill = async () => {
+    setMsg('');
+    try {
+      const hit = await lookup(it.item, 'item');
+      if (!hit) return setMsg(t('fill.notFound'));
+      const changes = fillItem(it, hit);
+      if (!changes.notes) return setMsg(t('fill.nothing'));
+      update((d) => ({
+        ...d,
+        inventory: d.inventory.map((x, j) => (j === i ? { ...x, ...fillItem(x, hit) } : x)),
+      }));
+    } catch {
+      setMsg(t('err.generic'));
+    }
+  };
+  return (
+    <div className="inv-cols">
+      <Input path={['inventory', i, 'item']} ariaLabel={t('inv.item')} placeholder={t('inv.item')} list="item-names" />
+      <Input path={['inventory', i, 'qty']} ariaLabel={t('inv.quantity')} placeholder={t('inv.qty')} center numeric />
+      <div>
+        <Input path={['inventory', i, 'notes']} ariaLabel={t('inv.notes')} placeholder={t('inv.notes')} />
+        {msg && <span className="dim tiny">{msg}</span>}
+      </div>
+      {!locked && it.item.trim() ? (
+        <button type="button" className="btn small ghost book-btn" onClick={fill} title={t('fill.hintItem')}>
+          {t('fill.short')}
+        </button>
+      ) : (
+        <span />
+      )}
+    </div>
+  );
+}
+
+/** Item suggestions for the GM only (players shouldn't see every item in the books). */
+function ItemNameList() {
+  const { user } = useAuth();
+  const [names, setNames] = useState<string[]>([]);
+  useEffect(() => {
+    if (!user?.isAdmin) return;
+    api
+      .fullCatalog()
+      .then((c) => setNames(c.items.map((e) => e.name).sort()))
+      .catch(() => {});
+  }, [user?.isAdmin]);
+  return (
+    <datalist id="item-names">
+      {names.map((n) => (
+        <option key={n} value={n} />
+      ))}
+    </datalist>
   );
 }
 

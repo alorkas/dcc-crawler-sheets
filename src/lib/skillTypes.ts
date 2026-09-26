@@ -32,7 +32,7 @@ export function defaultCheckType(
 
 type Known = [SkillCategory, string];
 
-/** The Skills and Spells charts from the book, by type (names only). */
+/** Weapons and utility skills from the player books, by type (names only). */
 const KNOWN: Record<string, Known> = {};
 const add = (cat: SkillCategory, sub: string, names: string[]) => {
   for (const n of names) KNOWN[n.toLowerCase()] = [cat, sub];
@@ -40,11 +40,19 @@ const add = (cat: SkillCategory, sub: string, names: string[]) => {
 
 add('combat', 'animal', ['Back Claw', 'Bite', 'Slice Attack']);
 add('combat', 'bashing', ['Club', 'Improvised Weapons', 'Improvised Weapon', 'Warhammer']);
-add('combat', 'edged', ['Axe', 'Dagger', 'Longsword']);
+add('combat', 'edged', ['Axe', 'Dagger', 'Longsword', 'Rapier']);
 add('combat', 'handToHand', ['Foot Soldier', 'Noggin Nocker', 'Pugilism', 'Unarmed Combat', 'Wrasslin’', "Wrasslin'"]);
-add('combat', 'damageEffect', ['Choke Out', 'Iron Punch', 'Powerful Strike', 'Skullcracker', 'Smush', 'Toss']);
+add('combat', 'damageEffect', [
+  'Choke Out',
+  'Dirty Fighting',
+  'Iron Punch',
+  'Powerful Strike',
+  'Skullcracker',
+  'Smush',
+  'Toss',
+]);
 add('combat', 'ranged', ['Bow', 'Crossbow', 'Handgun', 'Javelin', 'Shotgun', 'Shuriken', 'Slingshot']);
-add('combat', 'reach', ['Polearm', 'Quarterstaff']);
+add('combat', 'reach', ['Herding Weapons', 'Lance', 'Polearm', 'Quarterstaff']);
 
 add('utility', 'passive', ['Aiming', 'Catcher', 'Determine Value', 'Dodge', 'Regeneration']);
 add('utility', 'opposed', [
@@ -93,35 +101,8 @@ add('utility', 'unopposed', [
   'Tracking',
 ]);
 
-add('spell', 'attack', [
-  'Dirt Clod',
-  'Drain Life',
-  'Fireball',
-  'Fire Fingers',
-  'Frost Scar',
-  'Ice Blast',
-  'Lightning Bolt',
-  'Magic Missile',
-  'Shock Treatment',
-  'Soul Collector',
-  'Thunderlash',
-  'Unnecessary Force',
-]);
-add('spell', 'passive', [
-  'Astral Paw',
-  'Astral Hand',
-  'Astral Claw',
-  'Confusing Fog',
-  'Heal',
-  'Heal Others',
-  'Hole',
-  'Protective Shell',
-  'Puddle Jumper',
-  'Second Chance',
-  'Shield',
-  'Torch',
-  'Wisp Armor',
-]);
+// Spells are deliberately NOT listed here: the browser bundle is readable by players, and spell names
+// would be spoilers. Spells are recognised through the server catalog (src/lib/catalog.ts) instead.
 
 /**
  * Category/subtype for a skill name from the book. Custom names that name a weapon in brackets,

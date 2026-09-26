@@ -9,6 +9,9 @@ Interactive, mobile-friendly character sheets for a **Dungeon Crawler Carl RPG**
 - Rules automation (Tutorial Floors): Stat Mods (Table 9), Max Mana, Evade, Health Bar slots = Con Mod with a damage calculator (DR → resistance → slots), Heal, rests, Table 8 debuffs with penalties, skill roll totals, and Skill Advancement rolls. Calculated values can be overridden with ✎, and ↺ switches them back to automatic
 - Skills grouped into Combat (by weapon family), Utility (Opposed / Unopposed / Passive) and Spell (Attack / Passive) sections. Book skills are sorted automatically by name. Attack Skills and Spells are expandable cards with the book's entry fields (attack type, mana cost, range, duration, AI Favor, limitations, cooldown, description, effect(s), base damage, notes & upgrades), and spells have a Cast button that spends their Mana
 - Pinned attacks: pin combat skills and attack spells in the Skills tab and they appear read-only in the Core tab's Attacks list, with to-hit totals, damage showing current Stat Mods, and a Cast button for spells
+- New-crawler wizard following the Core Rulebook: basics (random crawler number, human or animal with size), background tables (pick or roll, choose 2 of 3 skills, no duplicates), main attack (weapon with an optional custom name such as "Tire Iron (Club)", starter spell, or hand-to-hand), stats (standard array or roll), starting gear kits, and a review. "Skip: blank sheet" is still available
+- "Fill from book": skill cards and inventory rows fill empty fields from the Core Rulebook (weapons, spells, utility skills, items)
+- Spoiler-safe book catalog: spells and items live only on the server. Players can look up an entry by its exact name (the one on their sheet), but only admins can list or autocomplete the whole catalog
 - A single container with a SQLite database kept in the `/data` volume
 
 ## Deploy (Komodo / docker compose)
@@ -41,6 +44,8 @@ Checks: `npm run lint`, `npx prettier --check .`, `npm run build`, `npm test`.
 ## Structure
 
 - `server/`: Express API (`app.js`), SQLite schema (`db.js`), entrypoint (`index.js`)
+- `server/catalog/`: Core Rulebook weapons, spells, utility skills and items (server-side only, so spells and items aren't in the browser bundle)
+- `src/lib/creation.ts` + `src/pages/CreatePage.tsx`: the character creation wizard (background tables, starter options, sheet builder)
 - `src/lib/sheet.ts`: the sheet data model (every field from the PDF)
 - `src/lib/rules.ts`: game rules as pure functions (derived values, damage, rests, debuffs, advancement, migration of older sheets), unit-tested in `rules.test.ts`
 - `src/components/SheetTabs.tsx`: the six sheet pages

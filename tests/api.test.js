@@ -94,3 +94,27 @@ test('rejects bad credentials and weak input', async () => {
   assert.equal((await c('POST', '/api/auth/register', { username: 'shorty', password: '123' })).status, 400);
   assert.equal((await c('GET', '/api/characters')).status, 401);
 });
+
+test('catalog: lookups by name for everyone, full list only for admins', async () => {
+  const player = client();
+  const dm = client();
+  await player('POST', '/api/auth/register', { username: 'catplayer', password: 'password1' });
+  await dm('POST', '/api/auth/login', { username: 'dm', password: 'adminpass123' });
+
+  const fb = await player('GET', '/api/catalog/lookup?name=fireball');
+  assert.equal(fb.status, 200);
+  assert.equal(fb.body.kind, 'spell');
+  assert.equal(fb.body.entry.manaCost, '45');
+  assert.equal((await player('GET', '/api/catalog/lookup?name=Tire%20Iron%20(Club)')).body.entry.name, 'Club');
+  assert.equal((await player('GET', '/api/catalog/lookup?name=Healing%20Potion&scope=item')).body.kind, 'item');
+  assert.equal((await player('GET', '/api/catalog/lookup?name=Fire')).status, 404);
+
+  const skills = (await player('GET', '/api/catalog/skills')).body;
+  assert.ok(skills.some((s) => s.name === 'Longsword'));
+  assert.ok(!skills.some((s) => s.name === 'Fireball'), 'spells are not listed for players');
+  assert.equal((await player('GET', '/api/catalog/all')).status, 403);
+
+  const all = (await dm('GET', '/api/catalog/all')).body;
+  assert.ok(all.spells.length > 40 && all.items.length > 20);
+  assert.equal((await client()('GET', '/api/catalog/lookup?name=Fireball')).status, 401);
+});

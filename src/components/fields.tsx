@@ -36,9 +36,11 @@ type InputProps = {
   numeric?: boolean;
   big?: boolean;
   ariaLabel?: string;
+  /** id of a <datalist> with suggestions */
+  list?: string;
 };
 
-export function Input({ path, label, placeholder, className = '', center, numeric, big, ariaLabel }: InputProps) {
+export function Input({ path, label, placeholder, className = '', center, numeric, big, ariaLabel, list }: InputProps) {
   const [value, setValue, locked] = useField<string>(path);
   const input = (
     <input
@@ -48,6 +50,7 @@ export function Input({ path, label, placeholder, className = '', center, numeri
       tabIndex={locked ? -1 : undefined}
       placeholder={locked ? '' : placeholder}
       inputMode={numeric ? 'numeric' : undefined}
+      list={locked ? undefined : list}
       aria-label={ariaLabel ?? (typeof label === 'string' ? label : undefined)}
       onChange={(e) => setValue(e.target.value)}
     />

@@ -199,8 +199,8 @@ describe('skill categories', () => {
   it('classifies book skills, spells and bracketed custom weapons', () => {
     expect(classifySkill('Longsword')).toEqual(['combat', 'edged']);
     expect(classifySkill('tire iron (Club)')).toEqual(['combat', 'bashing']);
-    expect(classifySkill('Fireball')).toEqual(['spell', 'attack']);
-    expect(classifySkill('Heal')).toEqual(['spell', 'passive']);
+    expect(classifySkill('Fireball')).toBeNull(); // spells are only known to the server
+    expect(classifySkill('Rapier')).toEqual(['combat', 'edged']);
     expect(classifySkill('Stealth')).toEqual(['utility', 'opposed']);
     expect(classifySkill('Internet Memes')).toBeNull();
   });
@@ -256,8 +256,7 @@ describe('pinned attacks', () => {
     expect(s.skills[0]).toMatchObject({ pinned: true, baseDamage: '1d8 + Str', effect: 'Slashing' });
     expect(s.skills[1]).toMatchObject({
       name: 'Fireball',
-      category: 'spell',
-      subtype: 'attack',
+      category: 'combat', // sorted into Spells later by the server lookup
       pinned: true,
       baseDamage: '2d12 +3',
     });

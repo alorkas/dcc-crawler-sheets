@@ -22,14 +22,7 @@ export default function Dashboard({ scope }: { scope: 'mine' | 'all' }) {
       .catch((e) => setError(e ?? new Error()));
   }, [all]);
 
-  async function create() {
-    try {
-      const c = await api.createCharacter();
-      navigate(`/sheet/${c.id}`);
-    } catch (e) {
-      setError(e);
-    }
-  }
+  const create = () => navigate('/new');
 
   const groups = useMemo(() => {
     const f = filter.trim().toLowerCase();

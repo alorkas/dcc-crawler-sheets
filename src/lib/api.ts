@@ -23,6 +23,35 @@ export type CharacterSummary = {
 };
 export type Character = CharacterSummary & { data: Partial<SheetData> };
 
+/** A book entry from the server-side catalog (see server/catalog). All fields are optional strings. */
+export type CatalogEntry = {
+  name: string;
+  subtype?: string;
+  attackType?: '' | 'melee' | 'ranged';
+  stat?: string;
+  tags?: string;
+  manaCost?: string;
+  range?: string;
+  duration?: string;
+  aiFavor?: string;
+  limitations?: string;
+  cooldown?: string;
+  baseDamage?: string;
+  effect?: string;
+  upgrades?: string;
+  type?: string;
+  slot?: string;
+  interrupt?: boolean;
+  page?: number;
+};
+export type CatalogHit = { kind: 'weapon' | 'spell' | 'utility' | 'item'; entry: CatalogEntry };
+export type FullCatalog = {
+  weapons: CatalogEntry[];
+  utility: CatalogEntry[];
+  spells: CatalogEntry[];
+  items: CatalogEntry[];
+};
+
 export class ApiError extends Error {
   constructor(
     public status: number,
@@ -74,4 +103,9 @@ export const api = {
   updateUser: (id: number, patch: { isAdmin?: boolean; password?: string }) =>
     request<User>('PATCH', `/api/users/${id}`, patch),
   deleteUser: (id: number) => request('DELETE', `/api/users/${id}`),
+
+  lookupCatalog: (name: string, scope: 'skill' | 'item' = 'skill') =>
+    request<CatalogHit>('GET', `/api/catalog/lookup?scope=${scope}&name=${encodeURIComponent(name)}`),
+  publicSkills: () => request<{ name: string; category: string; subtype: string }[]>('GET', '/api/catalog/skills'),
+  fullCatalog: () => request<FullCatalog>('GET', '/api/catalog/all'),
 };

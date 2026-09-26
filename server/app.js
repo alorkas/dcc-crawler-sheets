@@ -4,6 +4,7 @@ import bcrypt from 'bcryptjs';
 import jwt from 'jsonwebtoken';
 import path from 'node:path';
 import fs from 'node:fs';
+import { fullCatalog, lookup, publicSkills } from './catalog/index.js';
 
 const COOKIE = 'dcc_session';
 const USERNAME_RE = /^[a-zA-Z0-9_.-]{3,32}$/;
@@ -266,6 +267,20 @@ export function createApp({ db, jwtSecret, allowRegistration = true, cookieSecur
     db.prepare('DELETE FROM users WHERE id = ?').run(id);
     res.json({ ok: true });
   });
+
+  // ---------- book catalog ----------
+  // Anyone logged in can look up an entry by its exact name (spells and items stay hidden until named).
+  app.get('/api/catalog/lookup', auth, (req, res) => {
+    const scope = req.query.scope === 'item' ? 'item' : 'skill';
+    const hit = lookup(String(req.query.name ?? ''), scope);
+    if (!hit) return res.status(404).json({ error: 'Not found', code: 'not_found' });
+    const { aliases, ...entry } = hit.entry; // eslint-disable-line no-unused-vars
+    res.json({ kind: hit.kind, entry });
+  });
+  // Weapons and utility skills are public in the player books, so players may browse them.
+  app.get('/api/catalog/skills', auth, (_req, res) => res.json(publicSkills()));
+  // The full catalog (including every spell and item) is for the GM only.
+  app.get('/api/catalog/all', auth, adminOnly, (_req, res) => res.json(fullCatalog()));
 
   app.use('/api', (_req, res) => res.status(404).json({ error: 'Not found', code: 'not_found' }));
 

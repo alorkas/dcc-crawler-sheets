@@ -1,10 +1,13 @@
-import { useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { Area, Check, Input, Section, useSheet } from './fields';
 import { AdvancementPanel, RankBadge, StatMod, useStatMod } from './rulesWidgets';
 import { useI18n, type MsgKey } from '../lib/i18n';
 import { canPin, castHeal, num, spendMana } from '../lib/rules';
 import { emptySkill, signed, type Skill } from '../lib/sheet';
-import { SKILL_CATEGORIES, classifySkill, isCategory, isValidType, type SkillCategory } from '../lib/skillTypes';
+import { SKILL_CATEGORIES, isCategory, isValidType, type SkillCategory } from '../lib/skillTypes';
+import { fillSkill, hitType, lookup } from '../lib/catalog';
+import { api } from '../lib/api';
+import { useAuth } from '../lib/auth';
 
 const catKey = (c: string) => `skillcat.${c}` as MsgKey;
 const subKey = (c: string, s: string) => `skillsub.${c}.${s}` as MsgKey;
@@ -25,6 +28,30 @@ export function SkillsTab() {
 
   const uncategorized = data.skills.map((s, i) => [s, i] as const).filter(([s]) => !isCategory(s.category));
 
+  // Once per sheet: sort skills that have a name but no subtype yet (e.g. spells from older sheets)
+  const resolved = useRef(false);
+  useEffect(() => {
+    if (resolved.current || locked) return;
+    resolved.current = true;
+    const pending = data.skills.filter((s) => s.name.trim() && (!s.category || !s.subtype));
+    pending.forEach((s) => {
+      lookup(s.name)
+        .then((hit) => {
+          const type = hit && hitType(hit);
+          if (!type) return;
+          update((d) => ({
+            ...d,
+            skills: d.skills.map((x) =>
+              x.name === s.name && (!x.category || !x.subtype)
+                ? { ...x, ...type, stat: x.stat || fillSkill(x, hit).stat || '' }
+                : x,
+            ),
+          }));
+        })
+        .catch(() => {});
+    });
+  }, [data.skills, locked, update]);
+
   const addSkill = (category: SkillCategory) => {
     const index = data.skills.length;
     update((d) => ({ ...d, skills: [...d.skills, { ...emptySkill(), category }] }));
@@ -37,6 +64,7 @@ export function SkillsTab() {
 
   return (
     <div className="skills-page">
+      <SkillNameList />
       {SKILL_CATEGORIES.map((cat) => {
         const rows = data.skills.map((s, i) => [s, i] as const).filter(([s]) => s.category === cat.id);
         const groups = [...cat.subtypes, ''].map((sub) => ({
@@ -168,6 +196,13 @@ function TypeSelect({ i }: { i: number }) {
               {t(subKey(cat.id, sub))}
             </option>
           ))}
+          <optgroup label={t('skills.moveTo')}>
+            {SKILL_CATEGORIES.filter((c) => c.id !== cat.id).map((c) => (
+              <option key={c.id} value={`${c.id}:`}>
+                {t(catKey(c.id))}
+              </option>
+            ))}
+          </optgroup>
         </>
       ) : (
         <>
@@ -190,21 +225,96 @@ function TypeSelect({ i }: { i: number }) {
   );
 }
 
-/** Name input that sorts known book skills into their subtype when you leave the field. */
+/** Name input: when you leave it, known book skills and spells are sorted into their type (and get their Stat). */
 function NameInput({ i }: { i: number }) {
-  const { data, locked } = useSheet();
+  const { data, locked, update } = useSheet();
   const { t } = useI18n();
-  const patch = usePatch(i);
   const s = data.skills[i];
   const autoClassify = () => {
-    if (locked || s.subtype) return;
-    const known = classifySkill(s.name);
-    if (!known || (s.category && s.category !== known[0])) return;
-    patch({ category: known[0], subtype: known[1], ...(known[0] === 'spell' && !s.stat ? { stat: 'int' } : {}) });
+    if (locked || (s.subtype && s.stat) || !s.name.trim()) return;
+    const name = s.name;
+    lookup(name)
+      .then((hit) => {
+        const type = hit && hitType(hit);
+        if (!hit || !type) return;
+        update((d) => ({
+          ...d,
+          skills: d.skills.map((x, j) => {
+            if (j !== i || x.name !== name) return x;
+            const sameCategory = !x.category || x.category === type.category;
+            return {
+              ...x,
+              ...(sameCategory && !x.subtype ? type : {}),
+              stat: x.stat || fillSkill(x, hit).stat || '',
+            };
+          }),
+        }));
+      })
+      .catch(() => {});
   };
   return (
     <div onBlur={autoClassify} className="name-cell">
-      <Input path={['skills', i, 'name']} ariaLabel={t('skills.name')} placeholder={t('skills.phSkill')} />
+      <Input
+        path={['skills', i, 'name']}
+        ariaLabel={t('skills.name')}
+        placeholder={t('skills.phSkill')}
+        list="skill-names"
+      />
+    </div>
+  );
+}
+
+/**
+ * Name suggestions: weapons and utility skills for everyone (they're in the player books);
+ * the GM also gets every spell so they can hand spells out quickly.
+ */
+function SkillNameList() {
+  const { user } = useAuth();
+  const [names, setNames] = useState<string[]>([]);
+  useEffect(() => {
+    const load = user?.isAdmin
+      ? api.fullCatalog().then((c) => [...c.weapons, ...c.utility, ...c.spells].map((e) => e.name))
+      : api.publicSkills().then((l) => l.map((e) => e.name));
+    load.then((n) => setNames([...new Set(n)].sort())).catch(() => {});
+  }, [user?.isAdmin]);
+  return (
+    <datalist id="skill-names">
+      {names.map((n) => (
+        <option key={n} value={n} />
+      ))}
+    </datalist>
+  );
+}
+
+/** Fills empty fields of an attack skill or spell from the book. */
+function FillButton({ i }: { i: number }) {
+  const { data, locked, update } = useSheet();
+  const { t } = useI18n();
+  const [msg, setMsg] = useState('');
+  const s = data.skills[i];
+  if (locked || !s.name.trim()) return null;
+  const fill = async () => {
+    setMsg('');
+    try {
+      const hit = await lookup(s.name);
+      if (!hit || hit.kind === 'item') return setMsg(t('fill.notFound'));
+      const changes = fillSkill(s, hit);
+      if (Object.keys(changes).length === 0) return setMsg(t('fill.nothing'));
+      update(
+        (d) => ({ ...d, skills: d.skills.map((x, j) => (j === i ? { ...x, ...fillSkill(x, hit) } : x)) }),
+        t('fill.done', { name: hit.entry.name }),
+      );
+      setMsg(t('fill.filled', { n: Object.keys(changes).length }));
+    } catch {
+      setMsg(t('err.generic'));
+    }
+  };
+  return (
+    <div className="fill-row">
+      <button type="button" className="btn small ghost" onClick={fill} title={t('fill.hint')}>
+        {t('fill.button')}
+      </button>
+      {msg && <span className="dim small">{msg}</span>}
     </div>
   );
 }
@@ -343,6 +453,7 @@ function SkillCard({
 
       {open && (
         <div className="skill-details">
+          <FillButton i={i} />
           <div className="skill-fields">
             {spell ? (
               <Input path={f('manaCost')} label={t('skill.manaCost')} center numeric />

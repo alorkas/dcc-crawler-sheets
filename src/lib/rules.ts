@@ -45,7 +45,7 @@ export function statModFromScore(score: number | null): number | null {
   return 10;
 }
 
-/** Table 14: Rank damage die for an Attack Skill rank (Tutorial Floors). */
+/** Rank damage die for a Skill Rank (Core Rulebook Table 37; Tutorial Floors stop at Rank 15). */
 export function rankDamageDie(rank: number | null): string {
   if (!rank || rank < 1) return '';
   if (rank === 1) return '+1';
@@ -53,7 +53,12 @@ export function rankDamageDie(rank: number | null): string {
   if (rank <= 5) return '+1d4';
   if (rank <= 7) return '+1d6';
   if (rank <= 9) return '+1d8';
-  return '+1d10';
+  if (rank <= 11) return '+1d10';
+  if (rank <= 13) return '+1d12';
+  if (rank <= 15) return '+1d8 & +1d6';
+  if (rank <= 17) return '+2d8';
+  if (rank <= 19) return '+1d10 & +1d8';
+  return '+2d10';
 }
 
 /* ---------------- debuffs (Table 8) ---------------- */

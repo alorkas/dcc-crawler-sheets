@@ -7,6 +7,7 @@ import LoginPage from './pages/LoginPage';
 import Dashboard from './pages/Dashboard';
 import SheetPage from './pages/SheetPage';
 import PlayersPage from './pages/PlayersPage';
+import CreatePage from './pages/CreatePage';
 
 export default function App() {
   return (
@@ -29,6 +30,7 @@ function Shell() {
     <Layout>
       <Routes>
         <Route path="/" element={<Dashboard scope="mine" />} />
+        <Route path="/new" element={<CreatePage />} />
         <Route path="/sheet/:id" element={<SheetPage />} />
         {user.isAdmin && <Route path="/admin/crawlers" element={<Dashboard scope="all" />} />}
         {user.isAdmin && <Route path="/admin/players" element={<PlayersPage />} />}
