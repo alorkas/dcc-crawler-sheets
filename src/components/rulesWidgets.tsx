@@ -226,7 +226,8 @@ export function HealthBar({
 /* ---------------- damage, healing, rests, dying ---------------- */
 
 export function HealthTools() {
-  const { data, der, update, set, locked } = useSheet();
+  // stays usable on locked sheets (health, damage and rests are play values)
+  const { data, der, update, set, playLocked: locked } = useSheet();
   const { t } = useI18n();
   const [amount, setAmount] = useState('');
   const [flags, setFlags] = useState({ resistant: false, vulnerable: false, immune: false, bypassDr: false });
@@ -342,7 +343,7 @@ export function HealthTools() {
 /* ---------------- mana ---------------- */
 
 export function ManaTools() {
-  const { der, update, locked } = useSheet();
+  const { der, update, playLocked: locked } = useSheet();
   const { t } = useI18n();
   const [cost, setCost] = useState('');
   const [msg, setMsg] = useState('');
@@ -408,7 +409,7 @@ export function ManaTools() {
 /* ---------------- debuffs ---------------- */
 
 export function DebuffPanel() {
-  const { data, der, update, set, locked } = useSheet();
+  const { data, der, update, set, playLocked: locked } = useSheet();
   const { t } = useI18n();
   const [pick, setPick] = useState('');
   const sorted = [...DEBUFFS].sort((a, b) =>

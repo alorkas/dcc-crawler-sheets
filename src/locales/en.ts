@@ -88,7 +88,6 @@ export const en = {
   'sheet.unlockToDelete': 'Unlock to delete',
   'sheet.deleteConfirm': 'Delete {name}? This cannot be undone.',
   'sheet.thisCrawler': 'this crawler',
-  'sheet.lockedBanner': 'This sheet is locked. Unlock it to make changes.',
   'sheet.lockedElsewhere': 'This sheet was locked elsewhere.',
   'sheet.changedElsewhere': 'This sheet was changed elsewhere.',
   'sheet.loadLatest': 'Load latest version',

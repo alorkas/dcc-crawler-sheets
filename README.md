@@ -3,7 +3,7 @@
 Interactive, mobile-friendly character sheets for a **Dungeon Crawler Carl RPG** campaign. It covers all 6 pages of the official fillable sheet.
 
 - Players can register themselves and see only their own crawlers
-- Sheets save automatically; **Lock** makes a sheet read-only (the server enforces it), **Unlock** allows editing again
+- Sheets save automatically. **Lock** freezes the character build (name, race, stats, skills, gear, DR…) while health, damage, rests, mana, Cast Heal, Evade buffs, buffs, debuffs and skill advancement marks stay usable at the table (the server enforces this; see `shared/lockRules.js`). **Unlock** allows editing everything again
 - Admins see every sheet, grouped by player, can edit or unlock anything, reassign owners, and manage players
 - English and Spanish UI: switch with the EN/ES toggle. The choice is saved per browser, and the default follows the browser language
 - Rules automation (Tutorial Floors): Stat Mods (Table 9), Max Mana, Evade, Health Bar slots = Con Mod with a damage calculator (DR → resistance → slots), Heal, rests, Table 8 debuffs with penalties, skill roll totals, and Skill Advancement rolls. Calculated values can be overridden with ✎, and ↺ switches them back to automatic
@@ -17,11 +17,21 @@ Interactive, mobile-friendly character sheets for a **Dungeon Crawler Carl RPG**
 - Custom (homebrew) skills in every category; name suggestions are filtered to the section's own category
 - A single container with a SQLite database kept in the `/data` volume
 
-## Deploy (Komodo / docker compose)
+## Deploy (Docker Compose)
 
 Image: `ghcr.io/alorkas/dcc-crawler-sheets:latest`. It is published by `.github/workflows/publish.yml` on every push to `main`. After the first run, set the package's visibility to public in GitHub.
 
-Environment variables (in `docker-compose.yml` the admin and JWT values come from the Komodo secrets `DCC_ADMIN_USERNAME`, `DCC_ADMIN_PASSWORD` and `DCC_JWT_SECRET`):
+On the Docker host:
+
+```sh
+cp .env.example .env   # fill in the admin account (and optionally a JWT secret)
+docker compose pull
+docker compose up -d
+```
+
+To update later: `docker compose pull && docker compose up -d`.
+
+`docker-compose.yml` reads `DCC_ADMIN_USERNAME`, `DCC_ADMIN_PASSWORD`, `DCC_JWT_SECRET`, `DCC_ALLOW_REGISTRATION`, `DCC_COOKIE_SECURE` and `DCC_PORT` from `.env` and passes them to the container as:
 
 | Variable             | Purpose                                                                                               |
 | -------------------- | ----------------------------------------------------------------------------------------------------- |

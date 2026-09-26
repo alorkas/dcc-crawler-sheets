@@ -3,15 +3,16 @@ services:
     image: ghcr.io/alorkas/dcc-crawler-sheets:latest
     restart: unless-stopped
     ports:
-      - '8080:3000'
+      - '${DCC_PORT:-8080}:3000'
     environment:
       - NODE_ENV=production
-      - ADMIN_USERNAME=[[DCC_ADMIN_USERNAME]]
-      - ADMIN_PASSWORD=[[DCC_ADMIN_PASSWORD]]
-      - JWT_SECRET=[[DCC_JWT_SECRET]]
-      - ALLOW_REGISTRATION=true
-      # Set to true when served over HTTPS (e.g. behind Caddy)
-      - COOKIE_SECURE=false
+      # values come from the .env file next to this compose file (see .env.example)
+      - ADMIN_USERNAME=${DCC_ADMIN_USERNAME:?set DCC_ADMIN_USERNAME in .env}
+      - ADMIN_PASSWORD=${DCC_ADMIN_PASSWORD:?set DCC_ADMIN_PASSWORD in .env}
+      - JWT_SECRET=${DCC_JWT_SECRET:-}
+      - ALLOW_REGISTRATION=${DCC_ALLOW_REGISTRATION:-true}
+      # true when served over HTTPS (e.g. behind a reverse proxy with TLS)
+      - COOKIE_SECURE=${DCC_COOKIE_SECURE:-false}
     volumes:
       - crawler-data:/data
     healthcheck:

@@ -9,6 +9,7 @@ import { AbilitiesTab, CompanionsTab, CoreTab, GearTab, InventoryTab, SkillsTab 
 import { LockIcon, UnlockIcon } from '../components/icons';
 import { useI18n, type MsgKey } from '../lib/i18n';
 import { useLive } from '../lib/live';
+import { isPlayPath, onlyPlayChanges } from '../../shared/lockRules.js';
 import { PartyToggle } from '../components/LivePanels';
 
 const TABS = [
@@ -128,7 +129,8 @@ export default function SheetPage() {
 
   const set = useCallback(
     (path: Path, value: unknown) => {
-      if (locked || conflict) return;
+      // a locked sheet still takes health, mana, buff and debuff changes
+      if (conflict || (locked && !isPlayPath(path))) return;
       setData((d) => (d ? setIn(d, path, value) : d));
       setUndo(null);
       dirtyRef.current = true;
@@ -139,11 +141,12 @@ export default function SheetPage() {
 
   const update = useCallback(
     (fn: (d: SheetData) => SheetData, undoLabel?: string) => {
-      if (locked || conflict) return;
+      if (conflict) return;
       const prev = dataRef.current;
       if (!prev) return;
       const next = fn(prev);
       if (next === prev) return;
+      if (locked && !onlyPlayChanges(prev, next)) return;
       setData(next);
       setUndo(undoLabel ? { label: undoLabel, data: prev } : null);
       dirtyRef.current = true;
@@ -162,7 +165,8 @@ export default function SheetPage() {
 
   const der = useMemo(() => (data ? derive(data) : null), [data]);
   const ctx = useMemo(
-    () => (data && der ? { charId, data, der, set, update, locked: locked || !!conflict } : null),
+    () =>
+      data && der ? { charId, data, der, set, update, locked: locked || !!conflict, playLocked: !!conflict } : null,
     [charId, data, der, set, update, locked, conflict],
   );
 
@@ -248,7 +252,7 @@ export default function SheetPage() {
             </div>
           </div>
           <div className="sheet-actions">
-            <SaveBadge state={locked ? 'locked' : saveState} />
+            <SaveBadge state={locked && (saveState === 'idle' || saveState === 'saved') ? 'locked' : saveState} />
             {user?.isAdmin && (
               <PartyToggle
                 id={charId}
@@ -296,11 +300,6 @@ export default function SheetPage() {
           </div>
         </div>
 
-        {locked && (
-          <div className="banner lock-banner">
-            <LockIcon /> {t('sheet.lockedBanner')}
-          </div>
-        )}
         {saveError && (
           <div className="banner error-banner">
             <span>{'key' in saveError ? t(saveError.key) : err(saveError.error)}</span>
@@ -334,7 +333,7 @@ export default function SheetPage() {
           </div>
         )}
 
-        {undo && !locked && (
+        {undo && (!locked || onlyPlayChanges(undo.data, data)) && (
           <div className="banner undo-banner">
             <span>{undo.label}</span>
             <button

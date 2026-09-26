@@ -1,5 +1,6 @@
 import { createContext, useContext, useLayoutEffect, useRef, type ReactNode } from 'react';
 import { getIn, type SheetData } from '../lib/sheet';
+import { isPlayPath } from '../../shared/lockRules.js';
 import type { Derived } from '../lib/rules';
 
 export type Path = (string | number)[];
@@ -10,7 +11,10 @@ type SheetCtxValue = {
   data: SheetData;
   /** Values calculated from the rules (stat mods, max mana, HB slot value, totals…). */
   der: Derived;
+  /** Build lock: name, race, stats, skills, gear… are read-only. */
   locked: boolean;
+  /** Nothing at all can be edited (e.g. while resolving a save conflict). Play fields ignore the build lock. */
+  playLocked: boolean;
   set: (path: Path, value: unknown) => void;
   /** Whole-sheet change (rests, damage, advancement). With a label, the change can be undone once. */
   update: (fn: (d: SheetData) => SheetData, undoLabel?: string) => void;
@@ -25,8 +29,8 @@ export function useSheet() {
 }
 
 export function useField<T = string>(path: Path): [T, (v: T) => void, boolean] {
-  const { data, set, locked } = useSheet();
-  return [getIn(data, path) as T, (v: T) => set(path, v), locked];
+  const { data, set, locked, playLocked } = useSheet();
+  return [getIn(data, path) as T, (v: T) => set(path, v), isPlayPath(path) ? playLocked : locked];
 }
 
 type InputProps = {

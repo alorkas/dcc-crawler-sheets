@@ -90,7 +90,6 @@ export const es: Messages = {
   'sheet.unlockToDelete': 'Desbloquea para borrar',
   'sheet.deleteConfirm': '¿Borrar a {name}? No se puede deshacer.',
   'sheet.thisCrawler': 'este crawler',
-  'sheet.lockedBanner': 'Esta ficha está bloqueada. Desbloquéala para hacer cambios.',
   'sheet.lockedElsewhere': 'Esta ficha se bloqueó desde otro sitio.',
   'sheet.changedElsewhere': 'Esta ficha se modificó desde otro sitio.',
   'sheet.loadLatest': 'Cargar la última versión',

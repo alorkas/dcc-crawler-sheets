@@ -82,7 +82,16 @@ export function CoreTab() {
             <span className="op eq">=</span>
             <div className="field total">
               <span className="lbl">{t('core.evadeTotal')}</span>
-              <output className="total-val">{der.evadeTotal === null ? '—' : `d20 ${signed(der.evadeTotal)}`}</output>
+              {der.evadeTotal === null ? (
+                <output className="total-val">—</output>
+              ) : (
+                <RollButton
+                  expr={`d20${signed(der.evadeTotal)}`}
+                  text={`d20 ${signed(der.evadeTotal)}`}
+                  label={t('core.evade')}
+                  className="total-val evade-roll"
+                />
+              )}
             </div>
           </div>
           <div className="formula-extra">

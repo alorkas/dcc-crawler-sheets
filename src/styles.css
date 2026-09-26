@@ -767,11 +767,6 @@ main {
   margin-bottom: 0.75rem;
   font-size: 0.9rem;
 }
-.lock-banner {
-  background: rgba(255, 196, 0, 0.08);
-  border: 1px solid rgba(255, 196, 0, 0.35);
-  color: #ffdb6e;
-}
 .error-banner {
   background: rgba(229, 57, 53, 0.1);
   border: 1px solid rgba(229, 57, 53, 0.45);
@@ -812,14 +807,14 @@ main {
   border-bottom-color: var(--red);
 }
 
-/* Locked look: fields read as printed text */
-.is-locked .in {
+/* Locked look: fields read as printed text (play fields such as health, mana and buffs stay editable) */
+.is-locked .in:is([readonly], :disabled) {
   background: transparent;
   border-color: transparent;
   border-bottom-color: var(--border);
   border-radius: 0;
 }
-.is-locked .in:focus {
+.is-locked .in:is([readonly], :disabled):focus {
   box-shadow: none;
 }
 .is-locked .card {

@@ -555,7 +555,7 @@ function SkillCard({
 
 /** Cast a spell: spends its Mana cost (Heal also restores 2 HB slots). Hidden when locked or without a cost. */
 export function CastButton({ i, compact }: { i: number; compact?: boolean }) {
-  const { data, locked, update } = useSheet();
+  const { data, playLocked: locked, update } = useSheet();
   const { t } = useI18n();
   const [msg, setMsg] = useState('');
   const s = data.skills[i];

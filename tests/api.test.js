@@ -63,17 +63,33 @@ test('players only see their own sheets; admin sees and edits all', async () => 
   assert.equal(saved.body.version, 2);
   assert.equal((await alice('PUT', `/api/characters/${id}`, { data: {}, version: 1 })).status, 409);
 
-  // Lock blocks edits and deletion
+  // Lock blocks deletion
   assert.equal((await alice('POST', `/api/characters/${id}/lock`, { locked: true })).body.locked, true);
-  assert.equal((await alice('PUT', `/api/characters/${id}`, { data: {}, version: 2 })).status, 423);
   assert.equal((await alice('DELETE', `/api/characters/${id}`)).status, 423);
+  // ...but health, mana, buffs and debuffs stay usable while locked
+  const play = {
+    level: '3',
+    name: 'Carl',
+    hbLost: 4,
+    manaCurrent: '2',
+    evade: { buffs: '+2' },
+    debuffList: [{ id: 'burned', stacks: 1, note: '' }],
+  };
+  assert.equal((await alice('PUT', `/api/characters/${id}`, { data: play, version: 2 })).status, 200);
+  // other changes to a locked sheet are ignored: the stored build is kept
+  const renamed = { ...play, name: 'Carlos', hbLost: 5 };
+  assert.equal((await alice('PUT', `/api/characters/${id}`, { data: renamed, version: 3 })).status, 200);
+  const afterLocked = (await alice('GET', `/api/characters/${id}`)).body.data;
+  assert.equal(afterLocked.name, 'Carl');
+  assert.equal(afterLocked.hbLost, 5);
+  assert.equal(afterLocked.evade.buffs, '+2');
 
   // Admin sees everything and can unlock + edit
   const all = await dm('GET', '/api/characters?scope=all');
   assert.equal(all.body.length, 1);
   assert.equal(all.body[0].ownerName, 'alice');
   assert.equal((await dm('POST', `/api/characters/${id}/lock`, { locked: false })).status, 200);
-  const dmEdit = await dm('PUT', `/api/characters/${id}`, { data: { name: 'Carl', level: '4' }, version: 2 });
+  const dmEdit = await dm('PUT', `/api/characters/${id}`, { data: { name: 'Carl', level: '4' }, version: 4 });
   assert.equal(dmEdit.status, 200);
   assert.equal((await alice('GET', `/api/characters/${id}`)).body.data.level, '4');
 

@@ -6,6 +6,7 @@ import path from 'node:path';
 import fs from 'node:fs';
 import { fullCatalog, lookup, publicSkills } from './catalog/index.js';
 import { mountLive } from './live.js';
+import { applyPlay } from '../shared/lockRules.js';
 
 const COOKIE = 'dcc_session';
 const USERNAME_RE = /^[a-zA-Z0-9_.-]{3,32}$/;
@@ -194,18 +195,21 @@ export function createApp({ db, jwtSecret, allowRegistration = true, cookieSecur
     const { data, version } = req.body || {};
     if (!data || typeof data !== 'object')
       return res.status(400).json({ error: 'Missing sheet data', code: 'missing_data' });
-    if (req.char.locked)
-      return res.status(423).json({ error: 'Sheet is locked', code: 'sheet_locked', character: toChar(req.char) });
     if (Number(version) !== req.char.version) {
       return res
         .status(409)
         .json({ error: 'Sheet was changed elsewhere', code: 'sheet_conflict', character: toChar(req.char) });
     }
+    // A locked sheet only takes the play fields (health, mana, buffs, debuffs, advancement marks);
+    // everything else is kept as stored. One-time format upgrades (higher schema) are saved whole.
+    const stored = JSON.parse(req.char.data || '{}');
+    const next =
+      req.char.locked && !(Number(data.schema) > Number(stored.schema || 0)) ? applyPlay(stored, data) : data;
     db.prepare(`UPDATE characters SET data = ?, version = version + 1, updated_at = datetime('now') WHERE id = ?`).run(
-      JSON.stringify(data),
+      JSON.stringify(next),
       req.char.id,
     );
-    live.characterChanged(req.char, JSON.parse(req.char.data || '{}'), data);
+    live.characterChanged(req.char, stored, next);
     res.json(toChar(q.charById.get(req.char.id), false));
   });
 
