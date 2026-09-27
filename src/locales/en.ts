@@ -932,6 +932,8 @@ export const en = {
   'view.bannerSelf': 'Viewing as a player (read-only)',
   'view.back': 'Back to GM view',
   'err.view_only': 'Read-only while viewing as a player',
+  'assign.banked': '{n} Stat points banked.',
+  'assign.tutorialHint': 'They can be spent once the crawler reaches the Third Floor (before choosing Race and Class).',
 };
 
 export type Messages = { [K in keyof typeof en]: string };

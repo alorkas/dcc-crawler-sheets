@@ -16,6 +16,16 @@ export function AssignStatPoints({ compact }: { compact?: boolean }) {
   const [open, setOpen] = useState(false);
   const points = num(data.statPoints) ?? 0;
   if (points <= 0) return null;
+  // Tutorial Floors: level-up Stat points are banked and can only be spent from the Third Floor on
+  const floor = num(data.floor);
+  if (floor !== null && floor < 3) {
+    return (
+      <div className="assign-points is-locked-note">
+        <strong>{t('assign.banked', { n: points })}</strong>
+        <span className="dim small"> {t('assign.tutorialHint')}</span>
+      </div>
+    );
+  }
   if (!compact || locked) return <AssignPanel onDone={() => setOpen(false)} />;
   // narrow places (the Stats column): a banner that opens the helper in a dialog
   return (

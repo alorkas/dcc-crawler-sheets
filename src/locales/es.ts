@@ -938,4 +938,6 @@ export const es: Messages = {
   'view.bannerSelf': 'Viendo como jugador (solo lectura)',
   'view.back': 'Volver a la vista de DJ',
   'err.view_only': 'Solo lectura mientras ves la app como jugador',
+  'assign.banked': '{n} puntos de Estadística guardados.',
+  'assign.tutorialHint': 'Se pueden gastar cuando el crawler llegue al Tercer Piso (antes de elegir Raza y Clase).',
 };
