@@ -1,6 +1,6 @@
 import type { NpcData, OpponentKind } from './api';
 
-export const NPC_KINDS: OpponentKind[] = ['mob', 'elite', 'boss', 'npc'];
+export const NPC_KINDS: OpponentKind[] = ['mob', 'elite', 'boss', 'npc', 'crawler'];
 export const NPC_STATS = ['str', 'int', 'con', 'dex', 'cha'] as const;
 
 export const emptyAttack = (): NpcData['attacks'][number] => ({
@@ -30,7 +30,15 @@ export function emptyNpc(): NpcData {
     notes: '',
     source: '',
     chapter: '',
+    floor: 0,
   };
+}
+
+/** Floor of a stat block: its floor field, or "Floor N" in its chapter; 0 when unknown. */
+export function npcFloor(d: Partial<NpcData>): number {
+  if (typeof d.floor === 'number' && d.floor > 0) return d.floor;
+  const m = String(d.chapter ?? '').match(/Floor (\d+)/);
+  return m ? Number(m[1]) : 0;
 }
 
 /** Fill in missing fields of stored stat block data. */
@@ -40,7 +48,13 @@ export function loadNpc(stored: Partial<NpcData> | undefined): NpcData {
   const str = (v: unknown, fallback: string) => (typeof v === 'string' ? v : fallback);
   return {
     name: str(d.name, base.name),
-    kind: NPC_KINDS.includes(d.kind as OpponentKind) ? (d.kind as OpponentKind) : 'mob',
+    // older imports stored crawlers as NPCs: their tags start with "Crawler"
+    kind:
+      d.kind === 'npc' && /^Crawler\b/.test(String(d.tags ?? ''))
+        ? 'crawler'
+        : NPC_KINDS.includes(d.kind as OpponentKind)
+          ? (d.kind as OpponentKind)
+          : 'mob',
     size: str(d.size, ''),
     tags: str(d.tags, ''),
     slots: str(d.slots, base.slots),
@@ -57,6 +71,7 @@ export function loadNpc(stored: Partial<NpcData> | undefined): NpcData {
     notes: str(d.notes, ''),
     source: str(d.source, ''),
     chapter: str(d.chapter, ''),
+    floor: npcFloor(d),
   };
 }
 

@@ -3,7 +3,7 @@ import { BOOK_NPCS } from './catalog/npcs.js';
 import { BOSS_LEVELS, addGrindHours, advanceSkills, crawlerKillLevels, levelUp, rollDie } from './progress.js';
 
 const PHASES = 5; // Mob Action Declaration, Crawler Reaction, Mob Attack Resolution, Crawler Action, Clean Up
-const OPP_KINDS = ['mob', 'elite', 'boss', 'npc'];
+const OPP_KINDS = ['mob', 'elite', 'boss', 'npc', 'crawler'];
 const int = (v, d = 0) => {
   const n = parseInt(String(v ?? '').replace(/[^\d-]/g, ''), 10);
   return Number.isFinite(n) ? n : d;
@@ -29,23 +29,33 @@ export function mountGame(app, { db, auth, adminOnly, loadChar, live }) {
   });
   // add the Core Rulebook's stat blocks (skips ones already imported, so it's safe to run again)
   app.post('/api/npcs/import-book', auth, adminOnly, (_req, res) => {
-    const have = new Set(
+    const have = new Map(
       db
-        .prepare('SELECT data FROM npcs')
+        .prepare('SELECT id, data FROM npcs')
         .all()
         .map((r) => {
           const d = JSON.parse(r.data || '{}');
-          return `${d.name}|${d.source ?? ''}`;
+          return [`${d.name}|${d.source ?? ''}`, { id: r.id, d }];
         }),
     );
     const insert = db.prepare('INSERT INTO npcs (data) VALUES (?)');
+    const update = db.prepare(`UPDATE npcs SET data = ? WHERE id = ?`);
     let added = 0;
+    let updated = 0;
     for (const n of BOOK_NPCS) {
-      if (have.has(`${n.name}|${n.source}`)) continue;
-      insert.run(JSON.stringify(n));
-      added++;
+      const old = have.get(`${n.name}|${n.source}`);
+      if (!old) {
+        insert.run(JSON.stringify(n));
+        added++;
+        continue;
+      }
+      // already imported: only refresh how it's sorted (type and Floor), never the stats you may have edited
+      if (old.d.kind !== n.kind || old.d.floor !== n.floor || old.d.chapter !== n.chapter) {
+        update.run(JSON.stringify({ ...old.d, kind: n.kind, floor: n.floor, chapter: n.chapter }), old.id);
+        updated++;
+      }
     }
-    res.json({ added, total: BOOK_NPCS.length });
+    res.json({ added, updated, total: BOOK_NPCS.length });
   });
   const loadNpc = (req, res, next) => {
     const row = db.prepare('SELECT * FROM npcs WHERE id = ?').get(Number(req.params.id));

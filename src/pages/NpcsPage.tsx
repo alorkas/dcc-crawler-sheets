@@ -3,7 +3,7 @@ import { Link, useNavigate } from 'react-router-dom';
 import { api, type Npc } from '../lib/api';
 import { useI18n, type MsgKey } from '../lib/i18n';
 import { useLive } from '../lib/live';
-import { NPC_KINDS, loadNpc } from '../lib/npc';
+import { NPC_KINDS, loadNpc, npcFloor } from '../lib/npc';
 
 /** GM-only list of NPC / Mob stat blocks. */
 export default function NpcsPage() {
@@ -12,7 +12,7 @@ export default function NpcsPage() {
   const [npcs, setNpcs] = useState<Npc[] | null>(null);
   const [error, setError] = useState<unknown>(null);
   const [filter, setFilter] = useState('');
-  const [chapter, setChapter] = useState('');
+  const [floor, setFloor] = useState('');
   const [kind, setKind] = useState('');
   const [importing, setImporting] = useState(false);
   const [imported, setImported] = useState<string>('');
@@ -26,7 +26,7 @@ export default function NpcsPage() {
     setImporting(true);
     try {
       const r = await api.importBookNpcs();
-      setImported(t('npc.imported', { n: r.added, total: r.total }));
+      setImported(t(r.updated ? 'npc.importedUpdated' : 'npc.imported', { n: r.added, total: r.total, u: r.updated }));
       await load();
     } catch (e) {
       setError(e);
@@ -48,28 +48,28 @@ export default function NpcsPage() {
     }
   };
 
-  const chapters = useMemo(
-    () => [...new Set((npcs ?? []).map((n) => n.data.chapter || ''))].sort((a, b) => a.localeCompare(b)),
+  const floors = useMemo(
+    () => [...new Set((npcs ?? []).map((n) => npcFloor(n.data)))].sort((a, b) => (a || 99) - (b || 99)),
     [npcs],
   );
-  // grouped by chapter (Floor), then sorted by name
+  // grouped by Floor, then sorted by name; "any floor" (and your own without a Floor) last
   const groups = useMemo(() => {
     const f = filter.trim().toLowerCase();
     const list = (npcs ?? []).filter(
       (n) =>
         (!f || `${n.data.name ?? ''} ${n.data.tags ?? ''}`.toLowerCase().includes(f)) &&
-        (!chapter || (n.data.chapter || '') === chapter) &&
-        (!kind || (n.data.kind || 'mob') === kind),
+        (floor === '' || npcFloor(n.data) === Number(floor)) &&
+        (!kind || loadNpc(n.data).kind === kind),
     );
-    const map = new Map<string, Npc[]>();
-    for (const n of list) map.set(n.data.chapter || '', [...(map.get(n.data.chapter || '') ?? []), n]);
+    const map = new Map<number, Npc[]>();
+    for (const n of list) map.set(npcFloor(n.data), [...(map.get(npcFloor(n.data)) ?? []), n]);
     return [...map.entries()]
-      .sort(([a], [b]) => (a === '' ? -1 : b === '' ? 1 : a.localeCompare(b)))
-      .map(([ch, items]) => ({
-        ch,
+      .sort(([a], [b]) => (a || 99) - (b || 99))
+      .map(([fl, items]) => ({
+        fl,
         items: items.sort((a, b) => (a.data.name ?? '').localeCompare(b.data.name ?? '')),
       }));
-  }, [npcs, filter, chapter, kind]);
+  }, [npcs, filter, floor, kind]);
 
   return (
     <div className="page">
@@ -87,14 +87,14 @@ export default function NpcsPage() {
           />
           <select
             className="in sel"
-            value={chapter}
-            onChange={(e) => setChapter(e.target.value)}
-            aria-label={t('npc.chapter')}
+            value={floor}
+            onChange={(e) => setFloor(e.target.value)}
+            aria-label={t('npc.floor')}
           >
             <option value="">{t('npc.allChapters')}</option>
-            {chapters.map((c) => (
-              <option key={c} value={c}>
-                {c || t('npc.ownChapter')}
+            {floors.map((f) => (
+              <option key={f} value={f}>
+                {f ? t('dash.floor', { n: f }) : t('npc.anyFloor')}
               </option>
             ))}
           </select>
@@ -132,9 +132,9 @@ export default function NpcsPage() {
         </div>
       )}
       {groups.map((g) => (
-        <div key={g.ch || 'own'} className="group">
+        <div key={g.fl} className="group">
           <h2 className="group-title">
-            {g.ch || t('npc.ownChapter')} <span className="dim">({g.items.length})</span>
+            {g.fl ? t('dash.floor', { n: g.fl }) : t('npc.anyFloor')} <span className="dim">({g.items.length})</span>
           </h2>
           <div className="char-grid">
             {g.items.map((n) => (
@@ -166,7 +166,11 @@ function NpcCard({ npc }: { npc: Npc }) {
           {d.evade && <span className="pill">{t('npc.evadeShort', { v: d.evade })}</span>}
           {d.dr && <span className="pill">{t('npc.drShort', { v: d.dr })}</span>}
         </div>
-        {d.source && <div className="dim tiny">{d.source}</div>}
+        {d.source && (
+          <div className="dim tiny">
+            {[d.source, d.chapter.replace(/^Floor \d+ · /, '')].filter(Boolean).join(' · ')}
+          </div>
+        )}
         <AddToCombat npcId={npc.id} compact />
       </div>
     </Link>

@@ -9,6 +9,7 @@ import { api } from '../lib/api';
 import { useAuth } from '../lib/auth';
 import { CastButton } from './SkillsTab';
 import { RollButton } from './RollButton';
+import { AssignStatPoints } from './AssignStatPoints';
 import { useI18n, type MsgKey } from '../lib/i18n';
 import { STATS, emptyItem, signed, type Item, type SheetData, type StatKey } from '../lib/sheet';
 
@@ -41,6 +42,7 @@ export function CoreTab() {
       </Section>
 
       <Section title={t('core.stats')} className="span-stats">
+        <AssignStatPoints compact />
         <div className="stats">
           {STATS.map((s) => (
             <div className="stat" key={s.key}>
@@ -57,8 +59,8 @@ export function CoreTab() {
                 format={(n) => signed(n)}
                 className="stat-mod"
               />
-              {s.key === 'str' && der.liftLbs !== null && (
-                <div className="dim tiny">{t('core.lift', { n: der.liftLbs })}</div>
+              {s.key === 'str' && der.liftKg !== null && (
+                <div className="dim tiny">{t('core.lift', { n: der.liftKg })}</div>
               )}
             </div>
           ))}
@@ -95,8 +97,28 @@ export function CoreTab() {
             </div>
           </div>
           <div className="formula-extra">
-            <Input path={['evade', 'move']} label={t('core.move')} center />
-            <Input path={['evade', 'step']} label={t('core.step')} center />
+            <div className="field">
+              <span className="lbl">{t('core.move')}</span>
+              <AutoNumber
+                path={['evade', 'move']}
+                auto={der.moveAuto}
+                ariaLabel={t('core.move')}
+                format={(n) => `${n} ft`}
+              />
+              {der.moveMod !== null && (
+                <span className="dim tiny">{t('core.moveMod', { n: signed(der.moveMod) })}</span>
+              )}
+            </div>
+            <div className="field">
+              <span className="lbl">{t('core.step')}</span>
+              <AutoNumber
+                path={['evade', 'step']}
+                auto={der.stepAuto}
+                ariaLabel={t('core.step')}
+                format={(n) => `${n} ft`}
+              />
+              <span className="dim tiny">{t('core.stepHint')}</span>
+            </div>
           </div>
           {(der.penalty !== 0 || der.moveEffective !== der.move) && (
             <div className="penalty-note">

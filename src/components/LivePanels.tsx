@@ -509,6 +509,21 @@ function EventEntry({ m, ev, time }: { m: Message; ev: LogEvent; time: string })
         </>
       );
       break;
+    case 'stats':
+      icon = '▲';
+      tone = 'good';
+      body = (
+        <>
+          <strong>{who}</strong>{' '}
+          {t('log.ev.stats', {
+            list: Object.entries(ev.changes)
+              .map(([k, n]) => `${t(`stat.${k}.short` as MsgKey)} +${n}`)
+              .join(', '),
+          })}
+          {ev.left > 0 && <span className="dim"> · {t('log.ev.statsLeft', { n: ev.left })}</span>}
+        </>
+      );
+      break;
     case 'grind':
       icon = '⏱';
       body = (

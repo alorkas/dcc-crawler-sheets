@@ -4,6 +4,7 @@ import { useI18n, type MsgKey } from '../lib/i18n';
 import { useAuth } from '../lib/auth';
 import { api, type ProgressAction } from '../lib/api';
 import { num } from '../lib/rules';
+import { AssignStatPoints } from './AssignStatPoints';
 
 const BOSS_TIERS = ['neighborhood', 'borough', 'city', 'province', 'country', 'floor'] as const;
 
@@ -60,6 +61,7 @@ export function ProgressionPanel() {
         </div>
       </div>
       <p className="dim tiny">{t('prog.hint')}</p>
+      <AssignStatPoints />
 
       {gm ? (
         <div className="prog-actions">

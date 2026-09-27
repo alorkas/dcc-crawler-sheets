@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import {
   addDebuff,
+  assignStatPoints,
   damageExpr,
   annotateDamage,
   canPin,
@@ -171,7 +172,9 @@ describe('advancement', () => {
 describe('loading & migration', () => {
   it('empty record becomes a new crawler with book defaults', () => {
     const s = loadSheet({});
-    expect(s.evade.move).toBe('20');
+    expect(s.evade.move).toBe('');
+    expect(derive(s).move).toBe(20);
+    expect(derive(s).step).toBe(10);
     expect(s.dr.aiFavor).toBe('1');
     expect(s.attacks[0].name).toBe('Unarmed Combat');
     expect(s.hotlist[0]).toMatch(/Heal/);
@@ -186,7 +189,7 @@ describe('loading & migration', () => {
     legacy.health[8].hit = true;
     legacy.skills[0] = { ...legacy.skills[0], name: 'Persuasion', statMod: 'Cha +2' };
     const s = loadSheet(legacy);
-    expect(s.schema).toBe(4);
+    expect(s.schema).toBe(5);
     expect(s.hbLost).toBe(2);
     expect(s.stats.dex.mod).toBe('');
     expect(s.stats.str.mod).toBe('+3');
@@ -281,5 +284,51 @@ describe('damageExpr', () => {
     expect(damageExpr('1d4 Piercing', der, '1')).toBe('1d4');
     expect(damageExpr('Stuns the target', der, '1')).toBeNull();
     expect(damageExpr('1d8 + Dex Mod Slashing', der, '1')).toBeNull(); // Dex not filled in
+  });
+});
+
+describe('assignStatPoints', () => {
+  it('raises Enhanced and Unenhanced and spends the points', () => {
+    const d = newSheet();
+    d.stats.str = { enhanced: '8', unenhanced: '6', mod: '' };
+    d.stats.con = { enhanced: '5', unenhanced: '', mod: '' };
+    d.statPoints = '6';
+    const r = assignStatPoints(d, { str: 2, con: 1 })!;
+    expect(r.stats.str).toMatchObject({ enhanced: '10', unenhanced: '8' });
+    expect(r.stats.con.enhanced).toBe('6');
+    expect(r.statPoints).toBe('3');
+    expect(assignStatPoints(d, { str: 7 })).toBeNull();
+    expect(assignStatPoints(d, {})).toBeNull();
+  });
+});
+
+describe('lifting limit', () => {
+  it('is shown in kg, rounded to 5', () => {
+    const d = newSheet();
+    d.stats.str.enhanced = '3';
+    expect(derive(d).liftKg).toBe(20);
+    d.stats.str.enhanced = '6';
+    expect(derive(d).liftKg).toBe(40);
+    d.stats.str.enhanced = '20';
+    expect(derive(d).liftKg).toBe(135);
+  });
+});
+
+describe('move & step', () => {
+  it('are automatic: 20/10 ft, +5 Move with Running Rank 5, halved when Fatigued', () => {
+    const d = newSheet();
+    expect([derive(d).move, derive(d).step, derive(d).moveMod]).toEqual([20, 10, 2]);
+    d.skills = [...d.skills, { ...d.skills[0], name: 'Running', rank: '5', category: 'utility', subtype: 'unopposed' }];
+    expect(derive(d).move).toBe(25);
+    d.debuffList = [{ id: 'fatigued', stacks: 1, note: '' }];
+    expect(derive(d).moveEffective).toBe(12);
+    d.evade.move = '45';
+    expect(derive(d).move).toBe(45);
+  });
+  it('old sheets with the written defaults become automatic', () => {
+    const s = loadSheet({ schema: 4, name: 'Old', evade: { move: '20', step: '10', dexMod: '', buffs: '' } });
+    expect([s.evade.move, s.evade.step, s.schema]).toEqual(['', '', 5]);
+    const t = loadSheet({ schema: 4, name: 'Fast', evade: { move: '30', step: '10', dexMod: '', buffs: '' } });
+    expect(t.evade.move).toBe('30');
   });
 });

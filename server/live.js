@@ -116,6 +116,26 @@ export function mountLive(app, { db, auth, adminOnly, loadChar }) {
         gmOnly: !row.party_since, // HP is public for party members (it's on the party panel anyway)
       });
     }
+    // level-up Stat points spent (saferoom): log which Stats went up
+    const ptsA = parseInt(oldData?.statPoints, 10) || 0;
+    const ptsB = parseInt(newData.statPoints, 10) || 0;
+    if (ptsB < ptsA) {
+      const changes = {};
+      for (const k of ['str', 'int', 'con', 'dex', 'cha']) {
+        const a = parseInt(oldData?.stats?.[k]?.enhanced, 10);
+        const b = parseInt(newData.stats?.[k]?.enhanced, 10);
+        if (Number.isFinite(b) && b > (Number.isFinite(a) ? a : 0)) changes[k] = b - (Number.isFinite(a) ? a : 0);
+      }
+      if (Object.keys(changes).length) {
+        postEvent({
+          ownerId: row.owner_id,
+          characterId: row.id,
+          charName: name,
+          event: { type: 'stats', changes, spent: ptsA - ptsB, left: ptsB },
+          gmOnly: !row.party_since,
+        });
+      }
+    }
     const manaA = String(oldData?.manaCurrent ?? '');
     const manaB = String(newData.manaCurrent ?? '');
     if (manaA !== manaB && (manaA.trim() || manaB.trim())) {

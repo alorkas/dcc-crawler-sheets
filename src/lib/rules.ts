@@ -13,7 +13,10 @@ import {
 } from './sheet';
 import { classifySkill } from './skillTypes';
 
-export const SCHEMA_VERSION = 4;
+export const SCHEMA_VERSION = 5;
+/** Default Move and Step in feet (Character Creation Step 7). */
+export const BASE_MOVE = 20;
+export const BASE_STEP = 10;
 export const HB_SLOTS = 10;
 export const MAX_SKILL_RANK = 15; // Floors 1–5
 export const MAX_EXTERNAL_BUFFS = 3;
@@ -137,9 +140,16 @@ export type Derived = {
   evadeTotal: number | null;
   drTotal: number | null;
   penalty: number;
+  /** Move in feet: the stored value, or automatic (20, +5 with Running at Rank 5+). */
   move: number | null;
+  moveAuto: number;
   moveEffective: number | null;
-  liftLbs: number | null;
+  step: number | null;
+  stepAuto: number;
+  /** Move Mod for chases and races: Move ÷ 10, rounded down (Move 20 → +2). */
+  moveMod: number | null;
+  /** Lifting limit (Str × 15 lb in the book), shown in kg rounded to 5. */
+  liftKg: number | null;
   dying: boolean;
 };
 
@@ -157,7 +167,11 @@ export function derive(d: SheetData): Derived {
   const dexMod = d.evade.dexMod.trim() ? num(d.evade.dexMod) : mods.dex;
   const penalty = checkPenalty(d.debuffList);
   const evadeBase = sumNumbers(dexMod === null ? '' : String(dexMod), d.evade.buffs);
-  const move = num(d.evade.move);
+  const running = d.skills.find((s) => s.name.trim().toLowerCase() === 'running');
+  const moveAuto = BASE_MOVE + ((num(running?.rank ?? '') ?? 0) >= 5 ? 5 : 0);
+  const move = d.evade.move.trim() ? num(d.evade.move) : moveAuto;
+  const stepAuto = BASE_STEP;
+  const step = d.evade.step.trim() ? num(d.evade.step) : stepAuto;
   const halve = d.debuffList.some((x) => debuffDef(x.id)?.halveMove);
   const str = num(d.stats.str.enhanced);
   const hbLost = clamp(d.hbLost, 0, HB_SLOTS);
@@ -175,8 +189,12 @@ export function derive(d: SheetData): Derived {
     drTotal: sumNumbers(d.dr.armor, d.dr.buffs),
     penalty,
     move,
+    moveAuto,
     moveEffective: move === null ? null : halve ? Math.floor(move / 2) : move,
-    liftLbs: str === null ? null : str * 15,
+    step,
+    stepAuto,
+    moveMod: move === null ? null : Math.floor((halve ? Math.floor(move / 2) : move) / 10),
+    liftKg: str === null ? null : Math.max(5, Math.round((str * 15 * 0.4536) / 5) * 5),
     dying: hbLost >= HB_SLOTS,
   };
 }
@@ -338,7 +356,7 @@ export function learnUntrained(d: SheetData, skillName: string): SheetData {
 export function newSheet(): SheetData {
   const s = emptySheet();
   s.schema = SCHEMA_VERSION;
-  s.evade = { ...s.evade, move: '20', step: '10' };
+  // Move and Step are automatic (20 ft / 10 ft) unless overridden
   s.dr = { ...s.dr, aiFavor: '1', size: 'Medium (4)' };
   s.attacks = [
     {
@@ -402,6 +420,7 @@ export function migrate(d: SheetData): SheetData {
   if (out.schema < 2) out = migrateV1(out);
   if (out.schema < 3) out = migrateV2(out);
   if (out.schema < 4) out = migrateV3(out);
+  if (out.schema < 5) out = migrateV4(out);
   out.schema = SCHEMA_VERSION;
   return out;
 }
@@ -424,6 +443,13 @@ function migrateV1(d: SheetData): SheetData {
   if (num(out.manaMax) === der.manaMaxAuto) out.manaMax = '';
   if (num(out.evade.dexMod) === derive(out).mods.dex) out.evade.dexMod = '';
   return out;
+}
+
+/** v4 → v5: Move and Step became automatic; the old written defaults (20 / 10, or empty) turn into "automatic". */
+function migrateV4(d: SheetData): SheetData {
+  const move = d.evade.move.trim() === String(BASE_MOVE) ? '' : d.evade.move;
+  const step = d.evade.step.trim() === String(BASE_STEP) ? '' : d.evade.step;
+  return { ...d, evade: { ...d.evade, move, step } };
 }
 
 /** v2 → v3: skills get a category/subtype (recognised book skills are sorted automatically); blank rows are dropped. */
@@ -521,6 +547,30 @@ export function damageExpr(text: string, der: Derived, floor: string): string | 
     .replace(/\+-/g, '-')
     .replace(/[+-]+$/, '');
   return /\d*d\d+/i.test(expr) ? expr : null;
+}
+
+/**
+ * Spend level-up Stat points: each point raises both the Enhanced and Unenhanced value of a Stat
+ * (Core Rulebook "Stat Increases"). Returns null when more points are spent than are available.
+ */
+export function assignStatPoints(d: SheetData, alloc: Partial<Record<StatKey, number>>): SheetData | null {
+  const spend = STAT_KEYS.reduce((sum, k) => sum + Math.max(0, Math.floor(alloc[k] ?? 0)), 0);
+  const have = num(d.statPoints) ?? 0;
+  if (spend === 0 || spend > have) return null;
+  const bump = (v: string, n: number) => {
+    const cur = num(v);
+    return cur === null ? v : String(cur + n);
+  };
+  const stats = { ...d.stats };
+  for (const k of STAT_KEYS) {
+    const n = Math.max(0, Math.floor(alloc[k] ?? 0));
+    if (!n) continue;
+    const s = d.stats[k];
+    // an empty Enhanced value starts from the Unenhanced one (and vice versa)
+    const enh = s.enhanced.trim() ? s.enhanced : s.unenhanced || '0';
+    stats[k] = { ...s, enhanced: bump(enh, n), unenhanced: s.unenhanced.trim() ? bump(s.unenhanced, n) : s.unenhanced };
+  }
+  return { ...d, stats, statPoints: String(have - spend) };
 }
 
 /** Fill in category/subtype from the book's skill list when the row doesn't have one yet. */

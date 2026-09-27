@@ -86,6 +86,12 @@ export type LogEvent =
   | ({ type: 'level' } & LevelEntry)
   | { type: 'grind'; hours: number; total: number; level: number }
   | {
+      type: 'stats';
+      changes: Partial<Record<'str' | 'int' | 'con' | 'dex' | 'cha', number>>;
+      spent: number;
+      left: number;
+    }
+  | {
       type: 'advance';
       mode: 'session' | 'floor';
       results: { name: string; from: number; roll: number; gained: boolean }[];
@@ -93,7 +99,7 @@ export type LogEvent =
   | { type: 'combat'; action: 'start' | 'round' | 'end'; round: number }
   | { type: 'opponent'; name: string; from: number; to: number; defeated: boolean; source: string };
 
-export type OpponentKind = 'mob' | 'elite' | 'boss' | 'npc';
+export type OpponentKind = 'mob' | 'elite' | 'boss' | 'npc' | 'crawler';
 export type Opponent = {
   id: number;
   name: string;
@@ -129,6 +135,8 @@ export type NpcData = {
   /** Where a book stat block came from ("Core Rulebook p. 333") and its chapter/Floor. */
   source: string;
   chapter: string;
+  /** Floor the stat block belongs to (0 = any / not set). */
+  floor: number;
 };
 export type Npc = { id: number; data: Partial<NpcData>; updatedAt: string };
 export type ProgressAction =
@@ -213,7 +221,7 @@ export const api = {
   createNpc: (data: Partial<NpcData> = {}) => request<Npc>('POST', '/api/npcs', { data }),
   saveNpc: (id: number, data: NpcData) => request<Npc>('PUT', `/api/npcs/${id}`, { data }),
   deleteNpc: (id: number) => request('DELETE', `/api/npcs/${id}`),
-  importBookNpcs: () => request<{ added: number; total: number }>('POST', '/api/npcs/import-book', {}),
+  importBookNpcs: () => request<{ added: number; updated: number; total: number }>('POST', '/api/npcs/import-book', {}),
 
   progress: (id: number, action: ProgressAction) =>
     request<{ data: SheetData; version: number }>('POST', `/api/characters/${id}/progress`, action),

@@ -317,4 +317,30 @@ test('book stat blocks import once, for the GM only', async () => {
     ['10', '1', '10', '14+F', 'Core Rulebook p. 333'],
   );
   assert.equal(boiler.data.attacks[0].damage, '3d4+2 Piercing');
+  const carl = list.find((n) => n.data.name === 'Carl (Over City)');
+  assert.deepEqual([carl.data.kind, carl.data.floor], ['crawler', 3]);
+  assert.ok(list.some((n) => n.data.floor === 1 && n.data.kind === 'mob'));
+
+  // an older import (crawler stored as NPC) is re-sorted on the next import, keeping edited stats
+  const row = list.find((n) => n.data.name === 'Derrick Qu');
+  await dm('PUT', `/api/npcs/${row.id}`, { data: { ...row.data, kind: 'npc', level: '99' } });
+  const again = await dm('POST', '/api/npcs/import-book', {});
+  assert.deepEqual([again.body.added, again.body.updated], [0, 1]);
+  const fixed = (await dm('GET', `/api/npcs/${row.id}`)).body.data;
+  assert.deepEqual([fixed.kind, fixed.level], ['crawler', '99']);
+});
+
+test('spending Stat points is logged', async () => {
+  const pl = client();
+  await pl('POST', '/api/auth/register', { username: 'saferoom', password: 'password1' });
+  const c = await pl('POST', '/api/characters', {
+    data: { name: 'Lifter', statPoints: '6', stats: { str: { enhanced: '8', unenhanced: '8', mod: '' } } },
+  });
+  const cur = (await pl('GET', `/api/characters/${c.body.id}`)).body;
+  const next = { ...cur.data, statPoints: '3', stats: { str: { enhanced: '11', unenhanced: '11', mod: '' } } };
+  assert.equal((await pl('PUT', `/api/characters/${c.body.id}`, { data: next, version: cur.version })).status, 200);
+  const ev = (await pl('GET', '/api/messages')).body.find(
+    (m) => m.event?.type === 'stats' && m.characterId === c.body.id,
+  );
+  assert.deepEqual(ev.event, { type: 'stats', changes: { str: 3 }, spent: 3, left: 3 });
 });

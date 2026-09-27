@@ -3106,6 +3106,9 @@ ul.plain {
   background: color-mix(in srgb, var(--gold) 45%, var(--surface-2));
   color: #111;
 }
+.kind-crawler {
+  background: color-mix(in srgb, var(--green) 35%, var(--surface-2));
+}
 .kind-npc {
   background: color-mix(in srgb, #4f8cff 35%, var(--surface-2));
 }
@@ -3383,4 +3386,100 @@ ul.plain {
 }
 .npc-card .dim.tiny {
   margin-top: 0.2rem;
+}
+
+/* ---------------- assign stat points ---------------- */
+.assign-points {
+  border: 1px solid color-mix(in srgb, var(--gold) 55%, var(--border));
+  background: color-mix(in srgb, var(--gold) 6%, var(--surface));
+  border-radius: var(--radius);
+  padding: 0.6rem 0.75rem;
+  margin: 0.4rem 0 0.8rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+.assign-points.is-locked-note {
+  display: block;
+}
+.assign-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.5rem;
+}
+.assign-grid {
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+}
+.assign-row {
+  display: grid;
+  grid-template-columns: minmax(90px, 1fr) 70px auto minmax(90px, 1fr);
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.15rem 0;
+}
+.assign-row.changed .assign-stat {
+  color: var(--gold);
+}
+.assign-stat {
+  font: 600 0.8rem/1 var(--font-label);
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+}
+.assign-ctrl {
+  display: flex;
+  align-items: center;
+  gap: 0.3rem;
+}
+.assign-ctrl .btn {
+  width: 30px;
+  padding-left: 0;
+  padding-right: 0;
+}
+.assign-n {
+  min-width: 2.2em;
+  text-align: center;
+  font-weight: 600;
+}
+.assign-next {
+  font-size: 0.85rem;
+}
+.assign-next.mod-up {
+  color: var(--green);
+  font-weight: 600;
+}
+.assign-actions {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  justify-content: flex-end;
+  flex-wrap: wrap;
+}
+.assign-actions .dim {
+  margin-right: auto;
+}
+@media (max-width: 520px) {
+  .assign-row {
+    grid-template-columns: 1fr auto;
+  }
+  .assign-row .dim,
+  .assign-next {
+    font-size: 0.75rem;
+  }
+}
+.assign-banner {
+  display: flex;
+  flex-direction: row;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.5rem;
+  flex-wrap: wrap;
+}
+.assign-modal {
+  width: min(560px, 94vw);
+}
+.assign-modal .assign-points {
+  margin: 0;
 }

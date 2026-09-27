@@ -5,6 +5,7 @@ import { useI18n, type MsgKey } from '../lib/i18n';
 import { useLive } from '../lib/live';
 import { normalize } from '../lib/sheet';
 import { derive } from '../lib/rules';
+import { NPC_KINDS } from '../lib/npc';
 
 export const PHASES = [1, 2, 3, 4, 5] as const;
 
@@ -402,7 +403,7 @@ function AddOpponent() {
             aria-label={t('npc.kind')}
             onChange={(e) => setQ({ ...q, kind: e.target.value })}
           >
-            {(['mob', 'elite', 'boss', 'npc'] as const).map((k) => (
+            {NPC_KINDS.map((k) => (
               <option key={k} value={k}>
                 {t(`npc.kind.${k}` as MsgKey)}
               </option>

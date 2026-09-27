@@ -133,6 +133,16 @@ export default function NpcPage() {
             </label>
             {txt('size', t('core.size'), { ph: t('npc.sizePh') })}
             {txt('tags', t('npc.tags'), { ph: t('npc.tagsPh') })}
+            <label className="field">
+              <span className="lbl">{t('npc.floor')}</span>
+              <input
+                className="in center"
+                inputMode="numeric"
+                value={data.floor || ''}
+                placeholder={t('npc.anyFloor')}
+                onChange={(e) => patch({ floor: Math.max(0, parseInt(e.target.value, 10) || 0) })}
+              />
+            </label>
           </div>
 
           <div className="sb-hb">
