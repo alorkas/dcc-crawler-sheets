@@ -892,4 +892,10 @@ export const es: Messages = {
   'err.not_attack_step': 'Los ataques son en el paso 4 (Acción de los crawlers) o en la ronda de sorpresa',
   'err.attack_missed': 'Ese ataque falló',
   'err.no_combat': 'No hay combate ahora mismo',
+  'mana.healCombatHint': 'En combate, Curación es una Interrupción: gasta 1 de tus Acciones (quedan {n})',
+  'actions.kind.heal': 'Curación (Interrupción)',
+  'npc.aiSays': 'La IA del Sistema dice',
+  'npc.aiSaysPh': 'Cómo presentaría la IA del Sistema a este a los espectadores…',
+  'npc.aiSaysEs': 'La IA del Sistema dice (español)',
+  'npc.aiSaysEsPh': 'Versión en español, la que se ve con la app en español',
 };

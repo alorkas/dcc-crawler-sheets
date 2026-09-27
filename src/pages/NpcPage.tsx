@@ -15,7 +15,7 @@ type Save = 'idle' | 'dirty' | 'saving' | 'saved' | 'error';
 export default function NpcPage() {
   const { id } = useParams();
   const npcId = Number(id);
-  const { t, err } = useI18n();
+  const { t, err, lang } = useI18n();
   const navigate = useNavigate();
   const [data, setData] = useState<NpcData | null>(null);
   const [state, setState] = useState<Save>('idle');
@@ -67,6 +67,8 @@ export default function NpcPage() {
 
   const slots = Number(data.slots) || 1;
   const locked = data.locked;
+  // the System AI speaks the reader's language when there's a translation
+  const aiText = (lang === 'es' && data.descriptionEs) || data.description || data.descriptionEs;
   const remove = async () => {
     if (!confirm(t('npc.deleteConfirm', { name: data.name || t('npc.unnamed') }))) return;
     await api.deleteNpc(npcId).catch(() => {});
@@ -134,6 +136,13 @@ export default function NpcPage() {
       </div>
 
       <NpcInFight npcId={npcId} />
+
+      {locked && aiText && (
+        <blockquote className="ai-says">
+          <span className="ai-says-lbl">{t('npc.aiSays')}</span>
+          {aiText}
+        </blockquote>
+      )}
 
       <div className="card stat-block">
         <div className="card-body">
@@ -299,18 +308,47 @@ export default function NpcPage() {
             </div>
           )}
 
-          <fieldset className="plain-fieldset" disabled={locked}>
-            <label className="field">
-              <span className="lbl">{t('npc.notes')}</span>
-              <textarea
-                className="in"
-                rows={4}
-                value={data.notes}
-                placeholder={t('npc.notesPh')}
-                onChange={(e) => patch({ notes: e.target.value })}
-              />
-            </label>
-          </fieldset>
+          {locked ? (
+            data.notes && (
+              <div className="field">
+                <span className="lbl">{t('npc.notes')}</span>
+                <div className="npc-notes-view">{data.notes}</div>
+              </div>
+            )
+          ) : (
+            <>
+              <label className="field">
+                <span className="lbl">{t('npc.aiSays')}</span>
+                <textarea
+                  className="in"
+                  rows={3}
+                  value={data.description}
+                  placeholder={t('npc.aiSaysPh')}
+                  onChange={(e) => patch({ description: e.target.value })}
+                />
+              </label>
+              <label className="field">
+                <span className="lbl">{t('npc.aiSaysEs')}</span>
+                <textarea
+                  className="in"
+                  rows={3}
+                  value={data.descriptionEs}
+                  placeholder={t('npc.aiSaysEsPh')}
+                  onChange={(e) => patch({ descriptionEs: e.target.value })}
+                />
+              </label>
+              <label className="field">
+                <span className="lbl">{t('npc.notes')}</span>
+                <textarea
+                  className="in"
+                  rows={Math.min(16, Math.max(4, data.notes.split('\n').length + 2))}
+                  value={data.notes}
+                  placeholder={t('npc.notesPh')}
+                  onChange={(e) => patch({ notes: e.target.value })}
+                />
+              </label>
+            </>
+          )}
         </div>
       </div>
     </div>

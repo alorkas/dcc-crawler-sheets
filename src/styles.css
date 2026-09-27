@@ -3787,3 +3787,34 @@ ul.plain {
   background: var(--red);
   border-color: var(--red);
 }
+.pip.used.k-heal {
+  background: var(--green);
+  border-color: var(--green);
+}
+.ai-says {
+  margin: 0 0 1rem;
+  padding: 0.8rem 1rem;
+  border-left: 3px solid var(--gold);
+  border-radius: var(--radius);
+  background: color-mix(in srgb, var(--gold) 8%, var(--surface));
+  font-style: italic;
+  line-height: 1.5;
+}
+.ai-says-lbl {
+  display: block;
+  font: 600 0.68rem/1 var(--font-label);
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  font-style: normal;
+  color: var(--gold);
+  margin-bottom: 0.4rem;
+}
+.npc-notes-view {
+  white-space: pre-wrap;
+  line-height: 1.5;
+  font-size: 0.92rem;
+  padding: 0.6rem 0.7rem;
+  border-radius: 7px;
+  border: 1px solid var(--border);
+  background: var(--bg-2);
+}

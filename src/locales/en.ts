@@ -886,6 +886,12 @@ export const en = {
   'err.not_attack_step': 'Attacks happen in step 4 (Crawler Action) or the surprise round',
   'err.attack_missed': 'That attack missed',
   'err.no_combat': 'No combat right now',
+  'mana.healCombatHint': 'In combat, Healing is an Interrupt: it uses 1 of your Actions ({n} left)',
+  'actions.kind.heal': 'Healing (Interrupt)',
+  'npc.aiSays': 'The System AI says',
+  'npc.aiSaysPh': 'How the System AI would introduce this one to the viewers…',
+  'npc.aiSaysEs': 'The System AI says (Spanish)',
+  'npc.aiSaysEsPh': 'Spanish version, shown when the app is in Spanish',
 };
 
 export type Messages = { [K in keyof typeof en]: string };

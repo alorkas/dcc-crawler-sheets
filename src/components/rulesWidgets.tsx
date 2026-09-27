@@ -1,5 +1,6 @@
 import { useState, type CSSProperties } from 'react';
 import { useField, useSheet, type Path } from './fields';
+import { useCombatAction } from './CombatAttack';
 import { useI18n, type MsgKey } from '../lib/i18n';
 import { useAuth } from '../lib/auth';
 import { api } from '../lib/api';
@@ -399,7 +400,8 @@ export function HealthTools() {
 /* ---------------- mana ---------------- */
 
 export function ManaTools() {
-  const { der, update, playLocked: locked } = useSheet();
+  const { data, der, update, playLocked: locked } = useSheet();
+  const combat = useCombatAction();
   const { t } = useI18n();
   const [cost, setCost] = useState('');
   const [source, setSource] = useState('');
@@ -412,20 +414,16 @@ export function ManaTools() {
         type="button"
         className="btn small"
         disabled={der.hbLost === 0}
-        title={t('mana.healHint')}
-        onClick={() => {
+        title={combat.inCombat ? t('mana.healCombatHint', { n: combat.left }) : t('mana.healHint')}
+        onClick={async () => {
           setMsg('');
-          let ok = true;
-          update(
-            (d) => {
-              const r = castHeal(d);
-              if (!r) ok = false;
-              return r ?? d;
-            },
-            t('undo.heal'),
-            { hp: t('src.healSpell'), mana: t('src.healSpell') },
-          );
-          if (!ok) fail();
+          if (!castHeal(data)) return fail();
+          // in combat, Healing is an Interrupt (or an Action in step 4): it uses one of the crawler's Actions
+          if (combat.inCombat) {
+            const r = await combat.spend('heal');
+            if (!r.ok) return setMsg(r.error);
+          }
+          update((d) => castHeal(d) ?? d, t('undo.heal'), { hp: t('src.healSpell'), mana: t('src.healSpell') });
         }}
       >
         {t('mana.castHeal', { n: HEAL_MANA_COST })}

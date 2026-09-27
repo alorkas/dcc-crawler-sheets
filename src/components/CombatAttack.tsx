@@ -175,3 +175,25 @@ export function AttackRollButton({
     </button>
   );
 }
+
+/**
+ * Actions for things done from the sheet during combat (e.g. Cast Heal, an Interrupt in Crawler Reaction or an
+ * Action in step 4). `spend` returns false (with the error to show) when there's no Action left.
+ */
+export function useCombatAction() {
+  const fight = useFight();
+  const { err } = useI18n();
+  if (!fight) return { inCombat: false, left: Infinity, spend: async () => ({ ok: true, error: '' }) };
+  const { enc, charId, live } = fight;
+  const acts = enc.actions?.[charId] ?? { used: [], extra: false, max: 2 };
+  const left = Math.max(0, acts.max - acts.used.length);
+  const spend = async (kind: 'heal' | 'interrupt' | 'action') => {
+    try {
+      live.setEncounter(await api.crawlerAction(charId, 'use', { kind }));
+      return { ok: true, error: '' };
+    } catch (e) {
+      return { ok: false, error: err(e) };
+    }
+  };
+  return { inCombat: true, left, spend };
+}

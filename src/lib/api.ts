@@ -199,7 +199,7 @@ export type CrawlerAttack = {
   applied: { slots: number; damage: number } | null;
 };
 /** 'evade' / 'interrupt' are Crawler Reaction Interrupts, 'action' is a Crawler Action (step 4). */
-export type ActionKind = 'evade' | 'interrupt' | 'action' | 'attack';
+export type ActionKind = 'evade' | 'interrupt' | 'heal' | 'action' | 'attack';
 export type CrawlerActions = { used: ActionKind[]; extra: boolean; max: number };
 export type NpcData = {
   name: string;
@@ -216,6 +216,9 @@ export type NpcData = {
   stats: Record<'str' | 'int' | 'con' | 'dex' | 'cha', { score: string; mod: string }>;
   attacks: NpcAttack[];
   notes: string;
+  /** Flavor text in the System AI's voice (and its Spanish version). */
+  description: string;
+  descriptionEs: string;
   /** Locked stat blocks can't be edited by accident (the default for book entries). */
   locked: boolean;
   /** Where a book stat block came from ("Core Rulebook p. 333") and its chapter/Floor. */

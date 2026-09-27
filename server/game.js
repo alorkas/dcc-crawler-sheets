@@ -56,16 +56,21 @@ export function mountGame(app, { db, auth, adminOnly, loadChar, live }) {
     const update = db.prepare(`UPDATE npcs SET data = ? WHERE id = ?`);
     let added = 0;
     let updated = 0;
-    for (const n of BOOK_NPCS) {
+    for (const { prevNotes = [], prevDescriptions = [], ...n } of BOOK_NPCS) {
       const old = have.get(`${n.name}|${n.source}`);
       if (!old) {
         insert.run(JSON.stringify(n));
         added++;
         continue;
       }
-      // already imported: only refresh how it's sorted (type and Floor), never the stats you may have edited
-      if (old.d.kind !== n.kind || old.d.floor !== n.floor || old.d.chapter !== n.chapter) {
-        update.run(JSON.stringify({ ...old.d, kind: n.kind, floor: n.floor, chapter: n.chapter }), old.id);
+      // already imported: refresh how it's sorted (type and Floor), and the notes / System AI description only
+      // when you haven't written your own; never the stats you may have edited
+      const next = { ...old.d, kind: n.kind, floor: n.floor, chapter: n.chapter };
+      if (!old.d.notes || prevNotes.includes(old.d.notes)) next.notes = n.notes;
+      if (!old.d.description || prevDescriptions.includes(old.d.description)) next.description = n.description;
+      if (!old.d.descriptionEs) next.descriptionEs = n.descriptionEs;
+      if (JSON.stringify(next) !== JSON.stringify(old.d)) {
+        update.run(JSON.stringify(next), old.id);
         updated++;
       }
     }
@@ -485,7 +490,7 @@ export function mountGame(app, { db, auth, adminOnly, loadChar, live }) {
     const op = req.body?.op;
     if (op === 'use') {
       if (a.used.length >= max) return res.status(409).json({ error: 'No Actions left', code: 'no_actions_left' });
-      a.used.push(req.body?.kind === 'interrupt' ? 'interrupt' : 'action');
+      a.used.push(['interrupt', 'heal'].includes(req.body?.kind) ? req.body.kind : 'action');
     } else if (op === 'free') {
       const i = int(req.body?.index, -1);
       if (i < 0 || i >= a.used.length) return res.status(400).json({ error: 'Bad index', code: 'bad_request' });

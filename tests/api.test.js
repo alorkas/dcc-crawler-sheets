@@ -328,6 +328,41 @@ test('book stat blocks import once, for the GM only', async () => {
   assert.deepEqual([again.body.added, again.body.updated], [0, 1]);
   const fixed = (await dm('GET', `/api/npcs/${row.id}`)).body.data;
   assert.deepEqual([fixed.kind, fixed.level], ['crawler', '99']);
+
+  // rules notes and System AI descriptions: stat blocks from an older import (old generated notes, no
+  // description) get the new ones; notes you wrote yourself are kept
+  const llama = list.find((n) => n.data.name === 'Bad Llama' && n.data.source?.startsWith('GM'));
+  assert.match(llama.data.notes, /^Bad Reflux: /);
+  assert.ok(llama.data.description.length > 40);
+  const rat = list.find((n) => n.data.name === 'Rat' && n.data.source);
+  await dm('PUT', `/api/npcs/${llama.id}`, {
+    data: { ...llama.data, notes: 'Special: Bad Reflux. Full text: GM Campaign Toolkit p. 51.', description: '' },
+  });
+  await dm('PUT', `/api/npcs/${rat.id}`, { data: { ...rat.data, notes: 'My own rat notes', description: '' } });
+  await dm('POST', '/api/npcs/import-book', {});
+  const l2 = (await dm('GET', `/api/npcs/${llama.id}`)).body.data;
+  const r2 = (await dm('GET', `/api/npcs/${rat.id}`)).body.data;
+  assert.match(l2.notes, /^Bad Reflux: /);
+  assert.ok(l2.description.length > 40);
+  assert.equal(r2.notes, 'My own rat notes');
+  assert.ok(r2.description.length > 20);
+  assert.equal(l2.prevNotes, undefined, 'bookkeeping field not stored');
+  // an older generated description is replaced too, one you wrote is kept
+  const { BOOK_NPCS } = await import('../server/catalog/npcs.js');
+  const book = BOOK_NPCS.find((n) => n.name === 'Rat');
+  await dm('PUT', `/api/npcs/${rat.id}`, { data: { ...r2, description: book.prevDescriptions[0] } });
+  await dm('PUT', `/api/npcs/${llama.id}`, { data: { ...l2, description: 'My llama' } });
+  await dm('POST', '/api/npcs/import-book', {});
+  assert.equal((await dm('GET', `/api/npcs/${rat.id}`)).body.data.description, book.description);
+  assert.equal((await dm('GET', `/api/npcs/${llama.id}`)).body.data.description, 'My llama');
+  assert.ok((await dm('GET', `/api/npcs/${rat.id}`)).body.data.descriptionEs.length > 20, 'Spanish description');
+  // notes from the previous generated version are refreshed as well
+  const mook = (await dm('GET', '/api/npcs')).body.find((n) => n.data.name === 'Mook');
+  const mookBook = BOOK_NPCS.find((n) => n.name === 'Mook');
+  assert.match(mook.data.notes, /Big Fuckin' Insult/);
+  await dm('PUT', `/api/npcs/${mook.id}`, { data: { ...mook.data, notes: mookBook.prevNotes.at(-1) } });
+  await dm('POST', '/api/npcs/import-book', {});
+  assert.equal((await dm('GET', `/api/npcs/${mook.id}`)).body.data.notes, mookBook.notes);
 });
 
 test('spending Stat points is logged', async () => {

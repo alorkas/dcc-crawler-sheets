@@ -10,6 +10,7 @@ import { api } from '../lib/api';
 import { useAuth } from '../lib/auth';
 import { STARTER_SPELLS } from '../lib/creation';
 import { RollButton } from './RollButton';
+import { useCombatAction } from './CombatAttack';
 import { ProgressionPanel } from './Progression';
 
 const catKey = (c: string) => `skillcat.${c}` as MsgKey;
@@ -566,9 +567,16 @@ export function CastButton({ i, compact }: { i: number; compact?: boolean }) {
   const s = data.skills[i];
   const cost = num(s.manaCost);
   const isHeal = s.name.trim().toLowerCase() === 'heal';
+  const combat = useCombatAction();
   if (locked || (cost === null && !isHeal)) return null;
-  const cast = () => {
+  const cast = async () => {
     setMsg('');
+    // in combat, Heal is an Interrupt (or an Action in step 4): it uses one of the crawler's Actions
+    if (isHeal && combat.inCombat) {
+      if (!castHeal(data)) return setMsg(t('mana.notEnough'));
+      const r = await combat.spend('heal');
+      if (!r.ok) return setMsg(r.error);
+    }
     let ok = true;
     update(
       (d) => {
