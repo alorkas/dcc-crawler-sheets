@@ -1,7 +1,7 @@
 // GM tools: NPC stat blocks, the combat tracker, and level-ups / skill advancement.
 import { BOOK_NPCS } from './catalog/npcs.js';
-import { rollDice } from './dice.js';
-import { damageDice, resolveNum } from '../shared/formula.js';
+import { parseDice, rollDice } from './dice.js';
+import { damageDice, isAreaAttack, resolveNum } from '../shared/formula.js';
 import { BOSS_LEVELS, addGrindHours, advanceSkills, crawlerKillLevels, levelUp, rollDie } from './progress.js';
 
 const PHASES = 5; // Mob Action Declaration, Crawler Reaction, Mob Attack Resolution, Crawler Action, Clean Up
@@ -117,6 +117,7 @@ export function mountGame(app, { db, auth, adminOnly, loadChar, live }) {
       opponentName: o?.hidden ? '???' : d.opponentName,
       attack: { name: d.attack.name, range: d.attack.range },
       dc: d.dc,
+      area: !!d.area,
       targets: d.targets,
       damage: d.damage,
     };
@@ -150,6 +151,10 @@ export function mountGame(app, { db, auth, adminOnly, loadChar, live }) {
   /** Players see names and a Health percentage (the book's "let the players know what percentage…"). */
   const viewFor = (enc, admin, src = attackSource()) => ({
     actions: enc.active ? actionsView(enc) : {},
+    // crawler attacks this round; the Mob's Evade (the target number) is for the GM only
+    attacks: (enc.active ? enc.attacks || [] : [])
+      .filter((x) => x.round === enc.round)
+      .map((x) => (admin ? x : { ...x, dc: undefined })),
     active: enc.active,
     round: enc.round,
     phase: enc.phase,
@@ -173,7 +178,8 @@ export function mountGame(app, { db, auth, adminOnly, loadChar, live }) {
       attack: d.attack.name,
       range: d.attack.range,
       dc: d.dc,
-      targets: d.targets.map((t) => ({ id: t.id, name: t.name })),
+      area: !!d.area,
+      targets: d.targets.map((t) => ({ id: t.id, name: t.name, splash: !!t.splash })),
     };
   };
   /** Moving to Crawler Reaction: post all of this round's declarations to the log at once. */
@@ -204,6 +210,7 @@ export function mountGame(app, { db, auth, adminOnly, loadChar, live }) {
       }
       enc.declarations = [];
       enc.actions = {};
+      enc.attacks = [];
       combatEvent({ action: 'start', round: enc.round });
     } else if (action === 'next' && enc.active) {
       if (enc.round === 0 || enc.phase >= PHASES) {
@@ -211,6 +218,7 @@ export function mountGame(app, { db, auth, adminOnly, loadChar, live }) {
         enc.phase = 1;
         enc.declarations = []; // a new round: the Mobs declare again
         enc.actions = {}; // …and every crawler has 2 Actions again
+        enc.attacks = [];
         combatEvent({ action: 'round', round: enc.round });
       } else {
         enc.phase += 1;
@@ -227,6 +235,7 @@ export function mountGame(app, { db, auth, adminOnly, loadChar, live }) {
       enc.active = false;
       enc.declarations = [];
       enc.actions = {};
+      enc.attacks = [];
       enc.opponents = enc.opponents.filter((o) => req.body?.keepOpponents && o.lost < o.slots);
     } else if (action === 'floor') {
       enc.floor = Math.max(1, int(req.body?.floor, 1));
@@ -287,6 +296,29 @@ export function mountGame(app, { db, auth, adminOnly, loadChar, live }) {
     res.status(201).json(viewFor(enc, true));
   });
 
+  /** DR first, then each full slot's worth of damage removes a slot. */
+  function damageOpponent(enc, o, amount) {
+    const dr = withFloor(o.dr, enc.floor);
+    const eff = Math.max(0, int(amount) - dr);
+    const slots = eff >= o.slotValue ? Math.floor(eff / o.slotValue) : 0;
+    o.lost = Math.min(o.slots, o.lost + slots);
+    return { slots, damage: eff, detail: `${int(amount)}${dr ? ` − ${dr} DR` : ''}` };
+  }
+  function opponentEvent(o, before, source) {
+    if (o.lost === before) return;
+    live.postEvent({
+      event: {
+        type: 'opponent',
+        name: o.name,
+        from: Math.round(((o.slots - before) / o.slots) * 100),
+        to: pct(o),
+        defeated: o.lost >= o.slots,
+        source,
+      },
+      gmOnly: o.hidden,
+    });
+  }
+
   app.patch('/api/encounter/opponents/:oid', auth, adminOnly, (req, res) => {
     const enc = getEnc();
     const o = enc.opponents.find((x) => x.id === Number(req.params.oid));
@@ -294,30 +326,11 @@ export function mountGame(app, { db, auth, adminOnly, loadChar, live }) {
     const b = req.body || {};
     const before = o.lost;
     let detail = '';
-    if (b.damage !== undefined) {
-      // DR first, then each full slot's worth of damage removes a slot
-      const dr = withFloor(o.dr, enc.floor);
-      const eff = Math.max(0, int(b.damage) - dr);
-      const slots = eff >= o.slotValue ? Math.floor(eff / o.slotValue) : 0;
-      o.lost = Math.min(o.slots, o.lost + slots);
-      detail = `${int(b.damage)}${dr ? ` − ${dr} DR` : ''}`;
-    }
+    if (b.damage !== undefined) detail = damageOpponent(enc, o, b.damage).detail;
     if (b.lost !== undefined) o.lost = Math.min(o.slots, Math.max(0, int(b.lost)));
     if (b.hidden !== undefined) o.hidden = !!b.hidden;
     if (b.name !== undefined) o.name = clip(b.name) || o.name;
-    if (o.lost !== before) {
-      live.postEvent({
-        event: {
-          type: 'opponent',
-          name: o.name,
-          from: Math.round(((o.slots - before) / o.slots) * 100),
-          to: pct(o),
-          defeated: o.lost >= o.slots,
-          source: clip(b.source) || detail,
-        },
-        gmOnly: o.hidden,
-      });
-    }
+    opponentEvent(o, before, clip(b.source) || detail);
     putEnc(enc);
     res.json(viewFor(enc, true));
   });
@@ -366,9 +379,13 @@ export function mountGame(app, { db, auth, adminOnly, loadChar, live }) {
       opponentName: o.name,
       attack,
       dc: resolveNum(attack.toHit, enc.floor),
+      // Area Attack: an Evade halves the damage instead of avoiding it (the GM can override the guess)
+      area: typeof b.area === 'boolean' ? b.area : isAreaAttack(attack),
       targets: ids.map((id) => ({ id, name: party.get(id), evade: null, applied: null })),
       damage: null,
     };
+    const splash = new Set((Array.isArray(b.splash) ? b.splash : []).map(Number));
+    if (d.area) for (const tg of d.targets) tg.splash = splash.has(tg.id);
     enc.declarations = [...(enc.declarations || []), d];
     // declared late (after the reveal): post it right away
     if (revealed(enc)) revealDeclarations(enc);
@@ -448,7 +465,7 @@ export function mountGame(app, { db, auth, adminOnly, loadChar, live }) {
       roll: {
         ...r,
         label: `${reroll ? 'Evade reroll (AI Favor)' : 'Evade'} · ${o?.hidden ? '???' : d.opponentName} – ${d.attack.name}`,
-        vs: { dc: d.dc, success },
+        vs: { dc: d.dc, success, area: !!d.area },
       },
     });
     putEnc(enc);
@@ -528,6 +545,122 @@ export function mountGame(app, { db, auth, adminOnly, loadChar, live }) {
       gmOnly: !!req.body?.gmOnly,
     });
     res.status(201).json(m);
+  });
+
+  /* ---------------- Crawler Action: attacks against an opponent ---------------- */
+  // No initiative in step 4: a crawler just attacks a target. The server rolls the to-hit against the Mob's
+  // Evade (10 + Dex Mod + Floor, hidden from players), uses one of their Actions, and on a hit the player
+  // rolls damage and the GM applies it to the opponent's Health Bar.
+  const findAttack = (enc, id) => (enc.attacks || []).find((x) => x.id === Number(id) && x.round === enc.round);
+
+  app.post('/api/encounter/attacks', auth, (req, res) => {
+    const enc = getEnc();
+    const b = req.body || {};
+    const admin = !!req.user.is_admin;
+    const cid = Number(b.characterId);
+    if (!enc.active) return res.status(409).json({ error: 'No combat', code: 'no_combat' });
+    const row = charRow(cid);
+    if (!row || !row.party_since || (row.owner_id !== req.user.id && !admin))
+      return res.status(404).json({ error: 'Character not found', code: 'char_not_found' });
+    const o = enc.opponents.find((x) => x.id === Number(b.opponentId) && (admin || !x.hidden));
+    if (!o || o.lost >= o.slots) return res.status(404).json({ error: 'Not found', code: 'not_found' });
+    // attacks happen in the surprise round and in step 4 (the GM can allow them any time)
+    if (!admin && !(enc.round === 0 || enc.phase === 4))
+      return res.status(409).json({ error: 'Not the Crawler Action step', code: 'not_attack_step' });
+    const expr = String(b.expr ?? '').replace(/\s+/g, '');
+    if (!/^1?d20([+-]\d{1,3})?$/i.test(expr)) return res.status(400).json({ error: 'Invalid dice', code: 'bad_dice' });
+    const dmg = b.damage ? String(b.damage).replace(/\s+/g, '') : '';
+    if (dmg && !parseDice(dmg)) return res.status(400).json({ error: 'Invalid dice', code: 'bad_dice' });
+    // Actions: 2 per round (+1 non-Attack Action bought with AI Favor), at most 2 of them Attacks
+    const a = actionsOf(enc, cid);
+    const max = ACTIONS + (a.extra ? 1 : 0);
+    const attacks = a.used.filter((k) => k === 'attack').length;
+    if (a.used.length >= max || attacks >= ACTIONS)
+      return res.status(409).json({ error: 'No Actions left', code: 'no_actions_left' });
+    a.used.push('attack');
+    const r = rollDice(expr);
+    const dc = resolveNum(o.evade, enc.floor);
+    // a Natural 1 always misses; otherwise meet or beat the Mob's Evade
+    const hit = r.natural === 1 ? false : dc === null ? null : r.total >= dc;
+    const name = clip(JSON.parse(row.data || '{}').name) || '?';
+    const label = clip(b.label, 60) || 'Attack';
+    enc.seq += 1;
+    const atk = {
+      id: enc.seq,
+      round: enc.round,
+      characterId: cid,
+      charName: name,
+      opponentId: o.id,
+      opponentName: o.name,
+      label,
+      total: r.total,
+      natural: r.natural,
+      dc,
+      hit,
+      damageExpr: dmg || null,
+      damage: null,
+      applied: null,
+    };
+    enc.attacks = [...(enc.attacks || []), atk];
+    live.postRoll({
+      userId: req.user.id,
+      characterId: cid,
+      charName: name,
+      roll: {
+        ...r,
+        label: `${label} → ${o.hidden ? '???' : o.name}`.slice(0, 120),
+        vs: { dc: null, success: hit, kind: 'attack' },
+      },
+      gmOnly: !!o.hidden,
+    });
+    putEnc(enc);
+    res.status(201).json(viewFor(enc, admin));
+  });
+
+  // the attacker rolls damage for a hit (or the GM does, e.g. when the hit was a GM call)
+  app.post('/api/encounter/attacks/:id/damage', auth, (req, res) => {
+    const enc = getEnc();
+    const atk = findAttack(enc, req.params.id);
+    const admin = !!req.user.is_admin;
+    const row = atk && charRow(atk.characterId);
+    if (!atk || !row || (row.owner_id !== req.user.id && !admin))
+      return res.status(404).json({ error: 'Not found', code: 'not_found' });
+    if (atk.hit === false && !admin)
+      return res.status(409).json({ error: 'That attack missed', code: 'attack_missed' });
+    if (atk.damage && !admin) return res.status(409).json({ error: 'Already rolled', code: 'already_rolled' });
+    const expr = String(req.body?.expr ?? atk.damageExpr ?? '').replace(/\s+/g, '');
+    const r = expr ? rollDice(expr) : null;
+    if (!r) return res.status(400).json({ error: 'Invalid dice', code: 'bad_dice' });
+    atk.damage = { total: r.total, expr };
+    const o = enc.opponents.find((x) => x.id === atk.opponentId);
+    live.postRoll({
+      userId: req.user.id,
+      characterId: atk.characterId,
+      charName: atk.charName,
+      roll: { ...r, label: `${atk.label} · damage → ${o?.hidden ? '???' : atk.opponentName}`.slice(0, 120) },
+      gmOnly: !!o?.hidden,
+    });
+    putEnc(enc);
+    res.json(viewFor(enc, admin));
+  });
+
+  // GM: apply a hit's damage to the opponent (its DR first), or call a hit/miss the server couldn't decide
+  app.post('/api/encounter/attacks/:id/apply', auth, adminOnly, (req, res) => {
+    const enc = getEnc();
+    const atk = findAttack(enc, req.params.id);
+    if (!atk) return res.status(404).json({ error: 'Not found', code: 'not_found' });
+    if (typeof req.body?.hit === 'boolean') atk.hit = req.body.hit;
+    else {
+      const o = enc.opponents.find((x) => x.id === atk.opponentId);
+      if (!o || !atk.damage || atk.applied)
+        return res.status(409).json({ error: 'Nothing to apply', code: 'bad_request' });
+      const before = o.lost;
+      const r = damageOpponent(enc, o, atk.damage.total);
+      atk.applied = { slots: r.slots, damage: r.damage };
+      opponentEvent(o, before, `${atk.charName} – ${atk.label} (${r.detail})`);
+    }
+    putEnc(enc);
+    res.json(viewFor(enc, true));
   });
 
   /* ---------------- level-ups & skill advancement (GM only) ---------------- */

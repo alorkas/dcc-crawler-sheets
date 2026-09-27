@@ -9,6 +9,7 @@ import { api } from '../lib/api';
 import { useAuth } from '../lib/auth';
 import { CastButton } from './SkillsTab';
 import { RollButton } from './RollButton';
+import { AttackRollButton, CombatTargetBar, TargetProvider } from './CombatAttack';
 import { AssignStatPoints } from './AssignStatPoints';
 import { useI18n, type MsgKey } from '../lib/i18n';
 import { STATS, emptyItem, signed, type Item, type SheetData, type StatKey } from '../lib/sheet';
@@ -199,20 +200,23 @@ function PinnedAttacks() {
     );
   }
   return (
-    <div className="list pinned">
-      <div className="list-head pinned-cols">
-        <span>{t('atk.name')}</span>
-        <span>{t('pin.toHit')}</span>
-        <span>{t('skill.baseDamage')}</span>
-        <span>{t('skill.range')}</span>
-        <span>{t('atk.effects')}</span>
-        <span />
+    <TargetProvider>
+      <CombatTargetBar />
+      <div className="list pinned">
+        <div className="list-head pinned-cols">
+          <span>{t('atk.name')}</span>
+          <span>{t('pin.toHit')}</span>
+          <span>{t('skill.baseDamage')}</span>
+          <span>{t('skill.range')}</span>
+          <span>{t('atk.effects')}</span>
+          <span />
+        </div>
+        {pinned.map((i) => (
+          <PinnedRow key={i} i={i} der={der} onEdit={goToSkills} />
+        ))}
+        <p className="dim tiny">{t('pin.hint')}</p>
       </div>
-      {pinned.map((i) => (
-        <PinnedRow key={i} i={i} der={der} onEdit={goToSkills} />
-      ))}
-      <p className="dim tiny">{t('pin.hint')}</p>
-    </div>
+    </TargetProvider>
   );
 }
 
@@ -251,10 +255,12 @@ function PinnedRow({ i, der, onEdit }: { i: number; der: ReturnType<typeof useSh
         {toHit === null ? (
           <strong>—</strong>
         ) : (
-          <RollButton
+          <AttackRollButton
             expr={`d20${signed(toHit)}`}
             text={`d20 ${signed(toHit)}`}
             label={t('roll.toHit', { name: s.name || t('skills.phSkill') })}
+            name={s.name || t('skills.phSkill')}
+            damage={dmgExpr}
             className="pin-roll"
           />
         )}

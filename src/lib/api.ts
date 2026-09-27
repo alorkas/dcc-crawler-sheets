@@ -71,7 +71,7 @@ export type RollResult = {
   natural: number | null;
   label: string;
   /** An Evade roll against a declared attack: its difficulty and whether it succeeded. */
-  vs?: { dc: number | null; success: boolean | null };
+  vs?: { dc: number | null; success: boolean | null; area?: boolean; kind?: 'attack' };
 };
 export type Message = {
   id: number;
@@ -115,7 +115,8 @@ export type LogEvent =
         attack: string;
         range: string;
         dc: number | null;
-        targets: { id: number; name: string }[];
+        area?: boolean;
+        targets: { id: number; name: string; splash?: boolean }[];
       }[];
     };
 
@@ -148,9 +149,13 @@ export type Declaration = {
   /** Players get only the name and range. */
   attack: Partial<NpcAttack> & { name: string };
   dc: number | null;
+  /** Area Attack: a successful Evade halves the damage instead of avoiding it. */
+  area?: boolean;
   targets: {
     id: number;
     name: string;
+    /** In the Splash zone of an Area Attack: half damage (¼ when Evaded). */
+    splash?: boolean;
     evade: {
       total: number;
       natural: number | null;
@@ -172,9 +177,29 @@ export type Encounter = {
   declarations: Declaration[];
   /** Crawler Actions used this round, by character id (missing = none used yet). */
   actions: Record<string, CrawlerActions>;
+  /** Crawler attacks this round (step 4 / surprise round). */
+  attacks: CrawlerAttack[];
+};
+/** A crawler's attack on an opponent: hit or miss against the Mob's Evade (`dc`, GM only). */
+export type CrawlerAttack = {
+  id: number;
+  round: number;
+  characterId: number;
+  charName: string;
+  opponentId: number;
+  opponentName: string;
+  label: string;
+  total: number;
+  natural: number | null;
+  dc?: number | null;
+  /** null when the Mob has no Evade on file: the GM calls it. */
+  hit: boolean | null;
+  damageExpr: string | null;
+  damage: { total: number; expr: string } | null;
+  applied: { slots: number; damage: number } | null;
 };
 /** 'evade' / 'interrupt' are Crawler Reaction Interrupts, 'action' is a Crawler Action (step 4). */
-export type ActionKind = 'evade' | 'interrupt' | 'action';
+export type ActionKind = 'evade' | 'interrupt' | 'action' | 'attack';
 export type CrawlerActions = { used: ActionKind[]; extra: boolean; max: number };
 export type NpcData = {
   name: string;
@@ -276,8 +301,13 @@ export const api = {
   updateOpponent: (id: number, patch: Record<string, unknown>) =>
     request<Encounter>('PATCH', `/api/encounter/opponents/${id}`, patch),
   removeOpponent: (id: number) => request<Encounter>('DELETE', `/api/encounter/opponents/${id}`),
-  declare: (d: { opponentId: number; attack: number | Partial<NpcAttack>; targets: number[] }) =>
-    request<Encounter>('POST', '/api/encounter/declarations', d),
+  declare: (d: {
+    opponentId: number;
+    attack: number | Partial<NpcAttack>;
+    targets: number[];
+    area?: boolean;
+    splash?: number[];
+  }) => request<Encounter>('POST', '/api/encounter/declarations', d),
   removeDeclaration: (id: number) => request<Encounter>('DELETE', `/api/encounter/declarations/${id}`),
   rollEvade: (id: number, characterId: number, expr: string, reroll = false) =>
     request<Encounter>('POST', `/api/encounter/declarations/${id}/evade`, { characterId, expr, reroll }),
@@ -292,6 +322,17 @@ export const api = {
     characterId: number,
     patch: { applied?: { damage: number; slots: number } | null; evade?: null },
   ) => request<Encounter>('PATCH', `/api/encounter/declarations/${id}/targets/${characterId}`, patch),
+  crawlerAttack: (a: {
+    characterId: number;
+    opponentId: number;
+    expr: string;
+    damage?: string | null;
+    label: string;
+  }) => request<Encounter>('POST', '/api/encounter/attacks', a),
+  attackDamage: (id: number, expr?: string) =>
+    request<Encounter>('POST', `/api/encounter/attacks/${id}/damage`, expr ? { expr } : {}),
+  applyAttack: (id: number, body: { hit?: boolean } = {}) =>
+    request<Encounter>('POST', `/api/encounter/attacks/${id}/apply`, body),
   npcRoll: (r: { name: string; expr: string; label?: string; gmOnly?: boolean }) =>
     request<Message>('POST', '/api/npc-roll', r),
 

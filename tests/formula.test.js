@@ -17,3 +17,16 @@ test('damage entries become dice expressions', () => {
   assert.equal(damageDice('1d6 + Str', 1, {}), null);
   assert.equal(damageDice('Special', 1), null);
 });
+
+test('Area Attacks: detection and the share of damage taken', async () => {
+  const { isAreaAttack, hasSplash, damageFactor } = await import('../shared/formula.js');
+  assert.equal(isAreaAttack({ range: '15ft Cone', damage: '1d6+3 Force' }), true);
+  assert.equal(isAreaAttack({ range: '60ft range, 20ft Blast radius' }), true);
+  assert.equal(isAreaAttack({ range: '30 ft', damage: '1d8+3 Fire' }), false);
+  assert.equal(hasSplash({ range: '20ft Cone +10ft Splash' }), true);
+  assert.equal(damageFactor({ evaded: true }), 0);
+  assert.equal(damageFactor({}), 1);
+  assert.equal(damageFactor({ area: true, evaded: true }), 0.5);
+  assert.equal(damageFactor({ area: true, splash: true }), 0.5);
+  assert.equal(damageFactor({ area: true, splash: true, evaded: true }), 0.25);
+});

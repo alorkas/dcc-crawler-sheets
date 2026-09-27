@@ -539,3 +539,117 @@ test('crawler Actions, AI Favor rerolls, numbering and live stat block attacks',
   await dm('POST', '/api/encounter', { action: 'end' });
   await dm('PATCH', `/api/characters/${c.body.id}/party`, { inParty: false });
 });
+
+test('Area Attacks are detected (or set by the GM) and carry Splash targets', async () => {
+  const dm = client();
+  const pl = client();
+  await dm('POST', '/api/auth/login', { username: 'dm', password: 'adminpass123' });
+  await pl('POST', '/api/auth/register', { username: 'area1', password: 'password1' });
+  const npc = await dm('POST', '/api/npcs', {
+    data: {
+      name: 'Acid Toad',
+      attacks: [
+        { name: 'Spray', toHit: '12+F', damage: '1d6', range: '20ft Cone +10ft Splash' },
+        { name: 'Bite', toHit: '12+F', damage: '1d4', range: 'Melee' },
+      ],
+    },
+  });
+  const a = await pl('POST', '/api/characters', { data: { name: 'Ann' } });
+  const b = await pl('POST', '/api/characters', { data: { name: 'Bo' } });
+  for (const c of [a, b]) await dm('PATCH', `/api/characters/${c.body.id}/party`, { inParty: true });
+  await dm('POST', '/api/encounter', { action: 'start', floor: 1 });
+  let enc = (await dm('POST', '/api/encounter/opponents', { npcId: npc.body.id })).body;
+  const toad = enc.opponents.find((o) => o.name === 'Acid Toad');
+  await dm('POST', '/api/encounter/declarations', {
+    opponentId: toad.id,
+    attack: 0,
+    targets: [a.body.id, b.body.id],
+    splash: [b.body.id],
+  });
+  enc = (await dm('POST', '/api/encounter/declarations', { opponentId: toad.id, attack: 1, targets: [a.body.id] }))
+    .body;
+  const [spray, bite] = enc.declarations;
+  assert.equal(spray.area, true);
+  assert.deepEqual(
+    spray.targets.map((x) => x.splash),
+    [false, true],
+  );
+  assert.equal(bite.area, false);
+  // the GM can override the guess
+  enc = (
+    await dm('POST', '/api/encounter/declarations', {
+      opponentId: toad.id,
+      attack: 1,
+      targets: [b.body.id],
+      area: true,
+    })
+  ).body;
+  assert.equal(enc.declarations[2].area, true);
+  await dm('POST', '/api/encounter', { action: 'next' });
+  const log = (await pl('GET', '/api/messages')).body.filter((m) => m.event?.type === 'declare').pop();
+  assert.equal(log.event.items[0].area, true);
+  assert.equal(log.event.items[0].targets[1].splash, true);
+  await dm('POST', '/api/encounter', { action: 'end' });
+  for (const c of [a, b]) await dm('PATCH', `/api/characters/${c.body.id}/party`, { inParty: false });
+});
+
+test('crawler attacks: hit/miss against the hidden Mob Evade, Actions, damage and apply', async () => {
+  const dm = client();
+  const pl = client();
+  const other = client();
+  await dm('POST', '/api/auth/login', { username: 'dm', password: 'adminpass123' });
+  await pl('POST', '/api/auth/register', { username: 'atk1', password: 'password1' });
+  await other('POST', '/api/auth/register', { username: 'atk2', password: 'password1' });
+  const c = await pl('POST', '/api/characters', { data: { name: 'Carla' } });
+  await dm('PATCH', `/api/characters/${c.body.id}/party`, { inParty: true });
+  await dm('POST', '/api/encounter', { action: 'start', floor: 1 });
+  // Evade 0+F = 1: every roll but a Natural 1 hits; slots of 1, DR 0
+  let enc = (
+    await dm('POST', '/api/encounter/opponents', { name: 'Target Dummy', slots: 20, slotValue: 1, evade: '0+F' })
+  ).body;
+  const dummy = enc.opponents[0].id;
+  const atk = (body) => pl('POST', '/api/encounter/attacks', { characterId: c.body.id, opponentId: dummy, ...body });
+
+  // only in step 4 (or the surprise round)
+  assert.equal((await atk({ expr: 'd20+2', damage: '1d4+2', label: 'Club' })).body.code, 'not_attack_step');
+  for (let i = 0; i < 3; i++) await dm('POST', '/api/encounter', { action: 'next' });
+  assert.equal(
+    (
+      await other('POST', '/api/encounter/attacks', {
+        characterId: c.body.id,
+        opponentId: dummy,
+        expr: 'd20',
+      })
+    ).status,
+    404,
+  );
+  const r1 = await atk({ expr: 'd20+2', damage: '1d4+2', label: 'Club' });
+  assert.equal(r1.status, 201);
+  const a1 = r1.body.attacks[0];
+  assert.equal(a1.dc, undefined, 'players do not see the Mob Evade');
+  assert.equal(a1.hit, a1.natural !== 1);
+  assert.deepEqual(r1.body.actions[c.body.id].used, ['attack']);
+  const roll = (await other('GET', '/api/messages')).body.find((m) => m.roll?.vs?.kind === 'attack');
+  assert.equal(roll.roll.label, 'Club → Target Dummy');
+
+  // 2 Attacks max, then no Actions left
+  await atk({ expr: 'd20+2', label: 'Club' });
+  assert.equal((await atk({ expr: 'd20+2', label: 'Club' })).body.code, 'no_actions_left');
+
+  if (a1.hit) {
+    enc = (await pl('POST', `/api/encounter/attacks/${a1.id}/damage`, {})).body;
+    const dmg = enc.attacks[0].damage.total;
+    assert.ok(dmg >= 3 && dmg <= 6);
+    assert.equal((await pl('POST', `/api/encounter/attacks/${a1.id}/apply`, {})).status, 403);
+    enc = (await dm('POST', `/api/encounter/attacks/${a1.id}/apply`, {})).body;
+    assert.equal(enc.opponents[0].lost, dmg);
+    assert.equal(enc.attacks[0].applied.slots, dmg);
+    assert.equal((await dm('POST', `/api/encounter/attacks/${a1.id}/apply`, {})).status, 409, 'only once');
+  }
+  // a new round clears them (step 4 → 5 → next round)
+  await dm('POST', '/api/encounter', { action: 'next' });
+  await dm('POST', '/api/encounter', { action: 'next' });
+  assert.equal((await pl('GET', '/api/encounter')).body.attacks.length, 0);
+  await dm('POST', '/api/encounter', { action: 'end' });
+  await dm('PATCH', `/api/characters/${c.body.id}/party`, { inParty: false });
+});

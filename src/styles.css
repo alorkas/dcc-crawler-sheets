@@ -3730,3 +3730,60 @@ ul.plain {
   justify-content: space-between;
   align-items: center;
 }
+.area-pill {
+  background: color-mix(in srgb, #ff9800 30%, var(--surface-2));
+  color: var(--text);
+}
+.target-bar {
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+  padding: 0.5rem 0.6rem;
+  margin-bottom: 0.6rem;
+  border-radius: var(--radius);
+  border: 1px solid color-mix(in srgb, var(--red) 45%, var(--border));
+  background: color-mix(in srgb, var(--red) 7%, var(--surface));
+}
+.target-row {
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+  flex-wrap: wrap;
+}
+.target-row .in.sel {
+  flex: 0 1 240px;
+  margin-left: 0.3rem;
+}
+.target-bar p {
+  margin: 0;
+}
+.atk-results,
+.opp-hits {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+}
+.atk-results li,
+.opp-hits li {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  flex-wrap: wrap;
+  font-size: 0.82rem;
+  padding: 0.3rem 0.45rem;
+  border-radius: 6px;
+  background: var(--surface-2);
+}
+.atk-results li.hit {
+  background: color-mix(in srgb, var(--green) 14%, var(--surface-2));
+}
+.target-roll {
+  border-color: var(--red) !important;
+}
+.pip.used.k-attack {
+  background: var(--red);
+  border-color: var(--red);
+}

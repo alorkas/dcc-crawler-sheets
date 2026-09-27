@@ -1,12 +1,21 @@
 import { useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
-import { resolveNum } from '../../shared/formula.js';
-import { api, type Declaration, type Npc, type NpcAttack, type Opponent, type PartyMember } from '../lib/api';
+import { damageFactor, hasSplash, isAreaAttack, resolveNum } from '../../shared/formula.js';
+import {
+  api,
+  type Declaration,
+  type Encounter,
+  type Npc,
+  type NpcAttack,
+  type Opponent,
+  type PartyMember,
+} from '../lib/api';
 import { useAuth } from '../lib/auth';
 import { useI18n, type MsgKey } from '../lib/i18n';
 import { useLive } from '../lib/live';
 import { normalize, signed } from '../lib/sheet';
 import { applyAttackDamage } from '../lib/combat';
+import { HitResult } from './CombatAttack';
 import { derive } from '../lib/rules';
 import { NPC_KINDS } from '../lib/npc';
 
@@ -328,6 +337,7 @@ function OpponentRow({ o, floor, round, gm }: { o: Opponent; floor: number; roun
         </div>
       )}
       {gm && !o.defeated && round >= 1 && <AttackChips o={o} floor={floor} />}
+      {gm && <OpponentHits o={o} />}
     </div>
   );
 }
@@ -542,11 +552,24 @@ export function DeclareForm({
   const [busy, setBusy] = useState(false);
   const a = attack === null ? custom : typeof attack === 'number' ? opponent.attacks?.[attack] : attack;
   const dc = resolveNum(a?.toHit, floor);
+  // Area Attack: guessed from the stat block text (Cone, Blast, Burst, Line, Splash…), the GM can change it
+  const [areaSet, setArea] = useState<boolean | null>(null);
+  const area = areaSet ?? isAreaAttack(a);
+  const [splash, setSplash] = useState<number[]>([]);
   const toggle = (id: number) => setTargets((l) => (l.includes(id) ? l.filter((x) => x !== id) : [...l, id]));
+  const toggleSplash = (id: number) => setSplash((l) => (l.includes(id) ? l.filter((x) => x !== id) : [...l, id]));
   const submit = async () => {
     setBusy(true);
     try {
-      setEncounter(await api.declare({ opponentId: opponent.id, attack: attack ?? custom, targets }));
+      setEncounter(
+        await api.declare({
+          opponentId: opponent.id,
+          attack: attack ?? custom,
+          targets,
+          area,
+          splash: area ? splash.filter((id) => targets.includes(id)) : [],
+        }),
+      );
       onDone();
     } catch {
       /* ignore */
@@ -595,6 +618,25 @@ export function DeclareForm({
           </label>
         ))}
       </div>
+      <label className="gm-check" title={t('decl.areaHint')}>
+        <input type="checkbox" checked={area} onChange={(e) => setArea(e.target.checked)} />
+        {t('decl.area')}
+      </label>
+      {area && (hasSplash(a) || splash.length > 0) && targets.length > 0 && (
+        <>
+          <div className="lbl">{t('decl.splashWho')}</div>
+          <div className="target-picks">
+            {members
+              .filter((m) => targets.includes(m.id))
+              .map((m) => (
+                <label key={m.id} className={`target-pick ${splash.includes(m.id) ? 'on' : ''}`}>
+                  <input type="checkbox" checked={splash.includes(m.id)} onChange={() => toggleSplash(m.id)} />
+                  {m.view.name || t('dash.unnamed')}
+                </label>
+              ))}
+          </div>
+        </>
+      )}
       <div className="add-opp-row">
         <span className="dim tiny grow">{t('decl.dc', { n: dc ?? '?' })}</span>
         <button
@@ -680,8 +722,15 @@ function DeclarationRow({ d }: { d: Declaration }) {
   const rollDamage = () => run('dmg', async () => setEncounter(await api.rollDeclDamage(d.id)));
   const apply = (cid: number) =>
     run(cid, async () => {
-      if (!d.damage) return;
-      const r = await applyAttackDamage(cid, d.damage.total, `${d.opponentName} – ${d.attack.name}`);
+      const tg = d.targets.find((x) => x.id === cid);
+      if (!d.damage || !tg) return;
+      const f = factorOf(d, tg);
+      const note = f < 1 ? ` (${fraction(f)})` : '';
+      const r = await applyAttackDamage(
+        cid,
+        Math.floor(d.damage.total * f),
+        `${d.opponentName} – ${d.attack.name}${note}`,
+      );
       setEncounter(await api.markTarget(d.id, cid, { applied: r }));
     });
   return (
@@ -690,6 +739,7 @@ function DeclarationRow({ d }: { d: Declaration }) {
         <span className="grow">
           <strong>{d.opponentName}</strong> ▸ {d.attack.name}
         </span>
+        {d.area && <span className="pill area-pill">{t('decl.areaShort')}</span>}
         <span className="pill">{t('decl.dc', { n: d.dc ?? '?' })}</span>
         <button
           type="button"
@@ -720,37 +770,53 @@ function DeclarationRow({ d }: { d: Declaration }) {
         {d.attack.damage && <span className="dim tiny">{d.attack.damage}</span>}
       </div>
       <ul className="decl-targets">
-        {d.targets.map((tg) => (
-          <li key={tg.id}>
-            <span className="grow">{tg.name}</span>
-            <EvadeResult evade={tg.evade} />
-            {tg.applied ? (
-              <span className="dim tiny">{t('decl.applied', { n: tg.applied.slots, d: tg.applied.damage })}</span>
-            ) : (
-              <button
-                type="button"
-                className={`btn small ${tg.evade?.success === false ? 'primary' : 'ghost'}`}
-                disabled={!d.damage || busy === tg.id}
-                title={t('decl.applyHint')}
-                onClick={() => apply(tg.id)}
-              >
-                {t('decl.apply')}
-              </button>
-            )}
-          </li>
-        ))}
+        {d.targets.map((tg) => {
+          const f = factorOf(d, tg);
+          return (
+            <li key={tg.id}>
+              <span className="grow">
+                {tg.name}
+                {tg.splash && <span className="dim tiny"> · {t('decl.splash')}</span>}
+              </span>
+              <EvadeResult evade={tg.evade} area={d.area} />
+              {tg.applied ? (
+                <span className="dim tiny">{t('decl.applied', { n: tg.applied.slots, d: tg.applied.damage })}</span>
+              ) : f === 0 ? (
+                <span className="dim tiny">{t('decl.noDamage')}</span>
+              ) : (
+                <button
+                  type="button"
+                  className={`btn small ${tg.evade?.success === false ? 'primary' : 'ghost'}`}
+                  disabled={!d.damage || busy === tg.id}
+                  title={t('decl.applyHint')}
+                  onClick={() => apply(tg.id)}
+                >
+                  {t('decl.apply')}
+                  {f < 1 && ` ${fraction(f)}`}
+                  {d.damage && f < 1 && ` (${Math.floor(d.damage.total * f)})`}
+                </button>
+              )}
+            </li>
+          );
+        })}
       </ul>
       {error && <p className="error tiny">{error}</p>}
     </div>
   );
 }
 
-function EvadeResult({ evade }: { evade: Declaration['targets'][number]['evade'] }) {
+/** Share of the damage a target takes: see damageFactor (shared/formula.js). */
+const factorOf = (d: Declaration, tg: Declaration['targets'][number]) =>
+  damageFactor({ area: !!d.area, splash: !!tg.splash, evaded: tg.evade?.success === true });
+const fraction = (f: number) => (f === 0.5 ? '½' : f === 0.25 ? '¼' : `×${f}`);
+
+function EvadeResult({ evade, area }: { evade: Declaration['targets'][number]['evade']; area?: boolean }) {
   const { t } = useI18n();
   if (!evade) return <span className="dim tiny">{t('decl.evadePending')}</span>;
   return (
     <span className={`evade-res ${evade.success ? 'ok' : evade.success === false ? 'bad' : ''}`}>
       {evade.success ? '✓' : evade.success === false ? '✗' : '•'} {evade.total}
+      {evade.success && area && <span className="tiny"> · {t('decl.half')}</span>}
       {evade.rerolled && (
         <span className="dim tiny" title={t('decl.rerolled')}>
           {' '}
@@ -810,10 +876,16 @@ export function TargetedBy({
             <span className="grow">
               ⚠ <strong>{d.opponentName}</strong> · {d.attack.name}
               {d.attack.range && <span className="dim"> ({d.attack.range})</span>}
+              {tg.splash && <span className="dim"> · {t('decl.splash')}</span>}
             </span>
+            {d.area && (
+              <span className="pill area-pill" title={t('decl.areaHint')}>
+                {t('decl.areaShort')}
+              </span>
+            )}
             <span className="pill">{t('decl.dc', { n: d.dc ?? '?' })}</span>
             {e ? (
-              <EvadeResult evade={e} />
+              <EvadeResult evade={e} area={d.area} />
             ) : (
               canRoll && (
                 <button
@@ -920,5 +992,71 @@ export function ActionPips({
       )}
       {error && <span className="error tiny">{error}</span>}
     </div>
+  );
+}
+
+/** GM: this round's crawler attacks on an opponent: hit/miss vs its Evade, damage, and apply to its Health Bar. */
+function OpponentHits({ o }: { o: Opponent }) {
+  const { t, err } = useI18n();
+  const { encounter, setEncounter } = useLive();
+  const [error, setError] = useState('');
+  const list = (encounter?.attacks ?? []).filter((a) => a.opponentId === o.id);
+  if (!list.length) return null;
+  const run = async (fn: () => Promise<Encounter>) => {
+    setError('');
+    try {
+      setEncounter(await fn());
+    } catch (e) {
+      setError(err(e));
+    }
+  };
+  return (
+    <ul className="opp-hits">
+      {list.map((a) => (
+        <li key={a.id}>
+          <span className="grow">
+            <strong>{a.charName}</strong> · {a.label}
+          </span>
+          <HitResult a={a} showDc />
+          {a.hit === null && (
+            <>
+              <button
+                type="button"
+                className="btn small"
+                onClick={() => run(() => api.applyAttack(a.id, { hit: true }))}
+              >
+                {t('atkt.hit')}
+              </button>
+              <button
+                type="button"
+                className="btn small ghost"
+                onClick={() => run(() => api.applyAttack(a.id, { hit: false }))}
+              >
+                {t('atkt.miss')}
+              </button>
+            </>
+          )}
+          {a.hit &&
+            (a.applied ? (
+              <span className="dim tiny">{t('atkt.applied', { n: a.applied.slots })}</span>
+            ) : a.damage ? (
+              <button type="button" className="btn small primary" onClick={() => run(() => api.applyAttack(a.id))}>
+                {t('decl.apply')} {a.damage.total}
+              </button>
+            ) : (
+              <button
+                type="button"
+                className="btn small ghost"
+                disabled={!a.damageExpr}
+                title={a.damageExpr ? undefined : t('npc.noDice')}
+                onClick={() => run(() => api.attackDamage(a.id))}
+              >
+                🎲 {a.damageExpr ?? t('roll.damage')}
+              </button>
+            ))}
+        </li>
+      ))}
+      {error && <li className="error tiny">{error}</li>}
+    </ul>
   );
 }

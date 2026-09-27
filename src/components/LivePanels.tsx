@@ -434,7 +434,10 @@ function LogEntry({ m }: { m: Message }) {
           {r.vs && r.vs.success !== null && (
             <div className={`roll-vs ${r.vs.success ? 'ok-pill' : 'bad-pill'}`}>
               {r.vs.success ? '✓ ' : '✗ '}
-              {t(r.vs.success ? 'log.evaded' : 'log.notEvaded')} · {t('decl.dc', { n: r.vs.dc ?? '?' })}
+              {r.vs.kind === 'attack'
+                ? t(r.vs.success ? 'atkt.hit' : 'atkt.miss')
+                : `${t(r.vs.success ? 'log.evaded' : 'log.notEvaded')} · ${t('decl.dc', { n: r.vs.dc ?? '?' })}`}
+              {r.vs.success && r.vs.area && ` · ${t('decl.half')}`}
             </div>
           )}
           <div className="roll-break dim tiny">
@@ -604,10 +607,11 @@ function EventEntry({ m, ev, time }: { m: Message; ev: LogEvent; time: string })
                 {t('log.ev.declareItem', {
                   who: `“${d.opponent}”`,
                   attack: d.attack,
-                  targets: d.targets.map((x) => `“${x.name}”`).join(', '),
+                  targets: d.targets.map((x) => `“${x.name}”${x.splash ? ` (${t('decl.splash')})` : ''}`).join(', '),
                 })}
                 {d.dc !== null && <strong> – {t('log.ev.declareDc', { n: d.dc })}</strong>}
                 {d.range && <span className="dim"> ({d.range})</span>}
+                {d.area && <span className="dim"> · {t('decl.areaLog')}</span>}
               </li>
             ))}
           </ul>
