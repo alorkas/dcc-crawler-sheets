@@ -64,7 +64,15 @@ export type RollPart = {
   rolls?: number[];
   kept?: boolean[];
 };
-export type RollResult = { expr: string; total: number; parts: RollPart[]; natural: number | null; label: string };
+export type RollResult = {
+  expr: string;
+  total: number;
+  parts: RollPart[];
+  natural: number | null;
+  label: string;
+  /** An Evade roll against a declared attack: its difficulty and whether it succeeded. */
+  vs?: { dc: number | null; success: boolean | null };
+};
 export type Message = {
   id: number;
   kind: 'chat' | 'roll' | 'event';
@@ -97,7 +105,18 @@ export type LogEvent =
       results: { name: string; from: number; roll: number; gained: boolean }[];
     }
   | { type: 'combat'; action: 'start' | 'round' | 'end'; round: number }
-  | { type: 'opponent'; name: string; from: number; to: number; defeated: boolean; source: string };
+  | { type: 'opponent'; name: string; from: number; to: number; defeated: boolean; source: string }
+  | {
+      type: 'declare';
+      round: number;
+      items: {
+        opponent: string;
+        attack: string;
+        range: string;
+        dc: number | null;
+        targets: { id: number; name: string }[];
+      }[];
+    };
 
 export type OpponentKind = 'mob' | 'elite' | 'boss' | 'npc' | 'crawler';
 export type Opponent = {
@@ -115,8 +134,35 @@ export type Opponent = {
   notes?: string;
   hidden?: boolean;
   npcId?: number | null;
+  attacks?: NpcAttack[];
+  mods?: Partial<Record<'str' | 'int' | 'con' | 'dex' | 'cha', string>>;
 };
-export type Encounter = { active: boolean; round: number; phase: number; floor: number; opponents: Opponent[] };
+export type NpcAttack = { name: string; toHit: string; damage: string; range: string; effect: string };
+/** A Mob's declared attack for this round (Mob Action Declaration). Players see it from Crawler Reaction on. */
+export type Declaration = {
+  id: number;
+  round: number;
+  opponentId: number;
+  opponentName: string;
+  /** Players get only the name and range. */
+  attack: Partial<NpcAttack> & { name: string };
+  dc: number | null;
+  targets: {
+    id: number;
+    name: string;
+    evade: { total: number; natural: number | null; success: boolean | null } | null;
+    applied: { damage: number; slots: number } | null;
+  }[];
+  damage: { total: number; expr: string } | null;
+};
+export type Encounter = {
+  active: boolean;
+  round: number;
+  phase: number;
+  floor: number;
+  opponents: Opponent[];
+  declarations: Declaration[];
+};
 export type NpcData = {
   name: string;
   kind: OpponentKind;
@@ -130,8 +176,10 @@ export type NpcData = {
   move: string;
   dr: string;
   stats: Record<'str' | 'int' | 'con' | 'dex' | 'cha', { score: string; mod: string }>;
-  attacks: { name: string; toHit: string; damage: string; range: string; effect: string }[];
+  attacks: NpcAttack[];
   notes: string;
+  /** Locked stat blocks can't be edited by accident (the default for book entries). */
+  locked: boolean;
   /** Where a book stat block came from ("Core Rulebook p. 333") and its chapter/Floor. */
   source: string;
   chapter: string;
@@ -215,6 +263,19 @@ export const api = {
   updateOpponent: (id: number, patch: Record<string, unknown>) =>
     request<Encounter>('PATCH', `/api/encounter/opponents/${id}`, patch),
   removeOpponent: (id: number) => request<Encounter>('DELETE', `/api/encounter/opponents/${id}`),
+  declare: (d: { opponentId: number; attack: number | Partial<NpcAttack>; targets: number[] }) =>
+    request<Encounter>('POST', '/api/encounter/declarations', d),
+  removeDeclaration: (id: number) => request<Encounter>('DELETE', `/api/encounter/declarations/${id}`),
+  rollEvade: (id: number, characterId: number, expr: string) =>
+    request<Encounter>('POST', `/api/encounter/declarations/${id}/evade`, { characterId, expr }),
+  rollDeclDamage: (id: number) => request<Encounter>('POST', `/api/encounter/declarations/${id}/damage`, {}),
+  markTarget: (
+    id: number,
+    characterId: number,
+    patch: { applied?: { damage: number; slots: number } | null; evade?: null },
+  ) => request<Encounter>('PATCH', `/api/encounter/declarations/${id}/targets/${characterId}`, patch),
+  npcRoll: (r: { name: string; expr: string; label?: string; gmOnly?: boolean }) =>
+    request<Message>('POST', '/api/npc-roll', r),
 
   npcs: () => request<Npc[]>('GET', '/api/npcs'),
   npc: (id: number) => request<Npc>('GET', `/api/npcs/${id}`),

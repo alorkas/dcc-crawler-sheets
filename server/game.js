@@ -1,5 +1,7 @@
 // GM tools: NPC stat blocks, the combat tracker, and level-ups / skill advancement.
 import { BOOK_NPCS } from './catalog/npcs.js';
+import { rollDice } from './dice.js';
+import { damageDice, resolveNum } from '../shared/formula.js';
 import { BOSS_LEVELS, addGrindHours, advanceSkills, crawlerKillLevels, levelUp, rollDie } from './progress.js';
 
 const PHASES = 5; // Mob Action Declaration, Crawler Reaction, Mob Attack Resolution, Crawler Action, Clean Up
@@ -9,10 +11,7 @@ const int = (v, d = 0) => {
   return Number.isFinite(n) ? n : d;
 };
 /** "11+F" → 11 + floor. */
-const withFloor = (v, floor) => {
-  const s = String(v ?? '');
-  return int(s) + (/\+\s*F\b/i.test(s) ? floor : 0);
-};
+const withFloor = (v, floor) => resolveNum(v, floor) ?? 0;
 const clip = (v, n = 80) => String(v ?? '').slice(0, n);
 
 export function mountGame(app, { db, auth, adminOnly, loadChar, live }) {
@@ -24,6 +23,7 @@ export function mountGame(app, { db, auth, adminOnly, loadChar, live }) {
   });
   app.post('/api/npcs', auth, adminOnly, (req, res) => {
     const data = req.body?.data && typeof req.body.data === 'object' ? req.body.data : {};
+    if (data.locked === undefined) data.locked = false; // a new stat block starts unlocked for editing
     const r = db.prepare('INSERT INTO npcs (data) VALUES (?)').run(JSON.stringify(data));
     res.status(201).json(toNpc(db.prepare('SELECT * FROM npcs WHERE id = ?').get(r.lastInsertRowid)));
   });
@@ -79,7 +79,7 @@ export function mountGame(app, { db, auth, adminOnly, loadChar, live }) {
   });
 
   /* ---------------- combat tracker ---------------- */
-  const EMPTY = { active: false, round: 0, phase: 1, floor: 1, opponents: [], seq: 0 };
+  const EMPTY = { active: false, round: 0, phase: 1, floor: 1, opponents: [], seq: 0, declarations: [] };
   const getEnc = () => {
     const row = db.prepare(`SELECT value FROM kv WHERE key = 'encounter'`).get();
     return row ? { ...EMPTY, ...JSON.parse(row.value) } : { ...EMPTY };
@@ -91,12 +91,31 @@ export function mountGame(app, { db, auth, adminOnly, loadChar, live }) {
     live.send('encounter', {});
   };
   const pct = (o) => (o.slots > 0 ? Math.round(((o.slots - o.lost) / o.slots) * 100) : 0);
+  /** Declarations are the GM's secret during Mob Action Declaration; players see them from Crawler Reaction on. */
+  const revealed = (enc) => enc.active && enc.phase >= 2 && enc.round >= 1;
+  const declView = (enc, d, admin) => {
+    if (admin) return d;
+    const o = enc.opponents.find((x) => x.id === d.opponentId);
+    return {
+      id: d.id,
+      round: d.round,
+      opponentId: d.opponentId,
+      opponentName: o?.hidden ? '???' : d.opponentName,
+      attack: { name: d.attack.name, range: d.attack.range },
+      dc: d.dc,
+      targets: d.targets,
+      damage: d.damage,
+    };
+  };
   /** Players see names and a Health percentage (the book's "let the players know what percentage…"). */
   const viewFor = (enc, admin) => ({
     active: enc.active,
     round: enc.round,
     phase: enc.phase,
     floor: enc.floor,
+    declarations: (enc.declarations || [])
+      .filter((d) => d.round === enc.round && (admin || revealed(enc)))
+      .map((d) => declView(enc, d, admin)),
     opponents: enc.opponents
       .filter((o) => admin || !o.hidden)
       .map((o) =>
@@ -106,6 +125,23 @@ export function mountGame(app, { db, auth, adminOnly, loadChar, live }) {
       ),
   });
   const combatEvent = (event, gmOnly = false) => live.postEvent({ event: { type: 'combat', ...event }, gmOnly });
+  const declItem = (enc, d) => {
+    const o = enc.opponents.find((x) => x.id === d.opponentId);
+    return {
+      opponent: o?.hidden ? '???' : d.opponentName,
+      attack: d.attack.name,
+      range: d.attack.range,
+      dc: d.dc,
+      targets: d.targets.map((t) => ({ id: t.id, name: t.name })),
+    };
+  };
+  /** Moving to Crawler Reaction: post all of this round's declarations to the log at once. */
+  function revealDeclarations(enc) {
+    const list = (enc.declarations || []).filter((d) => d.round === enc.round && !d.posted);
+    for (const d of list) d.posted = true;
+    if (list.length)
+      live.postEvent({ event: { type: 'declare', round: enc.round, items: list.map((d) => declItem(enc, d)) } });
+  }
 
   app.get('/api/encounter', auth, (req, res) => res.json(viewFor(getEnc(), !!req.user.is_admin)));
 
@@ -125,13 +161,18 @@ export function mountGame(app, { db, auth, adminOnly, loadChar, live }) {
           .map((r) => int(JSON.parse(r.data || '{}').floor, 0));
         enc.floor = Math.max(1, ...floors);
       }
+      enc.declarations = [];
       combatEvent({ action: 'start', round: enc.round });
     } else if (action === 'next' && enc.active) {
       if (enc.round === 0 || enc.phase >= PHASES) {
         enc.round += 1;
         enc.phase = 1;
+        enc.declarations = []; // a new round: the Mobs declare again
         combatEvent({ action: 'round', round: enc.round });
-      } else enc.phase += 1;
+      } else {
+        enc.phase += 1;
+        if (enc.phase === 2) revealDeclarations(enc);
+      }
     } else if (action === 'prev' && enc.active) {
       if (enc.phase > 1) enc.phase -= 1;
       else if (enc.round > 1) {
@@ -141,6 +182,7 @@ export function mountGame(app, { db, auth, adminOnly, loadChar, live }) {
     } else if (action === 'end' && enc.active) {
       combatEvent({ action: 'end', round: enc.round });
       enc.active = false;
+      enc.declarations = [];
       enc.opponents = enc.opponents.filter((o) => req.body?.keepOpponents && o.lost < o.slots);
     } else if (action === 'floor') {
       enc.floor = Math.max(1, int(req.body?.floor, 1));
@@ -178,6 +220,17 @@ export function mountGame(app, { db, auth, adminOnly, loadChar, live }) {
         evade: String(n.evade ?? ''),
         notes: '',
         npcId: row.id,
+        attacks: (Array.isArray(n.attacks) ? n.attacks : [])
+          .filter((a) => a && String(a.name ?? '').trim())
+          .slice(0, 12)
+          .map((a) => ({
+            name: clip(a.name),
+            toHit: clip(a.toHit, 20),
+            damage: clip(a.damage, 80),
+            range: clip(a.range, 40),
+            effect: clip(a.effect, 300),
+          })),
+        mods: Object.fromEntries(['str', 'int', 'con', 'dex', 'cha'].map((k) => [k, clip(n.stats?.[k]?.mod, 6)])),
       };
     }
     const count = Math.min(20, Math.max(1, int(b.count, 1)));
@@ -229,8 +282,142 @@ export function mountGame(app, { db, auth, adminOnly, loadChar, live }) {
   app.delete('/api/encounter/opponents/:oid', auth, adminOnly, (req, res) => {
     const enc = getEnc();
     enc.opponents = enc.opponents.filter((x) => x.id !== Number(req.params.oid));
+    enc.declarations = (enc.declarations || []).filter((d) => d.opponentId !== Number(req.params.oid));
     putEnc(enc);
     res.json(viewFor(enc, true));
+  });
+
+  /* ---------------- Mob Action Declaration ---------------- */
+  // "Bad Llama 2 will use Lava Spit on Alvaro – Evade difficulty 15": the Mob's to-hit is the crawler's Evade DC
+  app.post('/api/encounter/declarations', auth, adminOnly, (req, res) => {
+    const enc = getEnc();
+    const b = req.body || {};
+    if (!enc.active) return res.status(400).json({ error: 'No combat', code: 'bad_request' });
+    const o = enc.opponents.find((x) => x.id === Number(b.opponentId));
+    if (!o) return res.status(404).json({ error: 'Not found', code: 'not_found' });
+    let attack;
+    if (Number.isInteger(b.attack) && o.attacks?.[b.attack]) attack = o.attacks[b.attack];
+    else if (b.attack && typeof b.attack === 'object')
+      attack = {
+        name: clip(b.attack.name) || '?',
+        toHit: clip(b.attack.toHit, 20),
+        damage: clip(b.attack.damage, 80),
+        range: clip(b.attack.range, 40),
+        effect: clip(b.attack.effect, 300),
+      };
+    else return res.status(400).json({ error: 'Missing attack', code: 'bad_request' });
+    const party = new Map(
+      db
+        .prepare('SELECT id, data FROM characters WHERE party_since IS NOT NULL')
+        .all()
+        .map((r) => [r.id, clip(JSON.parse(r.data || '{}').name) || '?']),
+    );
+    const ids = [...new Set((Array.isArray(b.targets) ? b.targets : []).map(Number))].filter((id) => party.has(id));
+    if (!ids.length) return res.status(400).json({ error: 'Pick a target', code: 'bad_request' });
+    enc.seq += 1;
+    const d = {
+      id: enc.seq,
+      round: enc.round,
+      opponentId: o.id,
+      opponentName: o.name,
+      attack,
+      dc: resolveNum(attack.toHit, enc.floor),
+      targets: ids.map((id) => ({ id, name: party.get(id), evade: null, applied: null })),
+      damage: null,
+    };
+    enc.declarations = [...(enc.declarations || []), d];
+    // declared late (after the reveal): post it right away
+    if (revealed(enc)) revealDeclarations(enc);
+    putEnc(enc);
+    res.status(201).json(viewFor(enc, true));
+  });
+
+  const findDecl = (enc, did) => (enc.declarations || []).find((d) => d.id === Number(did));
+
+  app.delete('/api/encounter/declarations/:did', auth, adminOnly, (req, res) => {
+    const enc = getEnc();
+    enc.declarations = (enc.declarations || []).filter((d) => d.id !== Number(req.params.did));
+    putEnc(enc);
+    res.json(viewFor(enc, true));
+  });
+
+  // a targeted crawler (its owner or the GM) rolls Evade against the declared attack
+  app.post('/api/encounter/declarations/:did/evade', auth, (req, res) => {
+    const enc = getEnc();
+    const d = findDecl(enc, req.params.did);
+    const admin = !!req.user.is_admin;
+    if (!d || (!admin && !revealed(enc))) return res.status(404).json({ error: 'Not found', code: 'not_found' });
+    const target = d.targets.find((x) => x.id === Number(req.body?.characterId));
+    if (!target) return res.status(404).json({ error: 'Not found', code: 'not_found' });
+    const c = db.prepare('SELECT id, owner_id, party_since FROM characters WHERE id = ?').get(target.id);
+    if (!c || (c.owner_id !== req.user.id && !admin))
+      return res.status(404).json({ error: 'Character not found', code: 'char_not_found' });
+    if (target.evade && !admin) return res.status(409).json({ error: 'Already rolled', code: 'already_rolled' });
+    const expr = String(req.body?.expr ?? 'd20').replace(/\s+/g, '');
+    if (!/^1?d20([+-]\d{1,2})?$/i.test(expr)) return res.status(400).json({ error: 'Invalid dice', code: 'bad_dice' });
+    const r = rollDice(expr);
+    const success = d.dc === null ? null : r.total >= d.dc;
+    target.evade = { total: r.total, natural: r.natural, success };
+    const o = enc.opponents.find((x) => x.id === d.opponentId);
+    live.postRoll({
+      userId: req.user.id,
+      characterId: target.id,
+      charName: target.name,
+      roll: {
+        ...r,
+        label: `Evade · ${o?.hidden ? '???' : d.opponentName} – ${d.attack.name}`,
+        vs: { dc: d.dc, success },
+      },
+    });
+    putEnc(enc);
+    res.json(viewFor(enc, admin));
+  });
+
+  // Mob Attack Resolution: the GM rolls the declared attack's damage (public, unless the Mob is hidden)
+  app.post('/api/encounter/declarations/:did/damage', auth, adminOnly, (req, res) => {
+    const enc = getEnc();
+    const d = findDecl(enc, req.params.did);
+    if (!d) return res.status(404).json({ error: 'Not found', code: 'not_found' });
+    const o = enc.opponents.find((x) => x.id === d.opponentId);
+    const expr = damageDice(d.attack.damage, enc.floor, o?.mods);
+    const r = expr ? rollDice(expr) : null;
+    if (!r) return res.status(400).json({ error: 'No dice in this damage entry', code: 'bad_dice' });
+    d.damage = { total: r.total, expr };
+    live.postRoll({
+      userId: req.user.id,
+      charName: o?.hidden ? '???' : d.opponentName,
+      roll: { ...r, label: `${d.attack.name} · ${d.attack.damage}`.slice(0, 120) },
+      gmOnly: !!o?.hidden,
+    });
+    putEnc(enc);
+    res.json(viewFor(enc, true));
+  });
+
+  // after the GM's browser applied the damage to a sheet: remember it so it isn't applied twice
+  app.patch('/api/encounter/declarations/:did/targets/:cid', auth, adminOnly, (req, res) => {
+    const enc = getEnc();
+    const d = findDecl(enc, req.params.did);
+    const target = d?.targets.find((x) => x.id === Number(req.params.cid));
+    if (!target) return res.status(404).json({ error: 'Not found', code: 'not_found' });
+    const b = req.body || {};
+    if (b.applied === null) target.applied = null;
+    else if (b.applied) target.applied = { damage: int(b.applied.damage), slots: int(b.applied.slots) };
+    if (b.evade === null) target.evade = null;
+    putEnc(enc);
+    res.json(viewFor(enc, true));
+  });
+
+  // a GM roll shown with an NPC's name as the speaker (damage buttons on the stat block)
+  app.post('/api/npc-roll', auth, adminOnly, (req, res) => {
+    const r = rollDice(req.body?.expr);
+    if (!r) return res.status(400).json({ error: 'Invalid dice expression', code: 'bad_dice' });
+    const m = live.postRoll({
+      userId: req.user.id,
+      charName: clip(req.body?.name) || '?',
+      roll: { ...r, label: clip(req.body?.label, 120) },
+      gmOnly: !!req.body?.gmOnly,
+    });
+    res.status(201).json(m);
   });
 
   /* ---------------- level-ups & skill advancement (GM only) ---------------- */

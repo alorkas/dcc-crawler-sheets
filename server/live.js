@@ -23,7 +23,13 @@ export function partyView(data, withMana) {
     debuffList: Array.isArray(d.debuffList) ? d.debuffList : [],
     stats,
   };
-  if (withMana) Object.assign(view, { manaMax: d.manaMax ?? '', manaCurrent: d.manaCurrent ?? '' });
+  // mana and Evade (for the Evade roll against a declared attack) only for the owner and the GM
+  if (withMana)
+    Object.assign(view, {
+      manaMax: d.manaMax ?? '',
+      manaCurrent: d.manaCurrent ?? '',
+      evade: { dexMod: d.evade?.dexMod ?? '', buffs: d.evade?.buffs ?? '' },
+    });
   return view;
 }
 
@@ -185,6 +191,21 @@ export function mountLive(app, { db, auth, adminOnly, loadChar }) {
     send('message', toMessage(row), (u) => visible(u, row));
   }
 
+  /** A dice roll posted by the server, e.g. for a Mob ("Bad Llama 2") or a crawler's Evade. */
+  function postRoll({ userId, characterId = null, charName = '', roll, gmOnly = false }) {
+    const uid = userId ?? db.prepare('SELECT id FROM users WHERE is_admin = 1 ORDER BY id LIMIT 1').get()?.id;
+    if (!uid) return null;
+    const r = db
+      .prepare(
+        `INSERT INTO messages (user_id, character_id, char_name, kind, text, roll, gm_only) VALUES (?, ?, ?, 'roll', '', ?, ?)`,
+      )
+      .run(uid, characterId, String(charName).slice(0, 80), JSON.stringify(roll), gmOnly ? 1 : 0);
+    const row = msgById.get(r.lastInsertRowid);
+    const message = toMessage(row);
+    send('message', message, (u) => visible(u, row));
+    return message;
+  }
+
   app.get('/api/messages', auth, (req, res) => {
     const limit = Math.min(Math.max(Number(req.query.limit) || 200, 1), 500);
     const rows = db
@@ -263,5 +284,5 @@ export function mountLive(app, { db, auth, adminOnly, loadChar }) {
     res.json({ ok: true });
   });
 
-  return { characterChanged, postEvent, send };
+  return { characterChanged, postEvent, postRoll, send };
 }

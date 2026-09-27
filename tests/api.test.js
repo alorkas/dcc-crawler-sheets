@@ -344,3 +344,105 @@ test('spending Stat points is logged', async () => {
   );
   assert.deepEqual(ev.event, { type: 'stats', changes: { str: 3 }, spent: 3, left: 3 });
 });
+
+test('Mob Action Declaration: secret in phase 1, revealed in phase 2, Evade and damage', async () => {
+  const pl = client();
+  const other = client();
+  const dm = client();
+  await pl('POST', '/api/auth/register', { username: 'decl1', password: 'password1' });
+  await other('POST', '/api/auth/register', { username: 'decl2', password: 'password1' });
+  await dm('POST', '/api/auth/login', { username: 'dm', password: 'adminpass123' });
+  await dm('DELETE', '/api/messages');
+
+  const npc = await dm('POST', '/api/npcs', {
+    data: {
+      name: 'Bad Llama',
+      slots: '3',
+      slotValue: '2',
+      attacks: [{ name: 'Lava Spit', toHit: '13+F', damage: '1d6+F Fire', range: '30 ft', effect: '' }],
+    },
+  });
+  assert.equal(npc.body.data.locked, false, 'a new stat block starts unlocked');
+  const c = await pl('POST', '/api/characters', { data: { name: 'Alvaro', floor: '2' } });
+  const c2 = await other('POST', '/api/characters', { data: { name: 'Nope' } });
+  await dm('PATCH', `/api/characters/${c.body.id}/party`, { inParty: true });
+
+  await dm('POST', '/api/encounter', { action: 'start', floor: 2 });
+  let enc = (await dm('POST', '/api/encounter/opponents', { npcId: npc.body.id, count: 2 })).body;
+  const llama = enc.opponents.find((o) => o.name === 'Bad Llama 2');
+  assert.equal(llama.attacks[0].name, 'Lava Spit', 'attacks are copied from the stat block');
+
+  // only party members can be targeted; players can't declare
+  const bad = await dm('POST', '/api/encounter/declarations', {
+    opponentId: llama.id,
+    attack: 0,
+    targets: [c2.body.id],
+  });
+  assert.equal(bad.status, 400);
+  assert.equal(
+    (await pl('POST', '/api/encounter/declarations', { opponentId: llama.id, attack: 0, targets: [c.body.id] })).status,
+    403,
+  );
+  enc = (await dm('POST', '/api/encounter/declarations', { opponentId: llama.id, attack: 0, targets: [c.body.id] }))
+    .body;
+  const decl = enc.declarations[0];
+  assert.equal(decl.dc, 15, 'Evade difficulty = to-hit with F = Floor 2');
+
+  // phase 1: players don't see it yet
+  assert.equal((await pl('GET', '/api/encounter')).body.declarations.length, 0);
+  assert.equal(
+    (await pl('POST', `/api/encounter/declarations/${decl.id}/evade`, { characterId: c.body.id, expr: 'd20+3' }))
+      .status,
+    404,
+  );
+  let log = (await pl('GET', '/api/messages')).body;
+  assert.ok(!log.some((m) => m.event?.type === 'declare'));
+
+  // phase 2: revealed, logged once
+  await dm('POST', '/api/encounter', { action: 'next' });
+  enc = (await pl('GET', '/api/encounter')).body;
+  assert.equal(enc.declarations.length, 1);
+  assert.equal(enc.declarations[0].attack.toHit, undefined, 'players only see the name, range and DC');
+  assert.equal(enc.declarations[0].dc, 15);
+  log = (await other('GET', '/api/messages')).body;
+  const ev = log.filter((m) => m.event?.type === 'declare');
+  assert.equal(ev.length, 1);
+  assert.deepEqual(
+    [ev[0].event.items[0].opponent, ev[0].event.items[0].attack, ev[0].event.items[0].targets[0].name],
+    ['Bad Llama 2', 'Lava Spit', 'Alvaro'],
+  );
+
+  // Evade: only the owner (or GM), once, d20 ± n only
+  const url = `/api/encounter/declarations/${decl.id}/evade`;
+  assert.equal((await other('POST', url, { characterId: c.body.id, expr: 'd20+3' })).status, 404);
+  assert.equal((await pl('POST', url, { characterId: c.body.id, expr: '10d20' })).status, 400);
+  enc = (await pl('POST', url, { characterId: c.body.id, expr: 'd20+3' })).body;
+  const ev2 = enc.declarations[0].targets[0].evade;
+  assert.equal(ev2.success, ev2.total >= 15);
+  assert.equal((await pl('POST', url, { characterId: c.body.id, expr: 'd20+3' })).status, 409);
+  const roll = (await pl('GET', '/api/messages')).body.find((m) => m.roll?.vs);
+  assert.equal(roll.roll.vs.dc, 15);
+  assert.equal(roll.characterName, 'Alvaro');
+
+  // damage: 1d6+2, posted as the Mob
+  enc = (await dm('POST', `/api/encounter/declarations/${decl.id}/damage`)).body;
+  const dmg = enc.declarations[0].damage;
+  assert.equal(dmg.expr, '1d6+2');
+  assert.ok(dmg.total >= 3 && dmg.total <= 8);
+  assert.ok(
+    (await other('GET', '/api/messages')).body.some((m) => m.kind === 'roll' && m.characterName === 'Bad Llama 2'),
+  );
+  enc = (
+    await dm('PATCH', `/api/encounter/declarations/${decl.id}/targets/${c.body.id}`, {
+      applied: { damage: dmg.total, slots: 1 },
+    })
+  ).body;
+  assert.equal(enc.declarations[0].targets[0].applied.slots, 1);
+
+  // a new round clears the declarations
+  for (let i = 0; i < 4; i++) await dm('POST', '/api/encounter', { action: 'next' });
+  enc = (await dm('GET', '/api/encounter')).body;
+  assert.deepEqual([enc.round, enc.phase, enc.declarations.length], [2, 1, 0]);
+  await dm('POST', '/api/encounter', { action: 'end' });
+  await dm('PATCH', `/api/characters/${c.body.id}/party`, { inParty: false });
+});

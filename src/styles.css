@@ -705,6 +705,7 @@ main {
   display: flex;
   align-items: center;
   gap: 0.5rem;
+  flex-wrap: wrap;
 }
 .save-badge {
   font: 600 0.7rem var(--font-label);
@@ -3482,4 +3483,175 @@ ul.plain {
 }
 .assign-modal .assign-points {
   margin: 0;
+}
+
+/* ---------------- Mob Action Declaration ---------------- */
+.plain-fieldset {
+  border: 0;
+  margin: 0;
+  padding: 0;
+  min-width: 0;
+  display: contents;
+}
+.plain-fieldset:disabled .in {
+  opacity: 0.85;
+  cursor: default;
+}
+.atk-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.25rem;
+}
+.atk-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.3rem;
+  font: 500 0.72rem/1 var(--font-label);
+  letter-spacing: 0.03em;
+  padding: 0.3rem 0.45rem;
+  border-radius: 5px;
+  border: 1px solid var(--border-2);
+  background: var(--surface-2);
+  color: var(--text);
+  cursor: pointer;
+}
+.atk-chip:hover,
+.atk-chip.active {
+  border-color: var(--red);
+  background: color-mix(in srgb, var(--red) 22%, var(--surface-2));
+}
+.atk-chip.ghost {
+  background: transparent;
+  color: var(--dim);
+  border-style: dashed;
+}
+.atk-dc {
+  color: var(--gold);
+  font-weight: 600;
+}
+.declare-form {
+  flex-basis: 100%;
+  display: flex;
+  flex-direction: column;
+  gap: 0.4rem;
+  padding: 0.5rem;
+  margin-top: 0.2rem;
+  border: 1px dashed var(--border-2);
+  border-radius: var(--radius);
+}
+.declare-form .quick-opp .mini.grow {
+  grid-column: span 2;
+}
+.target-picks {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.3rem;
+}
+.target-pick {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.3rem;
+  font-size: 0.8rem;
+  padding: 0.25rem 0.5rem;
+  border-radius: 999px;
+  border: 1px solid var(--border-2);
+  cursor: pointer;
+}
+.target-pick.on {
+  border-color: var(--gold);
+  background: color-mix(in srgb, var(--gold) 14%, transparent);
+}
+.target-pick input {
+  margin: 0;
+}
+.declarations {
+  display: flex;
+  flex-direction: column;
+  gap: 0.4rem;
+}
+.decl {
+  display: flex;
+  flex-direction: column;
+  gap: 0.3rem;
+  padding: 0.45rem 0.55rem;
+  border-radius: var(--radius);
+  border-left: 3px solid var(--red);
+  background: color-mix(in srgb, var(--red) 8%, var(--surface));
+  font-size: 0.84rem;
+}
+.decl-head,
+.decl-dmg,
+.decl-targets li,
+.targeted li,
+.sb-attack-line {
+  display: flex;
+  align-items: center;
+  gap: 0.35rem;
+  flex-wrap: wrap;
+}
+.decl-targets,
+.targeted {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+}
+.targeted {
+  margin-top: 0.1rem;
+}
+.targeted li {
+  font-size: 0.8rem;
+  padding: 0.3rem 0.4rem;
+  border-radius: 6px;
+  background: color-mix(in srgb, var(--red) 14%, var(--surface-2));
+}
+.targeted li.evaded {
+  background: color-mix(in srgb, var(--green) 14%, var(--surface-2));
+}
+.grow {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+.evade-res {
+  font-weight: 700;
+  font-size: 0.8rem;
+}
+.evade-res.ok,
+.ok-pill {
+  color: var(--green);
+}
+.evade-res.bad,
+.bad-pill {
+  color: #ff6b66;
+}
+.sb-attack-list {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+  margin-bottom: 0.8rem;
+}
+.sb-attack-view {
+  padding: 0.5rem 0.6rem;
+  border-radius: var(--radius);
+  background: var(--bg-2);
+  border: 1px solid var(--border);
+}
+.sb-effect-text {
+  margin: 0.3rem 0 0;
+}
+.npc-declare {
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+  margin-top: 0.4rem;
+}
+.roll-flash {
+  color: var(--gold);
+}
+.roll-vs {
+  font: 600 0.7rem/1.2 var(--font-label);
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
 }

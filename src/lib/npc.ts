@@ -31,6 +31,7 @@ export function emptyNpc(): NpcData {
     source: '',
     chapter: '',
     floor: 0,
+    locked: false,
   };
 }
 
@@ -72,6 +73,8 @@ export function loadNpc(stored: Partial<NpcData> | undefined): NpcData {
     source: str(d.source, ''),
     chapter: str(d.chapter, ''),
     floor: npcFloor(d),
+    // stat blocks are locked unless you unlock them (book entries have no flag → locked)
+    locked: d.locked !== false,
   };
 }
 

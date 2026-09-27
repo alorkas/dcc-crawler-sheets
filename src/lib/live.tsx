@@ -96,7 +96,8 @@ export function LiveProvider({ children }: { children: ReactNode }) {
     es.addEventListener('message', (e) => {
       const m = JSON.parse((e as MessageEvent).data) as Message;
       addMessage(m);
-      if (!logVisible.current && m.userId !== user.id && m.kind !== 'event') setUnread((n) => n + 1);
+      if (!logVisible.current && m.userId !== user.id && (m.kind !== 'event' || m.event?.type === 'declare'))
+        setUnread((n) => n + 1);
     });
     es.addEventListener('party', () => {
       clearTimeout(partyTimer);

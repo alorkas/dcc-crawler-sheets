@@ -7,7 +7,7 @@ import { useLive } from '../lib/live';
 import { derive } from '../lib/rules';
 import { normalize } from '../lib/sheet';
 import { ChatIcon, ChevronIcon, DiceIcon, PartyIcon } from './icons';
-import { CombatHeader, Opponents } from './CombatTracker';
+import { CombatHeader, Declarations, Opponents, TargetedBy } from './CombatTracker';
 
 /* ---------------- collapsible side panel ---------------- */
 
@@ -164,6 +164,7 @@ export function PartyPanel() {
     >
       <div className="side-body">
         <CombatHeader />
+        <Declarations />
         {fighting && <div className="side-sub">{t('combat.crawlers')}</div>}
         {party === null && <p className="dim small">{t('common.loading')}</p>}
         {party !== null && members.length === 0 && <PartyEmpty />}
@@ -258,6 +259,7 @@ function MemberCard({ m }: { m: PartyMember }) {
           <span className="dim tiny">{t('party.mana', { n: der.manaCurrent ?? '—', max: der.manaMax })}</span>
         </div>
       )}
+      <TargetedBy memberId={m.id} canRoll={canOpen} evadeTotal={der.evadeTotal} />
       {(der.dying || sheet.debuffList.length > 0) && (
         <div className="member-chips">
           {der.dying && (
@@ -374,7 +376,10 @@ function MessageList({ filter }: { filter: Filter }) {
   const ref = useRef<HTMLDivElement>(null);
   const stick = useRef(true);
   // automatic entries (HP, mana, levels, combat) live in their own Log tab so they don't drown the chat
-  const shown = messages.filter((m) => (filter === 'all' ? m.kind !== 'event' : m.kind === filter));
+  // "All" is rolls and chat, plus the Mobs' declared attacks (players need those during combat)
+  const shown = messages.filter((m) =>
+    filter === 'all' ? m.kind !== 'event' || m.event?.type === 'declare' : m.kind === filter,
+  );
 
   useEffect(() => {
     const el = ref.current;
@@ -424,6 +429,12 @@ function LogEntry({ m }: { m: Message }) {
             <span className="roll-label">{r.label || t('log.roll')}</span>
             <span className="roll-result">{r.total}</span>
           </div>
+          {r.vs && r.vs.success !== null && (
+            <div className={`roll-vs ${r.vs.success ? 'ok-pill' : 'bad-pill'}`}>
+              {r.vs.success ? '✓ ' : '✗ '}
+              {t(r.vs.success ? 'log.evaded' : 'log.notEvaded')} · {t('decl.dc', { n: r.vs.dc ?? '?' })}
+            </div>
+          )}
           <div className="roll-break dim tiny">
             {r.expr} →{' '}
             {r.parts.map((p, i) => (
@@ -567,6 +578,28 @@ function EventEntry({ m, ev, time }: { m: Message; ev: LogEvent; time: string })
               ? t('log.ev.end', { n: ev.round })
               : t('log.ev.round', { n: ev.round })}
         </strong>
+      );
+      break;
+    case 'declare':
+      icon = '⚠';
+      tone = 'foe';
+      body = (
+        <>
+          <strong>{t('log.ev.declare', { n: ev.round })}</strong>
+          <ul className="ev-list">
+            {ev.items.map((d, i) => (
+              <li key={i}>
+                {t('log.ev.declareItem', {
+                  who: `“${d.opponent}”`,
+                  attack: d.attack,
+                  targets: d.targets.map((x) => `“${x.name}”`).join(', '),
+                })}
+                {d.dc !== null && <strong> – {t('log.ev.declareDc', { n: d.dc })}</strong>}
+                {d.range && <span className="dim"> ({d.range})</span>}
+              </li>
+            ))}
+          </ul>
+        </>
       );
       break;
     case 'opponent':
