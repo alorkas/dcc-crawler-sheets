@@ -6,7 +6,7 @@ import { useI18n, type MsgKey } from '../lib/i18n';
 import { useLive } from '../lib/live';
 import { NPC_KINDS, NPC_STATS, emptyAttack, loadNpc, slotPercents } from '../lib/npc';
 import { LockIcon, UnlockIcon } from '../components/icons';
-import { NpcDeclare } from '../components/CombatTracker';
+import { NpcInFight } from '../components/CombatTracker';
 import { AddToCombat } from './NpcsPage';
 
 type Save = 'idle' | 'dirty' | 'saving' | 'saved' | 'error';
@@ -133,6 +133,8 @@ export default function NpcPage() {
         </div>
       </div>
 
+      <NpcInFight npcId={npcId} />
+
       <div className="card stat-block">
         <div className="card-body">
           <fieldset className="plain-fieldset" disabled={locked}>
@@ -234,7 +236,7 @@ export default function NpcPage() {
 
           <div className="sub-lbl">{t('npc.attacks')}</div>
           {locked ? (
-            <NpcAttackList npcId={npcId} data={data} />
+            <NpcAttackList data={data} />
           ) : (
             <div className="sb-attacks">
               {data.attacks.map((a, i) => {
@@ -316,13 +318,11 @@ export default function NpcPage() {
 }
 
 /** A locked stat block's attacks: declare one against the party (in combat) or roll its damage. */
-function NpcAttackList({ npcId, data }: { npcId: number; data: NpcData }) {
+function NpcAttackList({ data }: { data: NpcData }) {
   const { t } = useI18n();
   const { encounter } = useLive();
-  const [declaring, setDeclaring] = useState<number | null>(null);
   const [flash, setFlash] = useState<{ i: number; total: number } | null>(null);
   const floor = encounter?.active ? encounter.floor : data.floor || 1;
-  const inCombat = !!encounter?.active && encounter.opponents.some((o) => o.npcId === npcId && !o.defeated);
   const mods = Object.fromEntries(NPC_STATS.map((k) => [k, data.stats[k].mod]));
   const attacks = data.attacks.filter((a) => a.name.trim() || a.damage.trim());
   if (!attacks.length) return <p className="dim small">{t('npc.noAttacks')}</p>;
@@ -354,15 +354,6 @@ function NpcAttackList({ npcId, data }: { npcId: number; data: NpcData }) {
               <button
                 type="button"
                 className="btn small"
-                disabled={!inCombat || encounter!.round < 1}
-                title={inCombat ? t('decl.declareHint') : t('decl.notInCombat')}
-                onClick={() => setDeclaring(declaring === i ? null : i)}
-              >
-                ⚔ {t('decl.declare')}
-              </button>
-              <button
-                type="button"
-                className="btn small"
                 disabled={!expr}
                 title={expr ? t('npc.rollDamageHint', { expr }) : t('npc.noDice')}
                 onClick={() => expr && rollDamage(i, expr)}
@@ -372,7 +363,6 @@ function NpcAttackList({ npcId, data }: { npcId: number; data: NpcData }) {
               </button>
             </div>
             {a.effect && <p className="dim small sb-effect-text">{a.effect}</p>}
-            {declaring === i && <NpcDeclare npcId={npcId} attack={a} onDone={() => setDeclaring(null)} />}
           </div>
         );
       })}

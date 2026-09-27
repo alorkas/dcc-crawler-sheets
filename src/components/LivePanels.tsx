@@ -4,10 +4,10 @@ import { api, type LogEvent, type Message, type PartyMember } from '../lib/api';
 import { useAuth } from '../lib/auth';
 import { useI18n, type MsgKey } from '../lib/i18n';
 import { useLive } from '../lib/live';
-import { derive } from '../lib/rules';
+import { derive, num } from '../lib/rules';
 import { normalize } from '../lib/sheet';
 import { ChatIcon, ChevronIcon, DiceIcon, PartyIcon } from './icons';
-import { CombatHeader, Declarations, Opponents, TargetedBy } from './CombatTracker';
+import { ActionPips, CombatHeader, Declarations, Opponents, TargetedBy } from './CombatTracker';
 
 /* ---------------- collapsible side panel ---------------- */
 
@@ -206,6 +206,7 @@ function MemberCard({ m }: { m: PartyMember }) {
   const navigate = useNavigate();
   const { sheet, der, showMana } = useMemberStats(m);
   const canOpen = m.mine || !!user?.isAdmin;
+  const aiFavor = showMana ? num(sheet.dr.aiFavor) : null;
   const tone = hpTone(der.hbPercent, der.dying);
   const slots = 10 - der.hbLost;
   const manaPct =
@@ -259,7 +260,8 @@ function MemberCard({ m }: { m: PartyMember }) {
           <span className="dim tiny">{t('party.mana', { n: der.manaCurrent ?? '—', max: der.manaMax })}</span>
         </div>
       )}
-      <TargetedBy memberId={m.id} canRoll={canOpen} evadeTotal={der.evadeTotal} />
+      <ActionPips memberId={m.id} canEdit={canOpen} aiFavor={aiFavor} />
+      <TargetedBy memberId={m.id} canRoll={canOpen} evadeTotal={der.evadeTotal} aiFavor={aiFavor} />
       {(der.dying || sheet.debuffList.length > 0) && (
         <div className="member-chips">
           {der.dying && (
@@ -578,6 +580,16 @@ function EventEntry({ m, ev, time }: { m: Message; ev: LogEvent; time: string })
               ? t('log.ev.end', { n: ev.round })
               : t('log.ev.round', { n: ev.round })}
         </strong>
+      );
+      break;
+    case 'favor':
+      icon = '✦';
+      tone = 'good';
+      body = (
+        <>
+          <strong>{who}</strong> {t(ev.use === 'reroll' ? 'log.ev.favorReroll' : 'log.ev.favorAction')}
+          <span className="dim"> · {t('log.ev.favorLeft', { n: ev.to })}</span>
+        </>
       );
       break;
     case 'declare':

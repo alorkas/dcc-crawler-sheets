@@ -14,6 +14,7 @@ export const PLAY_PATHS = [
   ['pet', 'hbLost'],
   ['mount', 'hbLost'],
   ['skills', '*', 'done'], // skill advancement marks
+  ['dr', 'aiFavor'], // AI Favor is spent at the table (rerolls, extra Actions)
 ];
 
 /** True when `path` is (inside) one of the play paths. */

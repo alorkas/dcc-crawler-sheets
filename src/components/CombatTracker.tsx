@@ -474,10 +474,13 @@ function AddOpponent() {
 /* ---------------- Mob Action Declaration ---------------- */
 
 /** GM: one chip per attack of an opponent; pick one, then who it targets. */
-function AttackChips({ o, floor }: { o: Opponent; floor: number }) {
+export function AttackChips({ o, floor }: { o: Opponent; floor: number }) {
   const { t } = useI18n();
+  const { encounter } = useLive();
   const [pick, setPick] = useState<number | 'other' | null>(null);
   const attacks = o.attacks ?? [];
+  // what this one already declared this round (each copy declares on its own)
+  const mine = (encounter?.declarations ?? []).filter((d) => d.opponentId === o.id);
   return (
     <div className="atk-chips">
       {attacks.map((a, i) => (
@@ -492,13 +495,25 @@ function AttackChips({ o, floor }: { o: Opponent; floor: number }) {
           {a.toHit && <span className="atk-dc">{withFloor(a.toHit, floor)}</span>}
         </button>
       ))}
-      <button
-        type="button"
-        className={`atk-chip ghost ${pick === 'other' ? 'active' : ''}`}
-        onClick={() => setPick(pick === 'other' ? null : 'other')}
-      >
-        + {t(attacks.length ? 'decl.other' : 'decl.declare')}
-      </button>
+      {/* quick entries (no stat block attacks) type their attack in */}
+      {attacks.length === 0 && (
+        <button
+          type="button"
+          className={`atk-chip ghost ${pick === 'other' ? 'active' : ''}`}
+          onClick={() => setPick(pick === 'other' ? null : 'other')}
+        >
+          + {t('decl.declare')}
+        </button>
+      )}
+      {mine.length > 0 && (
+        <ul className="atk-declared">
+          {mine.map((d) => (
+            <li key={d.id}>
+              ✓ {t('decl.declaredLine', { attack: d.attack.name, targets: d.targets.map((x) => x.name).join(', ') })}
+            </li>
+          ))}
+        </ul>
+      )}
       {pick !== null && (
         <DeclareForm opponent={o} attack={pick === 'other' ? null : pick} floor={floor} onDone={() => setPick(null)} />
       )}
@@ -598,40 +613,30 @@ export function DeclareForm({
   );
 }
 
-/** On a stat block: declare one of its attacks for one of its copies in the fight. */
-export function NpcDeclare({ npcId, attack, onDone }: { npcId: number; attack: NpcAttack; onDone: () => void }) {
+/** On a stat block: its copies in the fight, each declaring its own attacks. */
+export function NpcInFight({ npcId }: { npcId: number }) {
   const { t } = useI18n();
   const { encounter } = useLive();
-  const copies = (encounter?.active ? encounter.opponents : []).filter((o) => o.npcId === npcId && !o.defeated);
-  const [oid, setOid] = useState<number>(() => copies[0]?.id ?? 0);
-  const o = copies.find((x) => x.id === oid) ?? copies[0];
-  if (!o || !encounter) return <p className="dim tiny">{t('decl.notInCombat')}</p>;
+  if (!encounter?.active) return null;
+  const copies = encounter.opponents.filter((o) => o.npcId === npcId);
+  if (!copies.length) return null;
   return (
-    <div className="npc-declare">
-      {copies.length > 1 && (
-        <select
-          className="in sel"
-          value={o.id}
-          aria-label={t('decl.who')}
-          onChange={(e) => setOid(Number(e.target.value))}
-        >
-          {copies.map((c) => (
-            <option key={c.id} value={c.id}>
-              {c.name}
-            </option>
-          ))}
-        </select>
-      )}
-      <DeclareForm
-        opponent={o}
-        attack={(() => {
-          // use the copy's own attack when it has one of that name, else this stat block's (edited since)
-          const i = (o.attacks ?? []).findIndex((x) => x.name === attack.name);
-          return i >= 0 ? i : attack;
-        })()}
-        floor={encounter.floor}
-        onDone={onDone}
-      />
+    <div className="card npc-fight">
+      <div className="card-body">
+        <div className="sub-lbl">
+          {t('decl.inFight')} · {t('combat.round', { n: encounter.round })}
+        </div>
+        {encounter.round < 1 && <p className="dim small">{t('combat.surpriseHint')}</p>}
+        {copies.map((o) => (
+          <div key={o.id} className={`npc-copy ${o.defeated ? 'defeated' : ''}`}>
+            <div className="npc-copy-head">
+              <strong>{o.name}</strong>
+              <span className="dim small">{o.defeated ? '✝' : `${o.pct}%`}</span>
+            </div>
+            {!o.defeated && encounter.round >= 1 && <AttackChips o={o} floor={encounter.floor} />}
+          </div>
+        ))}
+      </div>
     </div>
   );
 }
@@ -746,35 +751,50 @@ function EvadeResult({ evade }: { evade: Declaration['targets'][number]['evade']
   return (
     <span className={`evade-res ${evade.success ? 'ok' : evade.success === false ? 'bad' : ''}`}>
       {evade.success ? '✓' : evade.success === false ? '✗' : '•'} {evade.total}
+      {evade.rerolled && (
+        <span className="dim tiny" title={t('decl.rerolled')}>
+          {' '}
+          (↻ {evade.first})
+        </span>
+      )}
     </span>
   );
 }
 
 /**
- * On a party member's card: which Mobs target this crawler and the Evade difficulty,
- * with an Evade roll for the owner (and the GM). Players see it from Crawler Reaction on.
+ * On a party member's card: which Mobs target this crawler and the Evade difficulty, with an Evade roll for the
+ * owner (and the GM), and a reroll of a failed Evade with AI Favor. Players see it from Crawler Reaction on.
  */
 export function TargetedBy({
   memberId,
   canRoll,
   evadeTotal,
+  aiFavor,
 }: {
   memberId: number;
   canRoll: boolean;
   evadeTotal: number | null;
+  /** AI Favor left on the sheet (null when unknown). */
+  aiFavor: number | null;
 }) {
-  const { t } = useI18n();
+  const { t, err } = useI18n();
   const { encounter, setEncounter } = useLive();
   const [busy, setBusy] = useState<number | null>(null);
+  const [error, setError] = useState('');
   if (!encounter?.active) return null;
   const list = (encounter.declarations ?? []).filter((d) => d.targets.some((x) => x.id === memberId));
   if (!list.length) return null;
-  const roll = async (d: Declaration) => {
+  const acts = encounter.actions?.[memberId] ?? { used: [], extra: false, max: 2 };
+  // one Evade Action covers every attack this round; without it, the crawler needs a free Action
+  const evading = acts.used.includes('evade');
+  const noActions = !evading && acts.used.length >= acts.max;
+  const roll = async (d: Declaration, reroll = false) => {
     setBusy(d.id);
+    setError('');
     try {
-      setEncounter(await api.rollEvade(d.id, memberId, `d20${signed(evadeTotal ?? 0)}`));
-    } catch {
-      /* ignore */
+      setEncounter(await api.rollEvade(d.id, memberId, `d20${signed(evadeTotal ?? 0)}`, reroll));
+    } catch (e) {
+      setError(err(e));
     } finally {
       setBusy(null);
     }
@@ -783,27 +803,48 @@ export function TargetedBy({
     <ul className="targeted">
       {list.map((d) => {
         const tg = d.targets.find((x) => x.id === memberId)!;
+        const e = tg.evade;
+        const canReroll = canRoll && !!e && e.success === false && e.natural !== 1 && !e.rerolled;
         return (
-          <li key={d.id} className={tg.evade?.success ? 'evaded' : tg.evade ? 'hit' : ''}>
+          <li key={d.id} className={e?.success ? 'evaded' : e ? 'hit' : ''}>
             <span className="grow">
               ⚠ <strong>{d.opponentName}</strong> · {d.attack.name}
               {d.attack.range && <span className="dim"> ({d.attack.range})</span>}
             </span>
             <span className="pill">{t('decl.dc', { n: d.dc ?? '?' })}</span>
-            {tg.evade ? (
-              <EvadeResult evade={tg.evade} />
+            {e ? (
+              <EvadeResult evade={e} />
             ) : (
               canRoll && (
                 <button
                   type="button"
                   className="btn small primary"
-                  disabled={busy === d.id || evadeTotal === null}
-                  title={evadeTotal === null ? t('decl.noEvade') : undefined}
+                  disabled={busy === d.id || evadeTotal === null || noActions}
+                  title={
+                    evadeTotal === null
+                      ? t('decl.noEvade')
+                      : noActions
+                        ? t('actions.none')
+                        : evading
+                          ? t('decl.evadeCovered')
+                          : t('decl.evadeCosts')
+                  }
                   onClick={() => roll(d)}
                 >
                   🎲 {t('core.evade')} {evadeTotal !== null && signed(evadeTotal)}
                 </button>
               )
+            )}
+            {canReroll && (
+              <button
+                type="button"
+                className="btn small"
+                disabled={busy === d.id || !aiFavor}
+                title={aiFavor ? t('decl.rerollHint', { n: aiFavor }) : t('decl.noFavor')}
+                onClick={() => roll(d, true)}
+              >
+                ↻ {t('decl.reroll')}
+              </button>
             )}
             {tg.applied && tg.applied.slots > 0 && (
               <span className="dim tiny">{t('decl.lost', { n: tg.applied.slots })}</span>
@@ -811,6 +852,73 @@ export function TargetedBy({
           </li>
         );
       })}
+      {error && <li className="error tiny">{error}</li>}
     </ul>
+  );
+}
+
+/**
+ * A crawler's Actions this round: 2 (+1 bought with AI Favor, once per round). Interrupts in Crawler Reaction
+ * (Evade and the others) use them up, so what's left is what they get in step 4. Owner and GM can mark them.
+ */
+export function ActionPips({
+  memberId,
+  canEdit,
+  aiFavor,
+}: {
+  memberId: number;
+  canEdit: boolean;
+  aiFavor: number | null;
+}) {
+  const { t, err } = useI18n();
+  const { encounter, setEncounter } = useLive();
+  const [error, setError] = useState('');
+  if (!encounter?.active) return null;
+  const acts = encounter.actions?.[memberId] ?? { used: [], extra: false, max: 2 };
+  const left = Math.max(0, acts.max - acts.used.length);
+  const call = async (op: 'use' | 'free' | 'extra', extra: { kind?: 'interrupt' | 'action'; index?: number } = {}) => {
+    setError('');
+    try {
+      setEncounter(await api.crawlerAction(memberId, op, extra));
+    } catch (e) {
+      setError(err(e));
+    }
+  };
+  // phase 2 is Crawler Reaction (Interrupts), anything else counts as a normal Action
+  const kind = encounter.phase === 2 && encounter.round >= 1 ? 'interrupt' : 'action';
+  return (
+    <div className="action-row">
+      <span className="lbl">{t('actions.label')}</span>
+      <span className="pips">
+        {Array.from({ length: acts.max }, (_, i) => {
+          const used = acts.used[i];
+          const label = used ? t(`actions.kind.${used}` as MsgKey) : t('actions.free');
+          return (
+            <button
+              key={i}
+              type="button"
+              className={`pip ${used ? `used k-${used}` : ''}`}
+              disabled={!canEdit || (!used && i !== acts.used.length)}
+              title={canEdit ? (used ? t('actions.freeHint', { what: label }) : t(`actions.use.${kind}`)) : label}
+              aria-label={label}
+              onClick={() => (used ? call('free', { index: i }) : call('use', { kind }))}
+            />
+          );
+        })}
+      </span>
+      <span className={`dim tiny ${left === 0 ? 'bad-pill' : ''}`}>{t('actions.left', { n: left })}</span>
+      {canEdit && !acts.extra && (
+        <button
+          type="button"
+          className="btn small ghost"
+          disabled={!aiFavor}
+          title={aiFavor ? t('actions.extraHint', { n: aiFavor }) : t('decl.noFavor')}
+          onClick={() => call('extra')}
+        >
+          +1 · {t('core.aiFavor')}
+        </button>
+      )}
+      {error && <span className="error tiny">{error}</span>}
+    </div>
   );
 }

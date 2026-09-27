@@ -29,6 +29,7 @@ export function partyView(data, withMana) {
       manaMax: d.manaMax ?? '',
       manaCurrent: d.manaCurrent ?? '',
       evade: { dexMod: d.evade?.dexMod ?? '', buffs: d.evade?.buffs ?? '' },
+      dr: { aiFavor: d.dr?.aiFavor ?? '' },
     });
   return view;
 }

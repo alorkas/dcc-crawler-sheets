@@ -13,6 +13,20 @@ const int = (v, d = 0) => {
 /** "11+F" → 11 + floor. */
 const withFloor = (v, floor) => resolveNum(v, floor) ?? 0;
 const clip = (v, n = 80) => String(v ?? '').slice(0, n);
+/** The combat-relevant part of a stat block: its attacks and Stat Mods (for "Str" in damage). */
+const npcCombat = (n) => ({
+  attacks: (Array.isArray(n.attacks) ? n.attacks : [])
+    .filter((a) => a && String(a.name ?? '').trim())
+    .slice(0, 12)
+    .map((a) => ({
+      name: clip(a.name),
+      toHit: clip(a.toHit, 20),
+      damage: clip(a.damage, 80),
+      range: clip(a.range, 40),
+      effect: clip(a.effect, 300),
+    })),
+  mods: Object.fromEntries(['str', 'int', 'con', 'dex', 'cha'].map((k) => [k, clip(n.stats?.[k]?.mod, 6)])),
+});
 
 export function mountGame(app, { db, auth, adminOnly, loadChar, live }) {
   /* ---------------- NPC stat blocks (GM only) ---------------- */
@@ -107,8 +121,35 @@ export function mountGame(app, { db, auth, adminOnly, loadChar, live }) {
       damage: d.damage,
     };
   };
+  /** Attacks of an opponent: from its stat block as it is now (so edits count), else the copy made when added. */
+  const attackSource = () => {
+    const cache = new Map();
+    return (o) => {
+      if (!o.npcId) return { attacks: o.attacks || [], mods: o.mods || {} };
+      if (!cache.has(o.npcId)) {
+        const row = db.prepare('SELECT data FROM npcs WHERE id = ?').get(o.npcId);
+        cache.set(o.npcId, row ? npcCombat(JSON.parse(row.data || '{}')) : null);
+      }
+      return cache.get(o.npcId) || { attacks: o.attacks || [], mods: o.mods || {} };
+    };
+  };
+  /** Crawler Actions this round: 2 each (+1 bought with AI Favor); Interrupts in phase 2 count against them. */
+  const ACTIONS = 2;
+  const actionsOf = (enc, cid) => {
+    enc.actions = enc.actions && typeof enc.actions === 'object' ? enc.actions : {};
+    const a = enc.actions[cid];
+    if (!a || a.round !== enc.round) enc.actions[cid] = { round: enc.round, used: [], extra: false };
+    return enc.actions[cid];
+  };
+  const actionsView = (enc) =>
+    Object.fromEntries(
+      Object.entries(enc.actions || {})
+        .filter(([, a]) => a.round === enc.round)
+        .map(([cid, a]) => [cid, { used: a.used, extra: a.extra, max: ACTIONS + (a.extra ? 1 : 0) }]),
+    );
   /** Players see names and a Health percentage (the book's "let the players know what percentage…"). */
-  const viewFor = (enc, admin) => ({
+  const viewFor = (enc, admin, src = attackSource()) => ({
+    actions: enc.active ? actionsView(enc) : {},
     active: enc.active,
     round: enc.round,
     phase: enc.phase,
@@ -120,7 +161,7 @@ export function mountGame(app, { db, auth, adminOnly, loadChar, live }) {
       .filter((o) => admin || !o.hidden)
       .map((o) =>
         admin
-          ? { ...o, pct: pct(o), defeated: o.lost >= o.slots }
+          ? { ...o, ...src(o), pct: pct(o), defeated: o.lost >= o.slots }
           : { id: o.id, name: o.name, kind: o.kind, pct: pct(o), defeated: o.lost >= o.slots },
       ),
   });
@@ -162,12 +203,14 @@ export function mountGame(app, { db, auth, adminOnly, loadChar, live }) {
         enc.floor = Math.max(1, ...floors);
       }
       enc.declarations = [];
+      enc.actions = {};
       combatEvent({ action: 'start', round: enc.round });
     } else if (action === 'next' && enc.active) {
       if (enc.round === 0 || enc.phase >= PHASES) {
         enc.round += 1;
         enc.phase = 1;
         enc.declarations = []; // a new round: the Mobs declare again
+        enc.actions = {}; // …and every crawler has 2 Actions again
         combatEvent({ action: 'round', round: enc.round });
       } else {
         enc.phase += 1;
@@ -183,6 +226,7 @@ export function mountGame(app, { db, auth, adminOnly, loadChar, live }) {
       combatEvent({ action: 'end', round: enc.round });
       enc.active = false;
       enc.declarations = [];
+      enc.actions = {};
       enc.opponents = enc.opponents.filter((o) => req.body?.keepOpponents && o.lost < o.slots);
     } else if (action === 'floor') {
       enc.floor = Math.max(1, int(req.body?.floor, 1));
@@ -220,24 +264,23 @@ export function mountGame(app, { db, auth, adminOnly, loadChar, live }) {
         evade: String(n.evade ?? ''),
         notes: '',
         npcId: row.id,
-        attacks: (Array.isArray(n.attacks) ? n.attacks : [])
-          .filter((a) => a && String(a.name ?? '').trim())
-          .slice(0, 12)
-          .map((a) => ({
-            name: clip(a.name),
-            toHit: clip(a.toHit, 20),
-            damage: clip(a.damage, 80),
-            range: clip(a.range, 40),
-            effect: clip(a.effect, 300),
-          })),
-        mods: Object.fromEntries(['str', 'int', 'con', 'dex', 'cha'].map((k) => [k, clip(n.stats?.[k]?.mod, 6)])),
+        ...npcCombat(n),
       };
     }
     const count = Math.min(20, Math.max(1, int(b.count, 1)));
-    const existing = enc.opponents.filter((o) => o.name.replace(/ \d+$/, '') === base.name).length;
+    // number copies of the same name: a lone "Goblin" becomes "Goblin 1" once a second one joins
+    const same = enc.opponents.filter((o) => o.name === base.name || o.name.startsWith(`${base.name} `));
+    const nums = same.map((o) => (o.name === base.name ? 1 : int(o.name.slice(base.name.length + 1), 0)));
+    let next = Math.max(0, ...nums);
+    const lone = enc.opponents.find((o) => o.name === base.name);
+    if (lone && count >= 1) {
+      lone.name = `${base.name} 1`;
+      for (const d of enc.declarations || []) if (d.opponentId === lone.id) d.opponentName = lone.name;
+    }
     for (let i = 0; i < count; i++) {
       enc.seq += 1;
-      const numbered = count > 1 || existing > 0 ? `${base.name} ${existing + i + 1}` : base.name;
+      next += 1;
+      const numbered = count > 1 || next > 1 ? `${base.name} ${next}` : base.name;
       enc.opponents.push({ ...base, id: enc.seq, name: numbered, lost: 0, hidden: !!b.hidden });
     }
     putEnc(enc);
@@ -296,7 +339,8 @@ export function mountGame(app, { db, auth, adminOnly, loadChar, live }) {
     const o = enc.opponents.find((x) => x.id === Number(b.opponentId));
     if (!o) return res.status(404).json({ error: 'Not found', code: 'not_found' });
     let attack;
-    if (Number.isInteger(b.attack) && o.attacks?.[b.attack]) attack = o.attacks[b.attack];
+    const current = attackSource()(o).attacks;
+    if (Number.isInteger(b.attack) && current[b.attack]) attack = current[b.attack];
     else if (b.attack && typeof b.attack === 'object')
       attack = {
         name: clip(b.attack.name) || '?',
@@ -341,23 +385,61 @@ export function mountGame(app, { db, auth, adminOnly, loadChar, live }) {
     res.json(viewFor(enc, true));
   });
 
-  // a targeted crawler (its owner or the GM) rolls Evade against the declared attack
+  /** Spend 1 AI Favor (the sheet's AI Favor box) and log it. False when there is none left. */
+  function spendFavor(cid, use, actorId) {
+    const row = charRow(cid);
+    const data = JSON.parse(row?.data || '{}');
+    const have = int(data.dr?.aiFavor, 0);
+    if (!row || have <= 0) return false;
+    data.dr = { ...(data.dr || {}), aiFavor: String(have - 1) };
+    writeSheet(row, data, actorId);
+    live.postEvent({
+      ownerId: row.owner_id,
+      characterId: row.id,
+      charName: clip(data.name),
+      event: { type: 'favor', use, from: have, to: have - 1 },
+      gmOnly: !row.party_since,
+    });
+    return true;
+  }
+  const canAct = (req, cid) => {
+    const c = db.prepare('SELECT id, owner_id, party_since FROM characters WHERE id = ?').get(cid);
+    return !!c && (c.owner_id === req.user.id || !!req.user.is_admin);
+  };
+
+  // a targeted crawler (its owner or the GM) rolls Evade against the declared attack.
+  // One Evade Action covers every attack against the crawler this round (a separate check for each).
+  // { reroll: true } spends 1 AI Favor to reroll a failed Evade once (not on a Natural 1).
   app.post('/api/encounter/declarations/:did/evade', auth, (req, res) => {
     const enc = getEnc();
     const d = findDecl(enc, req.params.did);
     const admin = !!req.user.is_admin;
     if (!d || (!admin && !revealed(enc))) return res.status(404).json({ error: 'Not found', code: 'not_found' });
     const target = d.targets.find((x) => x.id === Number(req.body?.characterId));
-    if (!target) return res.status(404).json({ error: 'Not found', code: 'not_found' });
-    const c = db.prepare('SELECT id, owner_id, party_since FROM characters WHERE id = ?').get(target.id);
-    if (!c || (c.owner_id !== req.user.id && !admin))
+    if (!target || !canAct(req, target.id))
       return res.status(404).json({ error: 'Character not found', code: 'char_not_found' });
-    if (target.evade && !admin) return res.status(409).json({ error: 'Already rolled', code: 'already_rolled' });
     const expr = String(req.body?.expr ?? 'd20').replace(/\s+/g, '');
     if (!/^1?d20([+-]\d{1,2})?$/i.test(expr)) return res.status(400).json({ error: 'Invalid dice', code: 'bad_dice' });
+    const reroll = !!req.body?.reroll;
+    const acts = actionsOf(enc, target.id);
+    if (reroll) {
+      const e = target.evade;
+      if (!e || e.success !== false || e.natural === 1 || e.rerolled)
+        return res.status(409).json({ error: 'Nothing to reroll', code: 'no_reroll' });
+      if (!spendFavor(target.id, 'reroll', req.user.id))
+        return res.status(409).json({ error: 'No AI Favor left', code: 'no_ai_favor' });
+    } else {
+      if (target.evade && !admin) return res.status(409).json({ error: 'Already rolled', code: 'already_rolled' });
+      if (!acts.used.includes('evade')) {
+        if (acts.used.length >= ACTIONS + (acts.extra ? 1 : 0) && !admin)
+          return res.status(409).json({ error: 'No Actions left', code: 'no_actions_left' });
+        acts.used.push('evade');
+      }
+    }
     const r = rollDice(expr);
     const success = d.dc === null ? null : r.total >= d.dc;
-    target.evade = { total: r.total, natural: r.natural, success };
+    const first = reroll ? target.evade.total : undefined;
+    target.evade = { total: r.total, natural: r.natural, success, ...(reroll ? { rerolled: true, first } : {}) };
     const o = enc.opponents.find((x) => x.id === d.opponentId);
     live.postRoll({
       userId: req.user.id,
@@ -365,12 +447,40 @@ export function mountGame(app, { db, auth, adminOnly, loadChar, live }) {
       charName: target.name,
       roll: {
         ...r,
-        label: `Evade · ${o?.hidden ? '???' : d.opponentName} – ${d.attack.name}`,
+        label: `${reroll ? 'Evade reroll (AI Favor)' : 'Evade'} · ${o?.hidden ? '???' : d.opponentName} – ${d.attack.name}`,
         vs: { dc: d.dc, success },
       },
     });
     putEnc(enc);
     res.json(viewFor(enc, admin));
+  });
+
+  // mark a crawler's Actions: { op: 'use', kind: 'interrupt' | 'action' }, { op: 'free', index },
+  // or { op: 'extra' } to buy a 3rd (non-Attack) Action with 1 AI Favor, once per round
+  app.post('/api/encounter/actions', auth, (req, res) => {
+    const enc = getEnc();
+    const cid = Number(req.body?.characterId);
+    if (!enc.active || !canAct(req, cid)) return res.status(404).json({ error: 'Not found', code: 'not_found' });
+    const inParty = db.prepare('SELECT party_since FROM characters WHERE id = ?').get(cid)?.party_since;
+    if (!inParty) return res.status(404).json({ error: 'Not found', code: 'not_found' });
+    const a = actionsOf(enc, cid);
+    const max = ACTIONS + (a.extra ? 1 : 0);
+    const op = req.body?.op;
+    if (op === 'use') {
+      if (a.used.length >= max) return res.status(409).json({ error: 'No Actions left', code: 'no_actions_left' });
+      a.used.push(req.body?.kind === 'interrupt' ? 'interrupt' : 'action');
+    } else if (op === 'free') {
+      const i = int(req.body?.index, -1);
+      if (i < 0 || i >= a.used.length) return res.status(400).json({ error: 'Bad index', code: 'bad_request' });
+      a.used.splice(i, 1);
+    } else if (op === 'extra') {
+      if (a.extra) return res.status(409).json({ error: 'Once per round', code: 'already_extra' });
+      if (!spendFavor(cid, 'action', req.user.id))
+        return res.status(409).json({ error: 'No AI Favor left', code: 'no_ai_favor' });
+      a.extra = true;
+    } else return res.status(400).json({ error: 'Unknown action', code: 'bad_request' });
+    putEnc(enc);
+    res.json(viewFor(enc, !!req.user.is_admin));
   });
 
   // Mob Attack Resolution: the GM rolls the declared attack's damage (public, unless the Mob is hidden)
@@ -379,7 +489,7 @@ export function mountGame(app, { db, auth, adminOnly, loadChar, live }) {
     const d = findDecl(enc, req.params.did);
     if (!d) return res.status(404).json({ error: 'Not found', code: 'not_found' });
     const o = enc.opponents.find((x) => x.id === d.opponentId);
-    const expr = damageDice(d.attack.damage, enc.floor, o?.mods);
+    const expr = damageDice(d.attack.damage, enc.floor, o ? attackSource()(o).mods : {});
     const r = expr ? rollDice(expr) : null;
     if (!r) return res.status(400).json({ error: 'No dice in this damage entry', code: 'bad_dice' });
     d.damage = { total: r.total, expr };

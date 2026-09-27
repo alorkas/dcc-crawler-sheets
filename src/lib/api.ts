@@ -106,6 +106,7 @@ export type LogEvent =
     }
   | { type: 'combat'; action: 'start' | 'round' | 'end'; round: number }
   | { type: 'opponent'; name: string; from: number; to: number; defeated: boolean; source: string }
+  | { type: 'favor'; use: 'reroll' | 'action'; from: number; to: number }
   | {
       type: 'declare';
       round: number;
@@ -150,7 +151,14 @@ export type Declaration = {
   targets: {
     id: number;
     name: string;
-    evade: { total: number; natural: number | null; success: boolean | null } | null;
+    evade: {
+      total: number;
+      natural: number | null;
+      success: boolean | null;
+      /** Rerolled with AI Favor (once per check); `first` is the original total. */
+      rerolled?: boolean;
+      first?: number;
+    } | null;
     applied: { damage: number; slots: number } | null;
   }[];
   damage: { total: number; expr: string } | null;
@@ -162,7 +170,12 @@ export type Encounter = {
   floor: number;
   opponents: Opponent[];
   declarations: Declaration[];
+  /** Crawler Actions used this round, by character id (missing = none used yet). */
+  actions: Record<string, CrawlerActions>;
 };
+/** 'evade' / 'interrupt' are Crawler Reaction Interrupts, 'action' is a Crawler Action (step 4). */
+export type ActionKind = 'evade' | 'interrupt' | 'action';
+export type CrawlerActions = { used: ActionKind[]; extra: boolean; max: number };
 export type NpcData = {
   name: string;
   kind: OpponentKind;
@@ -266,8 +279,13 @@ export const api = {
   declare: (d: { opponentId: number; attack: number | Partial<NpcAttack>; targets: number[] }) =>
     request<Encounter>('POST', '/api/encounter/declarations', d),
   removeDeclaration: (id: number) => request<Encounter>('DELETE', `/api/encounter/declarations/${id}`),
-  rollEvade: (id: number, characterId: number, expr: string) =>
-    request<Encounter>('POST', `/api/encounter/declarations/${id}/evade`, { characterId, expr }),
+  rollEvade: (id: number, characterId: number, expr: string, reroll = false) =>
+    request<Encounter>('POST', `/api/encounter/declarations/${id}/evade`, { characterId, expr, reroll }),
+  crawlerAction: (
+    characterId: number,
+    op: 'use' | 'free' | 'extra',
+    extra: { kind?: ActionKind; index?: number } = {},
+  ) => request<Encounter>('POST', '/api/encounter/actions', { characterId, op, ...extra }),
   rollDeclDamage: (id: number) => request<Encounter>('POST', `/api/encounter/declarations/${id}/damage`, {}),
   markTarget: (
     id: number,

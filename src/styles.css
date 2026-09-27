@@ -3655,3 +3655,78 @@ ul.plain {
   letter-spacing: 0.05em;
   text-transform: uppercase;
 }
+/* a select inside a (column) field: don't let the row-layout flex basis stretch it vertically */
+.field > .in.sel {
+  flex: 0 0 auto;
+  width: 100%;
+}
+.atk-declared {
+  flex-basis: 100%;
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  font-size: 0.76rem;
+  color: var(--green);
+}
+.action-row {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  flex-wrap: wrap;
+}
+.action-row .lbl {
+  margin: 0;
+}
+.pips {
+  display: inline-flex;
+  gap: 0.25rem;
+}
+.pip {
+  width: 16px;
+  height: 16px;
+  padding: 0;
+  border-radius: 50%;
+  border: 2px solid var(--gold);
+  background: transparent;
+  cursor: pointer;
+}
+.pip.used {
+  background: var(--border-2);
+  border-color: var(--border-2);
+}
+.pip.used.k-evade,
+.pip.used.k-interrupt {
+  background: #4f8cff;
+  border-color: #4f8cff;
+}
+.pip:disabled {
+  cursor: default;
+}
+.pip:not(:disabled):hover {
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--gold) 40%, transparent);
+}
+.npc-fight {
+  margin-bottom: 1rem;
+}
+.npc-fight .card-body {
+  display: flex;
+  flex-direction: column;
+  gap: 0.6rem;
+}
+.npc-copy {
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+  padding: 0.5rem 0.6rem;
+  border-radius: var(--radius);
+  background: var(--bg-2);
+  border: 1px solid var(--border);
+}
+.npc-copy.defeated {
+  opacity: 0.55;
+}
+.npc-copy-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}

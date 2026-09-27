@@ -446,3 +446,96 @@ test('Mob Action Declaration: secret in phase 1, revealed in phase 2, Evade and 
   await dm('POST', '/api/encounter', { action: 'end' });
   await dm('PATCH', `/api/characters/${c.body.id}/party`, { inParty: false });
 });
+
+test('crawler Actions, AI Favor rerolls, numbering and live stat block attacks', async () => {
+  const pl = client();
+  const dm = client();
+  await pl('POST', '/api/auth/register', { username: 'act1', password: 'password1' });
+  await dm('POST', '/api/auth/login', { username: 'dm', password: 'adminpass123' });
+  const npc = await dm('POST', '/api/npcs', {
+    data: { name: 'Goblin', slots: '2', slotValue: '2', attacks: [{ name: 'Stab', toHit: '40', damage: '1d4' }] },
+  });
+  const c = await pl('POST', '/api/characters', { data: { name: 'Tess', dr: { aiFavor: '1' } } });
+  await pl('POST', `/api/characters/${c.body.id}/lock`, { locked: true });
+  await dm('PATCH', `/api/characters/${c.body.id}/party`, { inParty: true });
+  await dm('POST', '/api/encounter', { action: 'start', floor: 1 });
+
+  // a lone "Goblin" becomes "Goblin 1" when a second joins
+  await dm('POST', '/api/encounter/opponents', { npcId: npc.body.id });
+  let enc = (await dm('POST', '/api/encounter/opponents', { npcId: npc.body.id })).body;
+  assert.deepEqual(
+    enc.opponents.map((o) => o.name),
+    ['Goblin 1', 'Goblin 2'],
+  );
+  // attacks come from the stat block as it is now
+  await dm('PUT', `/api/npcs/${npc.body.id}`, {
+    data: {
+      ...npc.body.data,
+      attacks: [
+        { name: 'Stab', toHit: '40' },
+        { name: 'Bite', toHit: '41', damage: '1d6' },
+      ],
+    },
+  });
+  enc = (await dm('GET', '/api/encounter')).body;
+  assert.deepEqual(
+    enc.opponents[1].attacks.map((a) => a.name),
+    ['Stab', 'Bite'],
+  );
+  // each copy declares on its own
+  const [g1, g2] = enc.opponents;
+  await dm('POST', '/api/encounter/declarations', { opponentId: g1.id, attack: 0, targets: [c.body.id] });
+  enc = (await dm('POST', '/api/encounter/declarations', { opponentId: g2.id, attack: 1, targets: [c.body.id] })).body;
+  assert.deepEqual(
+    enc.declarations.map((d) => [d.opponentName, d.attack.name, d.dc]),
+    [
+      ['Goblin 1', 'Stab', 40],
+      ['Goblin 2', 'Bite', 41],
+    ],
+  );
+  await dm('POST', '/api/encounter', { action: 'next' });
+
+  // Evade (can't succeed vs 40): uses 1 Action for both attacks
+  const [d1, d2] = enc.declarations;
+  await pl('POST', `/api/encounter/declarations/${d1.id}/evade`, { characterId: c.body.id, expr: 'd20' });
+  enc = (await pl('POST', `/api/encounter/declarations/${d2.id}/evade`, { characterId: c.body.id, expr: 'd20' })).body;
+  assert.deepEqual(enc.actions[c.body.id].used, ['evade']);
+  assert.equal(enc.declarations[0].targets[0].evade.success, false);
+
+  // AI Favor reroll: once, spends the sheet's AI Favor even though the sheet is locked
+  const nat1 = enc.declarations[0].targets[0].evade.natural === 1;
+  const rr = await pl('POST', `/api/encounter/declarations/${d1.id}/evade`, {
+    characterId: c.body.id,
+    expr: 'd20',
+    reroll: true,
+  });
+  if (nat1) assert.equal(rr.status, 409);
+  else {
+    assert.equal(rr.status, 200);
+    assert.equal(rr.body.declarations[0].targets[0].evade.rerolled, true);
+    assert.equal((await pl('GET', `/api/characters/${c.body.id}`)).body.data.dr.aiFavor, '0');
+    const again = await pl('POST', `/api/encounter/declarations/${d2.id}/evade`, {
+      characterId: c.body.id,
+      expr: 'd20',
+      reroll: true,
+    });
+    assert.equal(again.body.code, 'no_ai_favor');
+    const log = (await pl('GET', '/api/messages')).body;
+    assert.ok(log.some((m) => m.event?.type === 'favor' && m.event.use === 'reroll'));
+  }
+
+  // one Action left for step 4, then none
+  enc = (await pl('POST', '/api/encounter/actions', { characterId: c.body.id, op: 'use', kind: 'action' })).body;
+  assert.equal(enc.actions[c.body.id].used.length, 2);
+  const full = await pl('POST', '/api/encounter/actions', { characterId: c.body.id, op: 'use' });
+  assert.equal(full.body.code, 'no_actions_left');
+  enc = (await pl('POST', '/api/encounter/actions', { characterId: c.body.id, op: 'free', index: 1 })).body;
+  assert.equal(enc.actions[c.body.id].used.length, 1);
+
+  // a new round: Actions reset
+  for (let i = 0; i < 4; i++) await dm('POST', '/api/encounter', { action: 'next' });
+  enc = (await pl('GET', '/api/encounter')).body;
+  assert.equal(enc.actions[c.body.id], undefined);
+  await dm('POST', '/api/encounter', { action: 'end' });
+  await dm('PATCH', `/api/characters/${c.body.id}/party`, { inParty: false });
+});
