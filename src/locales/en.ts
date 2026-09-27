@@ -920,6 +920,18 @@ export const en = {
   'world.dh': '{d} d {h} h',
   'world.h': '{h} h',
   'log.ev.floor': 'The party is now on Floor {n}: {name}',
+  'view.menu': 'View as a player…',
+  'view.title': 'View as a player',
+  'view.hint':
+    'See the app exactly as a player does (their sheets, the party, the log, combat). It is read-only: nothing can be changed until you go back to the GM view.',
+  'view.who': 'Whose view',
+  'view.self': 'Myself, without GM rights',
+  'view.chars': '{n} crawlers',
+  'view.start': 'View as player',
+  'view.banner': 'Viewing as {name} (read-only)',
+  'view.bannerSelf': 'Viewing as a player (read-only)',
+  'view.back': 'Back to GM view',
+  'err.view_only': 'Read-only while viewing as a player',
 };
 
 export type Messages = { [K in keyof typeof en]: string };

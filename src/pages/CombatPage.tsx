@@ -20,11 +20,12 @@ export default function CombatPage() {
         </div>
       </div>
       <div className="combat-page-head">
-        <CombatHeader />
+        <CombatHeader wide />
       </div>
       {active && (
         <div className="combat-cols">
           <section className="combat-col">
+            <Declarations />
             <h2 className="side-sub">
               {t('combat.crawlers')} <span className="count-badge">{members.length}</span>
             </h2>
@@ -36,7 +37,6 @@ export default function CombatPage() {
             </div>
           </section>
           <section className="combat-col">
-            <Declarations />
             <Opponents wide />
           </section>
         </div>

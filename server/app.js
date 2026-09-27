@@ -11,6 +11,7 @@ import { mountWorld } from './world.js';
 import { applyPlay } from '../shared/lockRules.js';
 
 const COOKIE = 'dcc_session';
+const VIEW_COOKIE = 'dcc_view_as';
 const USERNAME_RE = /^[a-zA-Z0-9_.-]{3,32}$/;
 
 export function createApp({ db, jwtSecret, allowRegistration = true, cookieSecure = false, staticDir }) {
@@ -76,6 +77,19 @@ export function createApp({ db, jwtSecret, allowRegistration = true, cookieSecur
       const user = q.userById.get(uid);
       if (!user) return res.status(401).json({ error: 'Account no longer exists', code: 'account_gone' });
       req.user = user;
+      // an admin "viewing as" a player: requests run as that player (or as themselves without GM rights),
+      // read-only, so the GM can see exactly what a player sees
+      const view = req.cookies[VIEW_COOKIE];
+      if (view && user.is_admin) {
+        const target = view === 'self' ? { ...user, is_admin: 0 } : q.userById.get(Number(view));
+        if (target && !(target.is_admin && target.id !== user.id)) {
+          req.realUser = user;
+          req.user = target.id === user.id ? { ...user, is_admin: 0 } : target;
+          const allowed = ['/api/auth/view-as', '/api/auth/logout'];
+          if (req.method !== 'GET' && !allowed.includes(req.originalUrl.split('?')[0]))
+            return res.status(403).json({ error: 'Read-only while viewing as a player', code: 'view_only' });
+        }
+      }
       next();
     } catch {
       res.status(401).json({ error: 'Session expired', code: 'session_expired' });
@@ -143,10 +157,40 @@ export function createApp({ db, jwtSecret, allowRegistration = true, cookieSecur
 
   app.post('/api/auth/logout', (_req, res) => {
     res.clearCookie(COOKIE);
+    res.clearCookie(VIEW_COOKIE);
     res.json({ ok: true });
   });
 
-  app.get('/api/auth/me', auth, (req, res) => res.json(publicUser(req.user)));
+  app.get('/api/auth/me', auth, (req, res) =>
+    res.json({
+      ...publicUser(req.user),
+      ...(req.realUser ? { viewAs: true, realUser: publicUser(req.realUser) } : {}),
+    }),
+  );
+
+  // GM: see the app as a player. { userId: <player id> | 'self' } starts it, { userId: null } goes back.
+  app.post('/api/auth/view-as', auth, (req, res) => {
+    const real = req.realUser ?? req.user;
+    if (!real.is_admin) return res.status(403).json({ error: 'Admin only', code: 'admin_only' });
+    const id = req.body?.userId;
+    if (id === null || id === undefined) {
+      res.clearCookie(VIEW_COOKIE);
+      return res.json(publicUser(real));
+    }
+    let target;
+    if (id === 'self') target = { ...real, is_admin: 0 };
+    else {
+      target = q.userById.get(Number(id));
+      if (!target || target.is_admin) return res.status(400).json({ error: 'Pick a player', code: 'bad_request' });
+    }
+    res.cookie(VIEW_COOKIE, id === 'self' ? 'self' : String(target.id), {
+      httpOnly: true,
+      sameSite: 'lax',
+      secure: cookieSecure,
+      maxAge: 12 * 3600 * 1000,
+    });
+    res.json({ ...publicUser(target), viewAs: true, realUser: publicUser(real) });
+  });
 
   app.post('/api/auth/password', auth, (req, res) => {
     const { currentPassword = '', newPassword = '' } = req.body || {};

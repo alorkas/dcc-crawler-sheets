@@ -1,6 +1,13 @@
 import type { LevelEntry, SheetData } from './sheet';
 
-export type User = { id: number; username: string; isAdmin: boolean };
+export type User = {
+  id: number;
+  username: string;
+  isAdmin: boolean;
+  /** A GM viewing the app as a player (read-only): `realUser` is the GM. */
+  viewAs?: boolean;
+  realUser?: { id: number; username: string; isAdmin: boolean };
+};
 export type AdminUser = User & { createdAt: string; characters: number };
 
 export type CharacterSummary = {
@@ -309,6 +316,7 @@ export const api = {
   login: (username: string, password: string) => request<User>('POST', '/api/auth/login', { username, password }),
   register: (username: string, password: string) => request<User>('POST', '/api/auth/register', { username, password }),
   logout: () => request('POST', '/api/auth/logout'),
+  viewAs: (userId: number | 'self' | null) => request<User>('POST', '/api/auth/view-as', { userId }),
   changePassword: (currentPassword: string, newPassword: string) =>
     request('POST', '/api/auth/password', { currentPassword, newPassword }),
 

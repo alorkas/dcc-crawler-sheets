@@ -7,15 +7,23 @@ let server;
 let base;
 
 function client() {
-  let cookie = '';
+  const jar = new Map();
   return async (method, url, body) => {
     const res = await fetch(base + url, {
       method,
-      headers: { 'content-type': 'application/json', cookie },
+      headers: {
+        'content-type': 'application/json',
+        cookie: [...jar].map(([k, v]) => `${k}=${v}`).join('; '),
+      },
       body: body ? JSON.stringify(body) : undefined,
     });
-    const set = res.headers.get('set-cookie');
-    if (set) cookie = set.split(';')[0];
+    for (const c of res.headers.getSetCookie()) {
+      const [kv, ...attrs] = c.split(';');
+      const [k, v] = kv.split('=');
+      const cleared = attrs.some((a) => /expires=Thu, 01 Jan 1970/i.test(a)) || v === '';
+      if (cleared) jar.delete(k.trim());
+      else jar.set(k.trim(), v);
+    }
     return { status: res.status, body: await res.json().catch(() => null) };
   };
 }
@@ -733,4 +741,34 @@ test('World Stats: everyone reads them, the GM changes the Floor, time and texts
   await dm('POST', '/api/encounter', { action: 'end' });
   await dm('PATCH', `/api/characters/${c.body.id}/party`, { inParty: false });
   await dm('PATCH', '/api/world', { floor: 1 });
+});
+
+test('GM "view as player": read-only, sees what that player sees', async () => {
+  const dm = client();
+  const pl = client();
+  await dm('POST', '/api/auth/login', { username: 'dm', password: 'adminpass123' });
+  const reg = await pl('POST', '/api/auth/register', { username: 'viewme', password: 'password1' });
+  const mine = await pl('POST', '/api/characters', { data: { name: 'Viewed' } });
+  assert.equal((await pl('POST', '/api/auth/view-as', { userId: 'self' })).status, 403, 'players cannot');
+
+  const r = await dm('POST', '/api/auth/view-as', { userId: reg.body.id });
+  assert.deepEqual([r.body.username, r.body.viewAs, r.body.realUser.username], ['viewme', true, 'dm']);
+  const me = (await dm('GET', '/api/auth/me')).body;
+  assert.deepEqual([me.username, me.isAdmin, me.viewAs], ['viewme', false, true]);
+  const list = (await dm('GET', '/api/characters')).body;
+  assert.deepEqual(
+    list.map((c) => c.id),
+    [mine.body.id],
+  );
+  assert.equal((await dm('GET', '/api/npcs')).status, 403, 'no GM pages');
+  const put = await dm('PUT', `/api/characters/${mine.body.id}`, { data: {}, version: 1 });
+  assert.deepEqual([put.status, put.body.code], [403, 'view_only']);
+  assert.equal((await dm('POST', '/api/messages', { text: 'hi' })).status, 403);
+
+  // as themselves without GM rights, then back
+  assert.equal((await dm('POST', '/api/auth/view-as', { userId: 'self' })).body.isAdmin, false);
+  assert.equal((await dm('GET', '/api/auth/me')).body.username, 'dm');
+  assert.equal((await dm('GET', '/api/npcs')).status, 403);
+  const back = await dm('POST', '/api/auth/view-as', { userId: null });
+  assert.equal(back.body.isAdmin, true);
 });

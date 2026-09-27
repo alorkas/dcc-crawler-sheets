@@ -926,4 +926,16 @@ export const es: Messages = {
   'world.dh': '{d} d {h} h',
   'world.h': '{h} h',
   'log.ev.floor': 'El grupo está ahora en el Piso {n}: {name}',
+  'view.menu': 'Ver como jugador…',
+  'view.title': 'Ver como jugador',
+  'view.hint':
+    'Ve la app exactamente como la ve un jugador (sus hojas, el grupo, el registro, el combate). Es de solo lectura: no se puede cambiar nada hasta que vuelvas a la vista de DJ.',
+  'view.who': 'Qué vista',
+  'view.self': 'Yo mismo, sin permisos de DJ',
+  'view.chars': '{n} crawlers',
+  'view.start': 'Ver como jugador',
+  'view.banner': 'Viendo como {name} (solo lectura)',
+  'view.bannerSelf': 'Viendo como jugador (solo lectura)',
+  'view.back': 'Volver a la vista de DJ',
+  'err.view_only': 'Solo lectura mientras ves la app como jugador',
 };

@@ -1,7 +1,7 @@
-import { useState, type FormEvent, type ReactNode } from 'react';
+import { useEffect, useState, type FormEvent, type ReactNode } from 'react';
 import { BrowserRouter, Navigate, NavLink, Route, Routes, useLocation } from 'react-router-dom';
 import { AuthProvider, useAuth } from './lib/auth';
-import { api } from './lib/api';
+import { api, type AdminUser } from './lib/api';
 import { I18nProvider, LanguageSwitcher, useI18n } from './lib/i18n';
 import LoginPage from './pages/LoginPage';
 import Dashboard from './pages/Dashboard';
@@ -56,9 +56,11 @@ function Layout({ children }: { children: ReactNode }) {
   const { user, logout } = useAuth();
   const { t } = useI18n();
   const [pwOpen, setPwOpen] = useState(false);
+  const [viewOpen, setViewOpen] = useState(false);
   const onCombat = useLocation().pathname === '/combat';
   return (
-    <div className="app">
+    <div className={`app ${user?.viewAs ? 'viewing-as' : ''}`}>
+      {user?.viewAs && <ViewAsBanner name={user.username} self={user.id === user.realUser?.id} />}
       <header className="topbar">
         <NavLink to="/" className="brand">
           <span className="brand-a">{t('brand.a')}</span>
@@ -81,9 +83,16 @@ function Layout({ children }: { children: ReactNode }) {
             {user?.isAdmin && <span className="pill gold">{t('user.admin')}</span>}
           </summary>
           <div className="menu-pop right">
-            <button type="button" onClick={() => setPwOpen(true)}>
-              {t('user.changePassword')}
-            </button>
+            {user?.isAdmin && (
+              <button type="button" onClick={() => setViewOpen(true)}>
+                {t('view.menu')}
+              </button>
+            )}
+            {!user?.viewAs && (
+              <button type="button" onClick={() => setPwOpen(true)}>
+                {t('user.changePassword')}
+              </button>
+            )}
             <button type="button" onClick={logout}>
               {t('user.logout')}
             </button>
@@ -97,6 +106,7 @@ function Layout({ children }: { children: ReactNode }) {
         <LogPanel />
       </div>
       {pwOpen && <PasswordDialog onClose={() => setPwOpen(false)} />}
+      {viewOpen && <ViewAsDialog onClose={() => setViewOpen(false)} />}
     </div>
   );
 }
@@ -160,6 +170,76 @@ function PasswordDialog({ onClose }: { onClose: () => void }) {
           {!done && <button className="btn primary">{t('common.save')}</button>}
         </div>
       </form>
+    </div>
+  );
+}
+
+/** Shown while a GM views the app as a player. */
+function ViewAsBanner({ name, self }: { name: string; self: boolean }) {
+  const { t } = useI18n();
+  return (
+    <div className="view-as-banner" role="status">
+      <span>👁 {self ? t('view.bannerSelf') : t('view.banner', { name })}</span>
+      <button
+        type="button"
+        className="btn small"
+        onClick={async () => {
+          await api.viewAs(null).catch(() => {});
+          window.location.assign('/');
+        }}
+      >
+        {t('view.back')}
+      </button>
+    </div>
+  );
+}
+
+/** GM: pick a player to see the app as (read-only), or yourself without GM rights. */
+function ViewAsDialog({ onClose }: { onClose: () => void }) {
+  const { t, err } = useI18n();
+  const [users, setUsers] = useState<AdminUser[] | null>(null);
+  const [pick, setPick] = useState<string>('self');
+  const [error, setError] = useState('');
+  useEffect(() => {
+    api
+      .listUsers()
+      .then((l) => setUsers(l.filter((u) => !u.isAdmin)))
+      .catch((e) => setError(err(e)));
+  }, [err]);
+  const go = async () => {
+    try {
+      await api.viewAs(pick === 'self' ? 'self' : Number(pick));
+      window.location.assign('/');
+    } catch (e) {
+      setError(err(e));
+    }
+  };
+  return (
+    <div className="modal-back" onClick={onClose}>
+      <div className="modal" onClick={(e) => e.stopPropagation()}>
+        <h2>{t('view.title')}</h2>
+        <p className="dim small">{t('view.hint')}</p>
+        <label className="field">
+          <span className="lbl">{t('view.who')}</span>
+          <select className="in sel" value={pick} onChange={(e) => setPick(e.target.value)}>
+            <option value="self">{t('view.self')}</option>
+            {(users ?? []).map((u) => (
+              <option key={u.id} value={u.id}>
+                {u.username} ({t('view.chars', { n: u.characters })})
+              </option>
+            ))}
+          </select>
+        </label>
+        {error && <p className="error">{error}</p>}
+        <div className="modal-actions">
+          <button type="button" className="btn ghost" onClick={onClose}>
+            {t('common.close')}
+          </button>
+          <button type="button" className="btn primary" onClick={go}>
+            {t('view.start')}
+          </button>
+        </div>
+      </div>
     </div>
   );
 }

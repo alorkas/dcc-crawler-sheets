@@ -28,7 +28,7 @@ const withFloor = (v: string | undefined, floor: number) => {
 };
 
 /** Round counter, the 5 phases of a combat round, and GM controls. Shown at the top of the party panel. */
-export function CombatHeader() {
+export function CombatHeader({ wide = false }: { wide?: boolean }) {
   const { t } = useI18n();
   const { user } = useAuth();
   const { encounter, setEncounter, party } = useLive();
@@ -72,6 +72,33 @@ export function CombatHeader() {
 
   const e = encounter;
   const isSurprise = e.round === 0;
+  if (wide) {
+    // Combat page: a full-width stepper, with the current phase's reminder underneath
+    return (
+      <div className="combat combat-wide">
+        <div className="combat-wide-top">
+          <span className="combat-round">
+            ⚔ {isSurprise ? t('combat.surpriseRound') : t('combat.round', { n: e.round })}
+          </span>
+          {!isSurprise && (
+            <ol className="stepper">
+              {PHASES.map((p) => (
+                <li key={p} className={p === e.phase ? 'current' : p < e.phase ? 'done' : ''}>
+                  <span className="phase-num">{p}</span>
+                  <span className="phase-name">{t(`combat.phase.${p}` as MsgKey)}</span>
+                </li>
+              ))}
+            </ol>
+          )}
+          {gm && <CombatControls e={e} busy={busy} act={act} />}
+        </div>
+        <div className="stepper-hint">
+          {isSurprise ? t('combat.surpriseHint') : t(`combat.phase.${e.phase}.hint` as MsgKey)}
+          {!isSurprise && e.phase === 5 && <CleanUpReminders members={party ?? []} />}
+        </div>
+      </div>
+    );
+  }
   return (
     <div className="combat">
       <div className="combat-head">
@@ -97,33 +124,48 @@ export function CombatHeader() {
           ))}
         </ol>
       )}
-      {gm && (
-        <div className="combat-ctrl">
-          <button
-            type="button"
-            className="btn small ghost"
-            disabled={busy || (e.round <= 1 && e.phase === 1)}
-            onClick={() => act('prev')}
-            aria-label={t('combat.prev')}
-            title={t('combat.prev')}
-          >
-            ◂
-          </button>
-          <button type="button" className="btn small primary grow" disabled={busy} onClick={() => act('next')}>
-            {isSurprise || e.phase === 5 ? t('combat.nextRound') : t('combat.nextPhase')} ▸
-          </button>
-          <button
-            type="button"
-            className="btn small ghost"
-            disabled={busy}
-            onClick={() => {
-              if (confirm(t('combat.endConfirm'))) act('end');
-            }}
-          >
-            {t('combat.end')}
-          </button>
-        </div>
-      )}
+      {gm && <CombatControls e={e} busy={busy} act={act} />}
+    </div>
+  );
+}
+
+/** GM: previous / next phase (or round) / end combat. */
+function CombatControls({
+  e,
+  busy,
+  act,
+}: {
+  e: { round: number; phase: number };
+  busy: boolean;
+  act: (action: 'start' | 'next' | 'prev' | 'end') => void;
+}) {
+  const { t } = useI18n();
+  const isSurprise = e.round === 0;
+  return (
+    <div className="combat-ctrl">
+      <button
+        type="button"
+        className="btn small ghost"
+        disabled={busy || (e.round <= 1 && e.phase === 1)}
+        onClick={() => act('prev')}
+        aria-label={t('combat.prev')}
+        title={t('combat.prev')}
+      >
+        ◂
+      </button>
+      <button type="button" className="btn small primary grow" disabled={busy} onClick={() => act('next')}>
+        {isSurprise || e.phase === 5 ? t('combat.nextRound') : t('combat.nextPhase')} ▸
+      </button>
+      <button
+        type="button"
+        className="btn small ghost"
+        disabled={busy}
+        onClick={() => {
+          if (confirm(t('combat.endConfirm'))) act('end');
+        }}
+      >
+        {t('combat.end')}
+      </button>
     </div>
   );
 }
