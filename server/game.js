@@ -56,7 +56,7 @@ export function mountGame(app, { db, auth, adminOnly, loadChar, live }) {
     const update = db.prepare(`UPDATE npcs SET data = ? WHERE id = ?`);
     let added = 0;
     let updated = 0;
-    for (const { prevNotes = [], prevDescriptions = [], ...n } of BOOK_NPCS) {
+    for (const { prevNotes = [], prevDescriptions = [], prevDescriptionsEs = [], ...n } of BOOK_NPCS) {
       const old = have.get(`${n.name}|${n.source}`);
       if (!old) {
         insert.run(JSON.stringify(n));
@@ -68,7 +68,8 @@ export function mountGame(app, { db, auth, adminOnly, loadChar, live }) {
       const next = { ...old.d, kind: n.kind, floor: n.floor, chapter: n.chapter };
       if (!old.d.notes || prevNotes.includes(old.d.notes)) next.notes = n.notes;
       if (!old.d.description || prevDescriptions.includes(old.d.description)) next.description = n.description;
-      if (!old.d.descriptionEs) next.descriptionEs = n.descriptionEs;
+      if (!old.d.descriptionEs || prevDescriptionsEs.includes(old.d.descriptionEs))
+        next.descriptionEs = n.descriptionEs;
       if (JSON.stringify(next) !== JSON.stringify(old.d)) {
         update.run(JSON.stringify(next), old.id);
         updated++;
@@ -98,6 +99,10 @@ export function mountGame(app, { db, auth, adminOnly, loadChar, live }) {
   });
 
   /* ---------------- combat tracker ---------------- */
+  const worldFloor = () => {
+    const row = db.prepare(`SELECT value FROM kv WHERE key = 'world'`).get();
+    return Math.max(1, int(row ? JSON.parse(row.value).floor : 1, 1));
+  };
   const EMPTY = { active: false, round: 0, phase: 1, floor: 1, opponents: [], seq: 0, declarations: [] };
   const getEnc = () => {
     const row = db.prepare(`SELECT value FROM kv WHERE key = 'encounter'`).get();
@@ -134,7 +139,19 @@ export function mountGame(app, { db, auth, adminOnly, loadChar, live }) {
       if (!o.npcId) return { attacks: o.attacks || [], mods: o.mods || {} };
       if (!cache.has(o.npcId)) {
         const row = db.prepare('SELECT data FROM npcs WHERE id = ?').get(o.npcId);
-        cache.set(o.npcId, row ? npcCombat(JSON.parse(row.data || '{}')) : null);
+        const n = row ? JSON.parse(row.data || '{}') : null;
+        // plus the stat block's notes and System AI text, for the GM's full-size combat view
+        cache.set(
+          o.npcId,
+          n
+            ? {
+                ...npcCombat(n),
+                npcNotes: clip(n.notes, 4000),
+                npcDescription: clip(n.description, 2000),
+                npcDescriptionEs: clip(n.descriptionEs, 2000),
+              }
+            : null,
+        );
       }
       return cache.get(o.npcId) || { attacks: o.attacks || [], mods: o.mods || {} };
     };
@@ -204,15 +221,8 @@ export function mountGame(app, { db, auth, adminOnly, loadChar, live }) {
       enc.active = true;
       enc.round = req.body?.surprise ? 0 : 1; // round 0 = the crawlers' surprise round
       enc.phase = 1;
-      if (req.body?.floor !== undefined) enc.floor = Math.max(1, int(req.body.floor, 1));
-      else {
-        // default: the deepest Floor among the party members
-        const floors = db
-          .prepare('SELECT data FROM characters WHERE party_since IS NOT NULL')
-          .all()
-          .map((r) => int(JSON.parse(r.data || '{}').floor, 0));
-        enc.floor = Math.max(1, ...floors);
-      }
+      // the Floor comes from World Stats (the GM can still pass one)
+      enc.floor = req.body?.floor !== undefined ? Math.max(1, int(req.body.floor, 1)) : worldFloor();
       enc.declarations = [];
       enc.actions = {};
       enc.attacks = [];
@@ -756,4 +766,20 @@ export function mountGame(app, { db, auth, adminOnly, loadChar, live }) {
     }
     res.json({ members: out });
   });
+
+  /** World Stats changed the Floor: the fight follows, and (optionally) every party sheet's Floor field. */
+  function setFloor(floor, syncParty) {
+    const enc = getEnc();
+    if (enc.floor !== floor) {
+      enc.floor = floor;
+      putEnc(enc);
+    }
+    if (!syncParty) return;
+    for (const { id } of db.prepare('SELECT id FROM characters WHERE party_since IS NOT NULL').all()) {
+      const row = charRow(id);
+      const data = JSON.parse(row.data || '{}');
+      if (String(data.floor ?? '') !== String(floor)) writeSheet(row, { ...data, floor: String(floor) }, null);
+    }
+  }
+  return { setFloor };
 }

@@ -107,6 +107,7 @@ export type LogEvent =
   | { type: 'combat'; action: 'start' | 'round' | 'end'; round: number }
   | { type: 'opponent'; name: string; from: number; to: number; defeated: boolean; source: string }
   | { type: 'favor'; use: 'reroll' | 'action'; from: number; to: number }
+  | { type: 'world'; action: 'floor'; from: number; to: number; name: string; nameEs: string }
   | {
       type: 'declare';
       round: number;
@@ -119,6 +120,35 @@ export type LogEvent =
         targets: { id: number; name: string; splash?: boolean }[];
       }[];
     };
+
+/** World Stats (everyone reads them, the GM changes them). */
+export type World = {
+  floor: number;
+  name: string;
+  nameEs: string;
+  /** Default days to Level Collapse for this Floor (0 = not set). */
+  collapseDays: number;
+  /** In-game hours left before the Floor collapses. */
+  collapseHours: number;
+  crawlersAlive: number | null;
+  ambience: string;
+  ambienceEs: string;
+  /** The GM has changed this Floor's name or texts. */
+  customized: boolean;
+  maxFloor: number;
+};
+export type WorldPatch = Partial<{
+  floor: number;
+  syncParty: boolean;
+  crawlersAlive: number | string | null;
+  collapseHours: number;
+  addHours: number;
+  name: string;
+  nameEs: string;
+  ambience: string;
+  ambienceEs: string;
+  reset: boolean;
+}>;
 
 export type OpponentKind = 'mob' | 'elite' | 'boss' | 'npc' | 'crawler';
 export type Opponent = {
@@ -137,6 +167,10 @@ export type Opponent = {
   hidden?: boolean;
   npcId?: number | null;
   attacks?: NpcAttack[];
+  /** From its stat block (GM only): rules notes and the System AI description. */
+  npcNotes?: string;
+  npcDescription?: string;
+  npcDescriptionEs?: string;
   mods?: Partial<Record<'str' | 'int' | 'con' | 'dex' | 'cha', string>>;
 };
 export type NpcAttack = { name: string; toHit: string; damage: string; range: string; effect: string };
@@ -338,6 +372,9 @@ export const api = {
     request<Encounter>('POST', `/api/encounter/attacks/${id}/apply`, body),
   npcRoll: (r: { name: string; expr: string; label?: string; gmOnly?: boolean }) =>
     request<Message>('POST', '/api/npc-roll', r),
+
+  world: () => request<World>('GET', '/api/world'),
+  updateWorld: (p: WorldPatch) => request<World>('PATCH', '/api/world', p),
 
   npcs: () => request<Npc[]>('GET', '/api/npcs'),
   npc: (id: number) => request<Npc>('GET', `/api/npcs/${id}`),

@@ -3818,3 +3818,210 @@ ul.plain {
   border: 1px solid var(--border);
   background: var(--bg-2);
 }
+
+/* ---------------- Combat page ---------------- */
+.combat-page-head {
+  max-width: 760px;
+  margin-bottom: 1rem;
+}
+.combat-page-head .phases {
+  display: grid;
+  grid-template-columns: repeat(5, minmax(0, 1fr));
+  gap: 0.4rem;
+}
+.combat-page-head .phases li {
+  align-items: flex-start;
+}
+.combat-cols {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  gap: 1.2rem;
+  align-items: start;
+}
+.combat-col {
+  display: flex;
+  flex-direction: column;
+  gap: 0.6rem;
+  min-width: 0;
+}
+.combat-col > .side-sub,
+.combat-col h2.side-sub {
+  margin: 0;
+}
+.combat-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(260px, 1fr));
+  gap: 0.6rem;
+}
+.combat-col .opponents {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(260px, 1fr));
+  gap: 0.6rem;
+}
+.combat-col .opponents > .side-sub,
+.combat-col .opponents > p,
+.combat-col .opponents > .add-opp,
+.combat-col .opponents > .add-row {
+  grid-column: 1 / -1;
+}
+.member-extra {
+  margin: -0.1rem 0 0;
+}
+.opp-details {
+  font-size: 0.82rem;
+}
+.opp-details summary {
+  cursor: pointer;
+  color: var(--dim);
+  font: 600 0.7rem/1.4 var(--font-label);
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+.opp-details[open] {
+  display: flex;
+  flex-direction: column;
+  gap: 0.4rem;
+}
+.opp-attacks {
+  list-style: none;
+  margin: 0.3rem 0 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+}
+.opp-attacks li {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.35rem;
+  align-items: center;
+}
+.ai-says.small {
+  font-size: 0.8rem;
+  padding: 0.5rem 0.7rem;
+  margin: 0;
+}
+@media (max-width: 1100px) {
+  .combat-cols {
+    grid-template-columns: 1fr;
+  }
+}
+@media (max-width: 700px) {
+  .combat-page-head .phases {
+    grid-template-columns: 1fr;
+  }
+}
+
+/* ---------------- World Stats ---------------- */
+.world-page {
+  display: flex;
+  flex-direction: column;
+  gap: 1rem;
+  max-width: 1000px;
+}
+.world-hero {
+  display: flex;
+  gap: 1.4rem;
+  align-items: center;
+  padding: 1.2rem 1.4rem;
+  background: radial-gradient(500px 200px at 0% 0%, rgba(229, 57, 53, 0.18), transparent 70%), var(--surface);
+}
+.world-floor {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  min-width: 110px;
+  padding: 0.6rem 0.8rem;
+  border-radius: var(--radius);
+  border: 2px solid var(--red);
+  background: var(--bg-2);
+}
+.world-floor-lbl {
+  font: 600 0.75rem/1 var(--font-label);
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: var(--dim);
+}
+.world-floor-num {
+  font: 400 4.2rem/1 var(--font-head);
+  color: var(--red);
+}
+.world-hero-main {
+  flex: 1;
+  min-width: 0;
+}
+.world-hero-main h1 {
+  margin: 0 0 0.8rem;
+}
+.world-tiles {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 0.6rem;
+}
+.world-tile {
+  display: flex;
+  flex-direction: column;
+  gap: 0.3rem;
+  padding: 0.6rem 0.8rem;
+  border-radius: var(--radius);
+  background: var(--bg-2);
+  border: 1px solid var(--border);
+}
+.world-tile strong {
+  font: 400 1.9rem/1 var(--font-head);
+  letter-spacing: 0.02em;
+}
+.world-tile.urgent {
+  border-color: var(--red);
+}
+.world-tile.urgent strong {
+  color: #ff6b66;
+}
+.collapse-bar {
+  height: 5px;
+  border-radius: 3px;
+  background: var(--surface-2);
+  overflow: hidden;
+}
+.collapse-bar span {
+  display: block;
+  height: 100%;
+  background: linear-gradient(90deg, var(--red), var(--gold));
+}
+.world-ambience p {
+  margin: 0;
+  line-height: 1.65;
+  font-size: 1.02rem;
+  font-style: italic;
+}
+.world-row {
+  display: flex;
+  align-items: flex-end;
+  gap: 0.5rem;
+  flex-wrap: wrap;
+  margin: 0.6rem 0;
+}
+.world-row .mini {
+  width: 64px;
+}
+.world-row > .lbl {
+  align-self: center;
+  margin-right: 0.3rem;
+}
+.world-texts {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 0.6rem;
+  margin-top: 0.8rem;
+}
+@media (max-width: 700px) {
+  .world-hero {
+    flex-direction: column;
+    align-items: stretch;
+  }
+  .world-tiles,
+  .world-texts {
+    grid-template-columns: 1fr;
+  }
+}

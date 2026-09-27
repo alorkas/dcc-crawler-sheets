@@ -33,7 +33,6 @@ export function CombatHeader() {
   const { user } = useAuth();
   const { encounter, setEncounter, party } = useLive();
   const [surprise, setSurprise] = useState(false);
-  const [floor, setFloor] = useState('');
   const [busy, setBusy] = useState(false);
   const gm = !!user?.isAdmin;
 
@@ -57,23 +56,13 @@ export function CombatHeader() {
             type="button"
             className="btn small primary"
             disabled={busy}
-            onClick={() => act('start', { surprise, ...(floor ? { floor: Number(floor) || 1 } : {}) })}
+            onClick={() => act('start', { surprise })}
           >
             ⚔ {t('combat.start')}
           </button>
           <label className="gm-check">
             <input type="checkbox" checked={surprise} onChange={(e) => setSurprise(e.target.checked)} />
             {t('combat.surprise')}
-          </label>
-          <label className="gm-check">
-            {t('combat.floor')}
-            <input
-              className="in center tiny-in"
-              inputMode="numeric"
-              value={floor}
-              placeholder={t('combat.floorAuto')}
-              onChange={(e) => setFloor(e.target.value)}
-            />
           </label>
         </div>
         <TwoHoursButton disabled={!party?.length} />
@@ -89,7 +78,6 @@ export function CombatHeader() {
         <span className="combat-round">
           ⚔ {isSurprise ? t('combat.surpriseRound') : t('combat.round', { n: e.round })}
         </span>
-        <span className="dim tiny">{t('dash.floor', { n: e.floor })}</span>
       </div>
       {isSurprise ? (
         <p className="phase-hint">{t('combat.surpriseHint')}</p>
@@ -195,7 +183,7 @@ function TwoHoursButton({ disabled }: { disabled: boolean }) {
 }
 
 /** The opponents side of the fight. Players see names and Health %, the GM sees and changes everything. */
-export function Opponents() {
+export function Opponents({ wide = false }: { wide?: boolean }) {
   const { t } = useI18n();
   const { user } = useAuth();
   const { encounter } = useLive();
@@ -209,14 +197,26 @@ export function Opponents() {
       </div>
       {list.length === 0 && <p className="dim small">{t(gm ? 'combat.noOpponentsGm' : 'combat.noOpponents')}</p>}
       {list.map((o) => (
-        <OpponentRow key={o.id} o={o} floor={encounter.floor} round={encounter.round} gm={gm} />
+        <OpponentRow key={o.id} o={o} floor={encounter.floor} round={encounter.round} gm={gm} wide={wide} />
       ))}
       {gm && <AddOpponent />}
     </div>
   );
 }
 
-function OpponentRow({ o, floor, round, gm }: { o: Opponent; floor: number; round: number; gm: boolean }) {
+function OpponentRow({
+  o,
+  floor,
+  round,
+  gm,
+  wide,
+}: {
+  o: Opponent;
+  floor: number;
+  round: number;
+  gm: boolean;
+  wide: boolean;
+}) {
   const { t } = useI18n();
   const { setEncounter } = useLive();
   const [dmg, setDmg] = useState('');
@@ -338,6 +338,7 @@ function OpponentRow({ o, floor, round, gm }: { o: Opponent; floor: number; roun
       )}
       {gm && !o.defeated && round >= 1 && <AttackChips o={o} floor={floor} />}
       {gm && <OpponentHits o={o} />}
+      {gm && wide && <OpponentDetails o={o} floor={floor} />}
     </div>
   );
 }
@@ -1058,5 +1059,38 @@ function OpponentHits({ o }: { o: Opponent }) {
       ))}
       {error && <li className="error tiny">{error}</li>}
     </ul>
+  );
+}
+
+/** Full-size combat view (GM): the opponent's attacks, rules notes and System AI text. */
+function OpponentDetails({ o, floor }: { o: Opponent; floor: number }) {
+  const { t, lang } = useI18n();
+  const ai = (lang === 'es' && o.npcDescriptionEs) || o.npcDescription || o.npcDescriptionEs;
+  const attacks = o.attacks ?? [];
+  if (!attacks.length && !o.npcNotes && !ai) return null;
+  return (
+    <details className="opp-details">
+      <summary>{t('combatPage.details')}</summary>
+      {attacks.length > 0 && (
+        <ul className="opp-attacks">
+          {attacks.map((a, i) => (
+            <li key={i}>
+              <strong>{a.name}</strong>
+              {a.toHit && <span className="pill">{t('decl.dc', { n: withFloor(a.toHit, floor) })}</span>}
+              <span>{a.damage}</span>
+              {a.range && <span className="dim">{a.range}</span>}
+              {a.effect && <span className="dim tiny">{a.effect}</span>}
+            </li>
+          ))}
+        </ul>
+      )}
+      {o.npcNotes && <div className="npc-notes-view small">{o.npcNotes}</div>}
+      {ai && (
+        <blockquote className="ai-says small">
+          <span className="ai-says-lbl">{t('npc.aiSays')}</span>
+          {ai}
+        </blockquote>
+      )}
+    </details>
   );
 }

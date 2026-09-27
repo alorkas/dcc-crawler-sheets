@@ -356,6 +356,12 @@ test('book stat blocks import once, for the GM only', async () => {
   assert.equal((await dm('GET', `/api/npcs/${rat.id}`)).body.data.description, book.description);
   assert.equal((await dm('GET', `/api/npcs/${llama.id}`)).body.data.description, 'My llama');
   assert.ok((await dm('GET', `/api/npcs/${rat.id}`)).body.data.descriptionEs.length > 20, 'Spanish description');
+  // the Spanish text from before the "Pro-Tip" wording is refreshed too
+  await dm('PUT', `/api/npcs/${rat.id}`, {
+    data: { ...(await dm('GET', `/api/npcs/${rat.id}`)).body.data, descriptionEs: book.prevDescriptionsEs[0] },
+  });
+  await dm('POST', '/api/npcs/import-book', {});
+  assert.match((await dm('GET', `/api/npcs/${rat.id}`)).body.data.descriptionEs, /Pro-Tip/);
   // notes from the previous generated version are refreshed as well
   const mook = (await dm('GET', '/api/npcs')).body.find((n) => n.data.name === 'Mook');
   const mookBook = BOOK_NPCS.find((n) => n.name === 'Mook');
@@ -554,7 +560,9 @@ test('crawler Actions, AI Favor rerolls, numbering and live stat block attacks',
       expr: 'd20',
       reroll: true,
     });
-    assert.equal(again.body.code, 'no_ai_favor');
+    // (a Natural 1 on that second Evade can't be rerolled at all)
+    const nat1b = rr.body.declarations[1].targets[0].evade.natural === 1;
+    assert.equal(again.body.code, nat1b ? 'no_reroll' : 'no_ai_favor');
     const log = (await pl('GET', '/api/messages')).body;
     assert.ok(log.some((m) => m.event?.type === 'favor' && m.event.use === 'reroll'));
   }
@@ -687,4 +695,42 @@ test('crawler attacks: hit/miss against the hidden Mob Evade, Actions, damage an
   assert.equal((await pl('GET', '/api/encounter')).body.attacks.length, 0);
   await dm('POST', '/api/encounter', { action: 'end' });
   await dm('PATCH', `/api/characters/${c.body.id}/party`, { inParty: false });
+});
+
+test('World Stats: everyone reads them, the GM changes the Floor, time and texts', async () => {
+  const dm = client();
+  const pl = client();
+  await dm('POST', '/api/auth/login', { username: 'dm', password: 'adminpass123' });
+  await pl('POST', '/api/auth/register', { username: 'world1', password: 'password1' });
+  let w = (await pl('GET', '/api/world')).body;
+  assert.equal(w.floor, 1);
+  assert.equal(w.collapseHours, 5 * 24);
+  assert.ok(w.ambience.length > 50 && w.ambienceEs.length > 50);
+  assert.equal((await pl('PATCH', '/api/world', { floor: 3 })).status, 403);
+
+  const c = await pl('POST', '/api/characters', { data: { schema: 5, name: 'Wanda', floor: '1' } });
+  await pl('POST', `/api/characters/${c.body.id}/lock`, { locked: true });
+  await dm('PATCH', `/api/characters/${c.body.id}/party`, { inParty: true });
+  await dm('POST', '/api/encounter', { action: 'start' });
+
+  // descending: new countdown, the fight and the party sheets follow, and it's logged
+  w = (await dm('PATCH', '/api/world', { floor: 3 })).body;
+  assert.deepEqual([w.floor, w.name, w.collapseHours], [3, 'The Over City', 8 * 24]);
+  assert.equal((await pl('GET', '/api/encounter')).body.floor, 3);
+  assert.equal((await pl('GET', `/api/characters/${c.body.id}`)).body.data.floor, '3', 'locked sheets too');
+  const ev = (await pl('GET', '/api/messages')).body.filter((m) => m.event?.type === 'world').pop();
+  assert.deepEqual([ev.event.from, ev.event.to], [1, 3]);
+
+  // time, crawlers alive and per-Floor text overrides
+  w = (await dm('PATCH', '/api/world', { addHours: -10, crawlersAlive: '1,234,567' })).body;
+  assert.deepEqual([w.collapseHours, w.crawlersAlive], [8 * 24 - 10, 1234567]);
+  w = (await dm('PATCH', '/api/world', { ambience: 'Custom', ambienceEs: 'Propio' })).body;
+  assert.deepEqual([w.ambience, w.ambienceEs, w.customized], ['Custom', 'Propio', true]);
+  w = (await dm('PATCH', '/api/world', { reset: true })).body;
+  assert.equal(w.customized, false);
+  assert.notEqual(w.ambience, 'Custom');
+
+  await dm('POST', '/api/encounter', { action: 'end' });
+  await dm('PATCH', `/api/characters/${c.body.id}/party`, { inParty: false });
+  await dm('PATCH', '/api/world', { floor: 1 });
 });

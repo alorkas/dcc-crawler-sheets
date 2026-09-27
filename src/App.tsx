@@ -1,5 +1,5 @@
 import { useState, type FormEvent, type ReactNode } from 'react';
-import { BrowserRouter, Navigate, NavLink, Route, Routes } from 'react-router-dom';
+import { BrowserRouter, Navigate, NavLink, Route, Routes, useLocation } from 'react-router-dom';
 import { AuthProvider, useAuth } from './lib/auth';
 import { api } from './lib/api';
 import { I18nProvider, LanguageSwitcher, useI18n } from './lib/i18n';
@@ -10,6 +10,8 @@ import PlayersPage from './pages/PlayersPage';
 import CreatePage from './pages/CreatePage';
 import NpcsPage from './pages/NpcsPage';
 import NpcPage from './pages/NpcPage';
+import CombatPage from './pages/CombatPage';
+import WorldPage from './pages/WorldPage';
 import { LiveProvider } from './lib/live';
 import { LogPanel, PartyPanel } from './components/LivePanels';
 
@@ -37,6 +39,8 @@ function Shell() {
           <Route path="/" element={<Dashboard scope="mine" />} />
           <Route path="/new" element={<CreatePage />} />
           <Route path="/sheet/:id" element={<SheetPage />} />
+          <Route path="/combat" element={<CombatPage />} />
+          <Route path="/world" element={<WorldPage />} />
           {user.isAdmin && <Route path="/admin/crawlers" element={<Dashboard scope="all" />} />}
           {user.isAdmin && <Route path="/admin/players" element={<PlayersPage />} />}
           {user.isAdmin && <Route path="/admin/npcs" element={<NpcsPage />} />}
@@ -52,6 +56,7 @@ function Layout({ children }: { children: ReactNode }) {
   const { user, logout } = useAuth();
   const { t } = useI18n();
   const [pwOpen, setPwOpen] = useState(false);
+  const onCombat = useLocation().pathname === '/combat';
   return (
     <div className="app">
       <header className="topbar">
@@ -63,6 +68,8 @@ function Layout({ children }: { children: ReactNode }) {
           <NavLink to="/" end>
             {t('nav.mine')}
           </NavLink>
+          <NavLink to="/combat">{t('nav.combat')}</NavLink>
+          <NavLink to="/world">{t('nav.world')}</NavLink>
           {user?.isAdmin && <NavLink to="/admin/crawlers">{t('nav.all')}</NavLink>}
           {user?.isAdmin && <NavLink to="/admin/npcs">{t('nav.npcs')}</NavLink>}
           {user?.isAdmin && <NavLink to="/admin/players">{t('nav.players')}</NavLink>}
@@ -84,7 +91,8 @@ function Layout({ children }: { children: ReactNode }) {
         </details>
       </header>
       <div className="workspace">
-        <PartyPanel />
+        {/* the Combat page shows the party itself, full size */}
+        {!onCombat && <PartyPanel />}
         <main>{children}</main>
         <LogPanel />
       </div>

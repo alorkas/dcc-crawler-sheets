@@ -5,7 +5,7 @@ import { useAuth } from '../lib/auth';
 import { useI18n, type MsgKey } from '../lib/i18n';
 import { useLive } from '../lib/live';
 import { derive, num } from '../lib/rules';
-import { normalize } from '../lib/sheet';
+import { normalize, signed } from '../lib/sheet';
 import { ChatIcon, ChevronIcon, DiceIcon, PartyIcon } from './icons';
 import { ActionPips, CombatHeader, Declarations, Opponents, TargetedBy } from './CombatTracker';
 
@@ -200,7 +200,9 @@ function RailMember({ m, onOpen }: { m: PartyMember; onOpen: () => void }) {
   );
 }
 
-function MemberCard({ m }: { m: PartyMember }) {
+/** A party member: Health, mana (owner/GM), Actions and declared attacks in combat, debuffs.
+ * `wide` (the Combat page) adds Evade, AI Favor and Move when known. */
+export function MemberCard({ m, wide = false }: { m: PartyMember; wide?: boolean }) {
   const { t } = useI18n();
   const { user } = useAuth();
   const navigate = useNavigate();
@@ -258,6 +260,17 @@ function MemberCard({ m }: { m: PartyMember }) {
             <span style={{ width: `${manaPct}%` }} />
           </div>
           <span className="dim tiny">{t('party.mana', { n: der.manaCurrent ?? '—', max: der.manaMax })}</span>
+        </div>
+      )}
+      {wide && (
+        <div className="member-extra dim small">
+          {[
+            showMana && der.evadeTotal !== null && `${t('core.evade')} ${signed(der.evadeTotal)}`,
+            aiFavor !== null && `${t('core.aiFavor')} ${aiFavor}`,
+            der.penalty ? t('combatPage.penalty', { n: der.penalty }) : '',
+          ]
+            .filter(Boolean)
+            .join(' · ')}
         </div>
       )}
       <ActionPips memberId={m.id} canEdit={canOpen} aiFavor={aiFavor} />
@@ -380,7 +393,9 @@ function MessageList({ filter }: { filter: Filter }) {
   // automatic entries (HP, mana, levels, combat) live in their own Log tab so they don't drown the chat
   // "All" is rolls and chat, plus the Mobs' declared attacks (players need those during combat)
   const shown = messages.filter((m) =>
-    filter === 'all' ? m.kind !== 'event' || m.event?.type === 'declare' : m.kind === filter,
+    filter === 'all'
+      ? m.kind !== 'event' || m.event?.type === 'declare' || m.event?.type === 'world'
+      : m.kind === filter,
   );
 
   useEffect(() => {
@@ -472,7 +487,7 @@ function LogEntry({ m }: { m: Message }) {
 
 /** One automatic log line: HP/mana changes with their source, level-ups, advancement, combat. */
 function EventEntry({ m, ev, time }: { m: Message; ev: LogEvent; time: string }) {
-  const { t } = useI18n();
+  const { t, lang } = useI18n();
   const who = m.characterName || m.userName;
   const pct = (lost: number) => (10 - lost) * 10;
   const src = (s: string) => (s ? ` · ${s}` : ` · ${t('log.ev.manual')}`);
@@ -584,6 +599,11 @@ function EventEntry({ m, ev, time }: { m: Message; ev: LogEvent; time: string })
               : t('log.ev.round', { n: ev.round })}
         </strong>
       );
+      break;
+    case 'world':
+      icon = '▼';
+      tone = 'combat';
+      body = <strong>{t('log.ev.floor', { n: ev.to, name: lang === 'es' ? ev.nameEs : ev.name })}</strong>;
       break;
     case 'favor':
       icon = '✦';

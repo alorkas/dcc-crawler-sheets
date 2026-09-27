@@ -1,5 +1,13 @@
 import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
-import { api, type CharacterSummary, type Encounter, type Message, type NewMessage, type PartyMember } from './api';
+import {
+  api,
+  type CharacterSummary,
+  type Encounter,
+  type Message,
+  type NewMessage,
+  type PartyMember,
+  type World,
+} from './api';
 import { useAuth } from './auth';
 
 type LiveState = {
@@ -20,6 +28,9 @@ type LiveState = {
   /** The combat tracker (round, phase, opponents). */
   encounter: Encounter | null;
   setEncounter: (e: Encounter) => void;
+  /** World Stats: current Floor, crawlers alive, time to Level Collapse, ambience. */
+  world: World | null;
+  setWorld: (w: World) => void;
   /** Subscribe to "this sheet has a newer version on the server" notices. Returns an unsubscribe function. */
   onCharacter: (fn: (e: { id: number; version: number; by: number | null }) => void) => () => void;
 };
@@ -36,6 +47,13 @@ export function LiveProvider({ children }: { children: ReactNode }) {
   const [activeChar, setActiveChar] = useState<{ id: number; name: string } | null>(null);
   const logVisible = useRef(false);
   const [encounter, setEncounter] = useState<Encounter | null>(null);
+  const [world, setWorld] = useState<World | null>(null);
+  const loadWorld = useCallback(() => {
+    api
+      .world()
+      .then(setWorld)
+      .catch(() => {});
+  }, []);
   const charListeners = useRef(new Set<(e: { id: number; version: number; by: number | null }) => void>());
   const onCharacter = useCallback((fn: (e: { id: number; version: number; by: number | null }) => void) => {
     charListeners.current.add(fn);
@@ -79,6 +97,7 @@ export function LiveProvider({ children }: { children: ReactNode }) {
     loadMessages();
     refreshSpeakers();
     loadEncounter();
+    loadWorld();
     let partyTimer: ReturnType<typeof setTimeout> | undefined;
     let wasConnected = false;
     const es = new EventSource('/api/events');
@@ -89,6 +108,7 @@ export function LiveProvider({ children }: { children: ReactNode }) {
         loadParty();
         loadMessages();
         loadEncounter();
+        loadWorld();
       }
       wasConnected = true;
     };
@@ -105,6 +125,7 @@ export function LiveProvider({ children }: { children: ReactNode }) {
     });
     es.addEventListener('clear', () => setMessages([]));
     es.addEventListener('encounter', loadEncounter);
+    es.addEventListener('world', loadWorld);
     es.addEventListener('character', (e) => {
       const ev = JSON.parse((e as MessageEvent).data);
       charListeners.current.forEach((fn) => fn(ev));
@@ -114,7 +135,7 @@ export function LiveProvider({ children }: { children: ReactNode }) {
       es.close();
       setConnected(false);
     };
-  }, [user, loadParty, loadMessages, refreshSpeakers, addMessage, loadEncounter]);
+  }, [user, loadParty, loadMessages, refreshSpeakers, addMessage, loadEncounter, loadWorld]);
 
   const setLogVisible = useCallback((v: boolean) => {
     logVisible.current = v;
@@ -159,6 +180,8 @@ export function LiveProvider({ children }: { children: ReactNode }) {
       refreshSpeakers,
       encounter,
       setEncounter,
+      world,
+      setWorld,
       onCharacter,
     }),
     [
@@ -173,6 +196,7 @@ export function LiveProvider({ children }: { children: ReactNode }) {
       roll,
       refreshSpeakers,
       encounter,
+      world,
       onCharacter,
     ],
   );

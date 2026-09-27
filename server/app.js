@@ -7,6 +7,7 @@ import fs from 'node:fs';
 import { fullCatalog, lookup, publicSkills } from './catalog/index.js';
 import { mountLive } from './live.js';
 import { mountGame } from './game.js';
+import { mountWorld } from './world.js';
 import { applyPlay } from '../shared/lockRules.js';
 
 const COOKIE = 'dcc_session';
@@ -281,7 +282,8 @@ export function createApp({ db, jwtSecret, allowRegistration = true, cookieSecur
   // ---------- party, roll log & chat (live) ----------
   const live = mountLive(app, { db, auth, adminOnly, loadChar });
   // ---------- GM tools: NPC stat blocks, combat tracker, level-ups ----------
-  mountGame(app, { db, auth, adminOnly, loadChar, live });
+  const game = mountGame(app, { db, auth, adminOnly, loadChar, live });
+  mountWorld(app, { db, auth, adminOnly, live, onFloor: (floor, sync) => game.setFloor(floor, sync) });
 
   // ---------- book catalog ----------
   // Anyone logged in can look up an entry by its exact name (spells and items stay hidden until named).
