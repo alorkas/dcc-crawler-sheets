@@ -10,6 +10,7 @@ import { api } from '../lib/api';
 import { useAuth } from '../lib/auth';
 import { STARTER_SPELLS } from '../lib/creation';
 import { RollButton } from './RollButton';
+import { ProgressionPanel } from './Progression';
 
 const catKey = (c: string) => `skillcat.${c}` as MsgKey;
 const subKey = (c: string, s: string) => `skillsub.${c}.${s}` as MsgKey;
@@ -151,6 +152,10 @@ export function SkillsTab() {
           </div>
         </Section>
       )}
+
+      <Section title={t('prog.section')}>
+        <ProgressionPanel />
+      </Section>
 
       <Section title={t('adv.section')}>
         <AdvancementPanel />
@@ -572,6 +577,7 @@ export function CastButton({ i, compact }: { i: number; compact?: boolean }) {
         return r ?? d;
       },
       t('skill.castDone', { name: s.name || t('skillcat.spell'), n: isHeal ? 2 : (cost ?? 0) }),
+      { mana: t('src.cast', { name: s.name || t('skillcat.spell') }), hp: isHeal ? t('src.healSpell') : undefined },
     );
     if (!ok) setMsg(t('mana.notEnough'));
   };

@@ -8,6 +8,8 @@ import Dashboard from './pages/Dashboard';
 import SheetPage from './pages/SheetPage';
 import PlayersPage from './pages/PlayersPage';
 import CreatePage from './pages/CreatePage';
+import NpcsPage from './pages/NpcsPage';
+import NpcPage from './pages/NpcPage';
 import { LiveProvider } from './lib/live';
 import { LogPanel, PartyPanel } from './components/LivePanels';
 
@@ -37,6 +39,8 @@ function Shell() {
           <Route path="/sheet/:id" element={<SheetPage />} />
           {user.isAdmin && <Route path="/admin/crawlers" element={<Dashboard scope="all" />} />}
           {user.isAdmin && <Route path="/admin/players" element={<PlayersPage />} />}
+          {user.isAdmin && <Route path="/admin/npcs" element={<NpcsPage />} />}
+          {user.isAdmin && <Route path="/admin/npcs/:id" element={<NpcPage />} />}
           <Route path="*" element={<Navigate to="/" replace />} />
         </Routes>
       </Layout>
@@ -60,6 +64,7 @@ function Layout({ children }: { children: ReactNode }) {
             {t('nav.mine')}
           </NavLink>
           {user?.isAdmin && <NavLink to="/admin/crawlers">{t('nav.all')}</NavLink>}
+          {user?.isAdmin && <NavLink to="/admin/npcs">{t('nav.npcs')}</NavLink>}
           {user?.isAdmin && <NavLink to="/admin/players">{t('nav.players')}</NavLink>}
         </nav>
         <LanguageSwitcher className="top-lang" />

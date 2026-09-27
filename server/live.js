@@ -85,12 +85,48 @@ export function mountLive(app, { db, auth, adminOnly, loadChar }) {
     res.json({ id: req.char.id, inParty });
   });
 
-  /** Call after a character was saved or deleted: tells clients to refresh the party when it matters. */
-  function characterChanged(row, oldData, newData) {
-    if (!row?.party_since) return;
-    const a = JSON.stringify(partyView(oldData, true));
-    const b = newData === null ? '' : JSON.stringify(partyView(newData, true));
-    if (a !== b) send('party', {});
+  /**
+   * Call after a character was saved (or deleted: newData null).
+   * - refreshes everyone's party panel when a member's party fields changed
+   * - tells the owner's and GM's open copies of the sheet that there is a newer version
+   * - logs HP and mana changes to the event log, with the sources the client reported
+   */
+  function characterChanged(row, oldData, newData, { version, sources, actorId } = {}) {
+    if (!row) return;
+    if (row.party_since) {
+      const a = JSON.stringify(partyView(oldData, true));
+      const b = newData === null ? '' : JSON.stringify(partyView(newData, true));
+      if (a !== b) send('party', {});
+    }
+    if (newData === null) return;
+    if (version !== undefined) {
+      send('character', { id: row.id, version, by: actorId ?? null }, (u) => u.is_admin || u.id === row.owner_id);
+    }
+    const name = String(newData.name || '').slice(0, 80);
+    const src = (k) =>
+      [...new Set((sources?.[k] ?? []).map((x) => String(x).slice(0, 80)).filter(Boolean))].join(', ').slice(0, 200);
+    const lostA = Number(oldData?.hbLost) || 0;
+    const lostB = Number(newData.hbLost) || 0;
+    if (lostA !== lostB) {
+      postEvent({
+        ownerId: row.owner_id,
+        characterId: row.id,
+        charName: name,
+        event: { type: 'hp', from: lostA, to: lostB, source: src('hp') },
+        gmOnly: !row.party_since, // HP is public for party members (it's on the party panel anyway)
+      });
+    }
+    const manaA = String(oldData?.manaCurrent ?? '');
+    const manaB = String(newData.manaCurrent ?? '');
+    if (manaA !== manaB && (manaA.trim() || manaB.trim())) {
+      postEvent({
+        ownerId: row.owner_id,
+        characterId: row.id,
+        charName: name,
+        event: { type: 'mana', from: manaA, to: manaB, source: src('mana') },
+        gmOnly: true, // mana is private to the owner and the GM
+      });
+    }
   }
 
   /* ---------------- messages ---------------- */
@@ -106,11 +142,28 @@ export function mountLive(app, { db, auth, adminOnly, loadChar }) {
     isAdmin: !!m.is_admin,
     characterId: m.character_id,
     characterName: m.char_name,
+    event: m.event ? JSON.parse(m.event) : null,
     createdAt: m.created_at,
   });
   const msgById = db.prepare(
     `SELECT m.*, u.username, u.is_admin FROM messages m JOIN users u ON u.id = m.user_id WHERE m.id = ?`,
   );
+
+  /**
+   * Automatic log entry (kind 'event'). `ownerId` is who the entry belongs to: with gmOnly, only that user
+   * and the GM see it. Without an owner it is posted by the first admin.
+   */
+  function postEvent({ ownerId, characterId = null, charName = '', event, gmOnly = false }) {
+    const uid = ownerId ?? db.prepare('SELECT id FROM users WHERE is_admin = 1 ORDER BY id LIMIT 1').get()?.id;
+    if (!uid) return;
+    const r = db
+      .prepare(
+        `INSERT INTO messages (user_id, character_id, char_name, kind, text, event, gm_only) VALUES (?, ?, ?, 'event', '', ?, ?)`,
+      )
+      .run(uid, characterId, charName, JSON.stringify(event), gmOnly ? 1 : 0);
+    const row = msgById.get(r.lastInsertRowid);
+    send('message', toMessage(row), (u) => visible(u, row));
+  }
 
   app.get('/api/messages', auth, (req, res) => {
     const limit = Math.min(Math.max(Number(req.query.limit) || 200, 1), 500);
@@ -190,5 +243,5 @@ export function mountLive(app, { db, auth, adminOnly, loadChar }) {
     res.json({ ok: true });
   });
 
-  return { characterChanged };
+  return { characterChanged, postEvent, send };
 }

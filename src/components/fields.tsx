@@ -17,7 +17,9 @@ type SheetCtxValue = {
   playLocked: boolean;
   set: (path: Path, value: unknown) => void;
   /** Whole-sheet change (rests, damage, advancement). With a label, the change can be undone once. */
-  update: (fn: (d: SheetData) => SheetData, undoLabel?: string) => void;
+  update: (fn: (d: SheetData) => SheetData, undoLabel?: string, sources?: { hp?: string; mana?: string }) => void;
+  /** Save pending edits, run a server-side action on this sheet (GM tools), then load the result. */
+  runServer: <T>(fn: () => Promise<T>) => Promise<T>;
 };
 
 export const SheetCtx = createContext<SheetCtxValue | null>(null);

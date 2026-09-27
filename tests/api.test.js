@@ -224,3 +224,79 @@ test('messages: rolls happen on the server, GM-only messages stay private, event
   assert.equal((await dm('DELETE', '/api/messages')).status, 200);
   assert.equal((await p1('GET', '/api/messages')).body.length, 0);
 });
+
+test('GM tools: NPCs, combat tracker, level-ups and the event log', async () => {
+  const pl = client();
+  const other = client();
+  const dm = client();
+  await pl('POST', '/api/auth/register', { username: 'zev', password: 'password1' });
+  await other('POST', '/api/auth/register', { username: 'elle', password: 'password1' });
+  await dm('POST', '/api/auth/login', { username: 'dm', password: 'adminpass123' });
+  await dm('DELETE', '/api/messages');
+
+  // NPC stat blocks are GM only
+  assert.equal((await pl('GET', '/api/npcs')).status, 403);
+  const npc = await dm('POST', '/api/npcs', {
+    data: { name: 'Bad Llama', kind: 'mob', slots: '3', slotValue: '2', dr: '2', evade: '13+F' },
+  });
+  assert.equal(npc.status, 201);
+  assert.equal((await dm('GET', '/api/npcs')).body.length, 1);
+
+  // combat
+  await dm('POST', '/api/encounter', { action: 'start', floor: 2 });
+  await dm('POST', '/api/encounter/opponents', { npcId: npc.body.id, count: 2 });
+  await dm('POST', '/api/encounter/opponents', { name: 'Hidden Boss', kind: 'boss', slots: 5, hidden: true });
+  let enc = (await pl('GET', '/api/encounter')).body;
+  assert.equal(enc.active, true);
+  assert.deepEqual(
+    enc.opponents.map((o) => o.name),
+    ['Bad Llama 1', 'Bad Llama 2'],
+  );
+  assert.equal(enc.opponents[0].dr, undefined, 'players do not see stat details');
+  const llama = enc.opponents[0].id;
+  // 6 damage − 2 DR = 4 → 2 slots of 2 → 33%
+  enc = (await dm('PATCH', `/api/encounter/opponents/${llama}`, { damage: 6 })).body;
+  assert.equal(enc.opponents[0].lost, 2);
+  assert.equal(enc.opponents[0].pct, 33);
+  assert.equal((await pl('PATCH', `/api/encounter/opponents/${llama}`, { damage: 6 })).status, 403);
+  for (let i = 0; i < 5; i++) await dm('POST', '/api/encounter', { action: 'next' });
+  enc = (await pl('GET', '/api/encounter')).body;
+  assert.deepEqual([enc.round, enc.phase], [2, 1]);
+
+  // level-ups: GM only, work on locked sheets, tracked with stat points and history
+  const c = await pl('POST', '/api/characters', { data: { name: 'Zev', level: '3', floor: '3', hbLost: 0 } });
+  await pl('POST', `/api/characters/${c.body.id}/lock`, { locked: true });
+  assert.equal((await pl('POST', `/api/characters/${c.body.id}/progress`, { type: 'twoHours' })).status, 403);
+  const up = await dm('POST', `/api/characters/${c.body.id}/progress`, { type: 'boss', tier: 'borough' });
+  assert.equal(up.body.data.level, '5');
+  assert.equal(up.body.data.statPoints, '6');
+  assert.equal(up.body.data.levelLog[0].source, 'boss');
+
+  // HP change with a source is logged; the owner and GM see it (not in the party), others don't
+  const cur = (await pl('GET', `/api/characters/${c.body.id}`)).body;
+  const hit = await pl('PUT', `/api/characters/${c.body.id}`, {
+    data: { ...cur.data, hbLost: 2 },
+    version: cur.version,
+    sources: { hp: ['Goblin arrow'] },
+  });
+  assert.equal(hit.status, 200);
+  const mine = (await pl('GET', '/api/messages')).body.filter((m) => m.kind === 'event');
+  const hp = mine.find((m) => m.event.type === 'hp');
+  assert.deepEqual([hp.event.from, hp.event.to, hp.event.source], [0, 2, 'Goblin arrow']);
+  assert.ok(mine.some((m) => m.event.type === 'level'));
+  const theirs = (await other('GET', '/api/messages')).body.filter((m) => m.kind === 'event');
+  assert.ok(!theirs.some((m) => m.event.type === 'hp'), 'non-party HP changes are private');
+  assert.ok(
+    theirs.some((m) => m.event.type === 'opponent'),
+    'visible opponent damage is public',
+  );
+  assert.ok(theirs.some((m) => m.event.type === 'combat' && m.event.action === 'round'));
+
+  // party-wide 2 hours: +1 level and 2-hour advancement for every party member
+  await dm('PATCH', `/api/characters/${c.body.id}/party`, { inParty: true });
+  const two = await dm('POST', '/api/party/two-hours', {});
+  assert.ok(two.body.members.some((m) => m.id === c.body.id));
+  assert.equal((await pl('GET', `/api/characters/${c.body.id}`)).body.data.level, '6');
+  await dm('POST', '/api/encounter', { action: 'end' });
+  assert.equal((await pl('GET', '/api/encounter')).body.active, false);
+});

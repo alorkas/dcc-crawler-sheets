@@ -37,10 +37,23 @@ export function openDb(file) {
       gm_only INTEGER NOT NULL DEFAULT 0,
       created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))
     );
+    CREATE TABLE IF NOT EXISTS npcs (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      data TEXT NOT NULL DEFAULT '{}',
+      created_at TEXT NOT NULL DEFAULT (datetime('now')),
+      updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+    );
+    CREATE TABLE IF NOT EXISTS kv (
+      key TEXT PRIMARY KEY,
+      value TEXT NOT NULL
+    );
   `);
   // added later: party membership (NULL = not in the party; otherwise when they joined, for ordering)
   const cols = db.prepare('PRAGMA table_info(characters)').all();
   if (!cols.some((c) => c.name === 'party_since')) db.exec('ALTER TABLE characters ADD COLUMN party_since TEXT');
+  // added later: structured payload of automatic log entries (HP/mana changes, level-ups, combat…)
+  const mcols = db.prepare('PRAGMA table_info(messages)').all();
+  if (!mcols.some((c) => c.name === 'event')) db.exec('ALTER TABLE messages ADD COLUMN event TEXT');
   return db;
 }
 

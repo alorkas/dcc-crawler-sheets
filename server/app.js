@@ -6,6 +6,7 @@ import path from 'node:path';
 import fs from 'node:fs';
 import { fullCatalog, lookup, publicSkills } from './catalog/index.js';
 import { mountLive } from './live.js';
+import { mountGame } from './game.js';
 import { applyPlay } from '../shared/lockRules.js';
 
 const COOKIE = 'dcc_session';
@@ -209,7 +210,8 @@ export function createApp({ db, jwtSecret, allowRegistration = true, cookieSecur
       JSON.stringify(next),
       req.char.id,
     );
-    live.characterChanged(req.char, stored, next);
+    const sources = req.body?.sources && typeof req.body.sources === 'object' ? req.body.sources : {};
+    live.characterChanged(req.char, stored, next, { version: req.char.version + 1, sources, actorId: req.user.id });
     res.json(toChar(q.charById.get(req.char.id), false));
   });
 
@@ -278,6 +280,8 @@ export function createApp({ db, jwtSecret, allowRegistration = true, cookieSecur
 
   // ---------- party, roll log & chat (live) ----------
   const live = mountLive(app, { db, auth, adminOnly, loadChar });
+  // ---------- GM tools: NPC stat blocks, combat tracker, level-ups ----------
+  mountGame(app, { db, auth, adminOnly, loadChar, live });
 
   // ---------- book catalog ----------
   // Anyone logged in can look up an entry by its exact name (spells and items stay hidden until named).

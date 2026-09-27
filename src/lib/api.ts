@@ -1,4 +1,4 @@
-import type { SheetData } from './sheet';
+import type { LevelEntry, SheetData } from './sheet';
 
 export type User = { id: number; username: string; isAdmin: boolean };
 export type AdminUser = User & { createdAt: string; characters: number };
@@ -67,7 +67,7 @@ export type RollPart = {
 export type RollResult = { expr: string; total: number; parts: RollPart[]; natural: number | null; label: string };
 export type Message = {
   id: number;
-  kind: 'chat' | 'roll';
+  kind: 'chat' | 'roll' | 'event';
   text: string;
   roll: RollResult | null;
   gmOnly: boolean;
@@ -76,8 +76,66 @@ export type Message = {
   isAdmin: boolean;
   characterId: number | null;
   characterName: string;
+  event: LogEvent | null;
   createdAt: string;
 };
+/** Automatic log entries (the "Log" tab). */
+export type LogEvent =
+  | { type: 'hp'; from: number; to: number; source: string }
+  | { type: 'mana'; from: string; to: string; source: string }
+  | ({ type: 'level' } & LevelEntry)
+  | { type: 'grind'; hours: number; total: number; level: number }
+  | {
+      type: 'advance';
+      mode: 'session' | 'floor';
+      results: { name: string; from: number; roll: number; gained: boolean }[];
+    }
+  | { type: 'combat'; action: 'start' | 'round' | 'end'; round: number }
+  | { type: 'opponent'; name: string; from: number; to: number; defeated: boolean; source: string };
+
+export type OpponentKind = 'mob' | 'elite' | 'boss' | 'npc';
+export type Opponent = {
+  id: number;
+  name: string;
+  kind: OpponentKind;
+  pct: number;
+  defeated: boolean;
+  // GM only
+  slots?: number;
+  slotValue?: number;
+  lost?: number;
+  dr?: string;
+  evade?: string;
+  notes?: string;
+  hidden?: boolean;
+  npcId?: number | null;
+};
+export type Encounter = { active: boolean; round: number; phase: number; floor: number; opponents: Opponent[] };
+export type NpcData = {
+  name: string;
+  kind: OpponentKind;
+  size: string;
+  tags: string;
+  slots: string;
+  slotValue: string;
+  level: string;
+  surprise: string;
+  evade: string;
+  move: string;
+  dr: string;
+  stats: Record<'str' | 'int' | 'con' | 'dex' | 'cha', { score: string; mod: string }>;
+  attacks: { name: string; toHit: string; damage: string; range: string; effect: string }[];
+  notes: string;
+};
+export type Npc = { id: number; data: Partial<NpcData>; updatedAt: string };
+export type ProgressAction =
+  | { type: 'twoHours' }
+  | { type: 'quest'; levels: number }
+  | { type: 'boss'; tier: string }
+  | { type: 'kill'; victimLevel: number }
+  | { type: 'grind'; hours: number }
+  | { type: 'levels'; levels: number };
+export type HpManaSources = { hp?: string[]; mana?: string[] };
 export type NewMessage = {
   text?: string;
   roll?: { expr: string; label?: string };
@@ -124,8 +182,8 @@ export const api = {
   createCharacter: (data: Partial<SheetData> = {}, ownerId?: number) =>
     request<Character>('POST', '/api/characters', { data, ownerId }),
   getCharacter: (id: number) => request<Character>('GET', `/api/characters/${id}`),
-  saveCharacter: (id: number, data: SheetData, version: number) =>
-    request<CharacterSummary>('PUT', `/api/characters/${id}`, { data, version }),
+  saveCharacter: (id: number, data: SheetData, version: number, sources?: HpManaSources) =>
+    request<CharacterSummary>('PUT', `/api/characters/${id}`, { data, version, sources }),
   setLocked: (id: number, locked: boolean) =>
     request<CharacterSummary>('POST', `/api/characters/${id}/lock`, { locked }),
   deleteCharacter: (id: number) => request('DELETE', `/api/characters/${id}`),
@@ -138,6 +196,30 @@ export const api = {
   messages: () => request<Message[]>('GET', '/api/messages'),
   postMessage: (m: NewMessage) => request<Message>('POST', '/api/messages', m),
   clearMessages: () => request('DELETE', '/api/messages'),
+
+  encounter: () => request<Encounter>('GET', '/api/encounter'),
+  encounterAction: (action: 'start' | 'next' | 'prev' | 'end' | 'floor', extra: Record<string, unknown> = {}) =>
+    request<Encounter>('POST', '/api/encounter', { action, ...extra }),
+  addOpponents: (o: Record<string, unknown>) => request<Encounter>('POST', '/api/encounter/opponents', o),
+  updateOpponent: (id: number, patch: Record<string, unknown>) =>
+    request<Encounter>('PATCH', `/api/encounter/opponents/${id}`, patch),
+  removeOpponent: (id: number) => request<Encounter>('DELETE', `/api/encounter/opponents/${id}`),
+
+  npcs: () => request<Npc[]>('GET', '/api/npcs'),
+  npc: (id: number) => request<Npc>('GET', `/api/npcs/${id}`),
+  createNpc: (data: Partial<NpcData> = {}) => request<Npc>('POST', '/api/npcs', { data }),
+  saveNpc: (id: number, data: NpcData) => request<Npc>('PUT', `/api/npcs/${id}`, { data }),
+  deleteNpc: (id: number) => request('DELETE', `/api/npcs/${id}`),
+
+  progress: (id: number, action: ProgressAction) =>
+    request<{ data: SheetData; version: number }>('POST', `/api/characters/${id}/progress`, action),
+  advance: (id: number, mode: 'session' | 'floor') =>
+    request<{
+      data: SheetData;
+      version: number;
+      results: { name: string; from: number; roll: number; gained: boolean }[];
+    }>('POST', `/api/characters/${id}/advance`, { mode }),
+  partyTwoHours: () => request<{ members: { id: number }[] }>('POST', '/api/party/two-hours', {}),
 
   listUsers: () => request<AdminUser[]>('GET', '/api/users'),
   updateUser: (id: number, patch: { isAdmin?: boolean; password?: string }) =>

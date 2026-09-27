@@ -44,6 +44,15 @@ export type Skill = {
   baseDamage: string;
 };
 export type Item = { item: string; qty: string; notes: string };
+export type LevelEntry = {
+  at: string;
+  floor: string;
+  source: 'twoHours' | 'quest' | 'boss' | 'kill' | 'grind' | 'manual';
+  detail: string;
+  levels: number;
+  from: number;
+  to: number;
+};
 
 export type SheetData = {
   /** Data format version, used for one-time migrations of older sheets. */
@@ -83,6 +92,12 @@ export type SheetData = {
   skills: Skill[];
   /** Skills attempted untrained this session (Tutorial Floors). */
   untrained: string[];
+  /** Stat points from level-ups still to assign (in a saferoom, from the Third Floor on). */
+  statPoints: string;
+  /** Grinding hours toward the next Level (erased when you level up). */
+  grindHours: string;
+  /** Level-up history (written by the GM tools on the server). */
+  levelLog: LevelEntry[];
   inventory: Item[];
   // page 5
   pet: {
@@ -197,6 +212,9 @@ export function emptySheet(): SheetData {
     notes: '',
     skills: [emptySkill()], // template row only; skills lists are not padded
     untrained: [],
+    statPoints: '',
+    grindHours: '',
+    levelLog: [],
     inventory: Array.from({ length: 8 }, emptyItem),
     pet: {
       name: '',

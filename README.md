@@ -14,6 +14,10 @@ Interactive, mobile-friendly character sheets for a **Dungeon Crawler Carl RPG**
 - Spoiler-safe book catalog: spells and items live only on the server. Players can look up an entry by its exact name (the one on their sheet), but only admins can list or autocomplete the whole catalog
 - Party panel (left, collapsible): the GM marks which crawlers are in the party (party button on the sheet or on the crawler cards) and everyone sees their Health Bar, Dying state and debuffs live. Mana is shown only to the owner and the GM
 - Log & chat panel (right, collapsible): shared, live dice log and chat. Click any roll total on a sheet (skill checks, to-hit, damage) or use `/roll 2d6+3 # label` (also `2d20kh1`, `2d20kl1`). Rolls happen on the server. Speak as one of your crawlers; "To GM only" / "Hidden" keeps a message between you and the GM. The GM can clear the log
+- Combat tracker (in the party panel): the GM starts combat (optionally with a surprise round), and everyone sees the round counter, the 5 phases of a combat round with a short reminder of each (Clean Up lists Dying countdowns and debuffs), the crawlers and the opponents. Opponents come from NPC stat blocks or quick entries; players see names and Health %, the GM applies damage (DR and slot values handled), hides/reveals and removes them
+- NPCs & Mobs (GM only): stat blocks in the Core Rulebook's Mob format (type, size, Health Bar slots, Level, Surprise, Evade, Move, DR, stats, attacks, notes) that can be dropped into combat ("Bad Llama 1", "Bad Llama 2"…)
+- Levels & progression (GM only): +1 Level for 2 hours of play, quests, Boss kills by tier, crawler kills (1d6 ± Level difference) and grinding hours, with Stat points to assign and a Level history; Skill Advancement rolls happen on the server; a party-wide "2 hours passed" button levels everyone and rolls their 2-hour advancement. Works on locked sheets, and open sheets refresh automatically
+- Log tab: HP and mana changes with their source (damage source, Heal spell, potions, rests…), level-ups, advancement results, combat rounds and opponent damage. HP of party members is public, mana and non-party changes are only visible to the owner and the GM
 - Custom (homebrew) skills in every category; name suggestions are filtered to the section's own category
 - A single container with a SQLite database kept in the `/data` volume
 
@@ -61,6 +65,7 @@ Checks: `npm run lint`, `npx prettier --check .`, `npm run build`, `npm test`.
 ## Structure
 
 - `server/`: Express API (`app.js`), SQLite schema (`db.js`), entrypoint (`index.js`)
+- `server/game.js`: NPC stat blocks, combat tracker and level-ups (`server/progress.js`)
 - `server/live.js`: party panel, roll log/chat and the Server-Sent Events stream (`/api/events`); `server/dice.js`: dice parser
 - `server/catalog/`: Core Rulebook weapons, spells, utility skills and items (server-side only, so spells and items aren't in the browser bundle)
 - `src/lib/creation.ts` + `src/pages/CreatePage.tsx`: the character creation wizard (background tables, starter options, sheet builder)

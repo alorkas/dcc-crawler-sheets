@@ -45,6 +45,8 @@ export default function SheetPage() {
   const [undo, setUndo] = useState<{ label: string; data: SheetData } | null>(null);
 
   const versionRef = useRef(0);
+  // where HP/mana changes came from since the last save (sent along for the event log)
+  const sourcesRef = useRef<{ hp: string[]; mana: string[] }>({ hp: [], mana: [] });
   const dirtyRef = useRef(false);
   const savingRef = useRef<Promise<void> | null>(null);
   const dataRef = useRef<SheetData | null>(null);
@@ -88,7 +90,9 @@ export default function SheetPage() {
     setSaveState('saving');
     const p = (async () => {
       try {
-        const res = await api.saveCharacter(charId, snapshot, versionRef.current);
+        const sources = sourcesRef.current;
+        sourcesRef.current = { hp: [], mana: [] };
+        const res = await api.saveCharacter(charId, snapshot, versionRef.current, sources);
         versionRef.current = res.version;
         setMeta((m) => (m ? { ...m, ...res } : m));
         setSaveError(null);
@@ -140,13 +144,15 @@ export default function SheetPage() {
   );
 
   const update = useCallback(
-    (fn: (d: SheetData) => SheetData, undoLabel?: string) => {
+    (fn: (d: SheetData) => SheetData, undoLabel?: string, sources?: { hp?: string; mana?: string }) => {
       if (conflict) return;
       const prev = dataRef.current;
       if (!prev) return;
       const next = fn(prev);
       if (next === prev) return;
       if (locked && !onlyPlayChanges(prev, next)) return;
+      if (sources?.hp && next.hbLost !== prev.hbLost) sourcesRef.current.hp.push(sources.hp);
+      if (sources?.mana && next.manaCurrent !== prev.manaCurrent) sourcesRef.current.mana.push(sources.mana);
       setData(next);
       setUndo(undoLabel ? { label: undoLabel, data: prev } : null);
       dirtyRef.current = true;
@@ -156,18 +162,47 @@ export default function SheetPage() {
   );
 
   // chat and sheet rolls default to this character while its sheet is open
-  const { setActiveChar } = useLive();
+  const { setActiveChar, onCharacter } = useLive();
+
+  // someone else (usually the GM) changed this sheet: load it, unless there are unsaved edits here
+  useEffect(
+    () =>
+      onCharacter((ev) => {
+        if (ev.id !== charId || ev.version <= versionRef.current) return;
+        if (dirtyRef.current || savingRef.current) return; // the save will report the conflict
+        api
+          .getCharacter(charId)
+          .then((c) => {
+            if (!dirtyRef.current && c.version > versionRef.current) applyServer(c);
+          })
+          .catch(() => {});
+      }),
+    [onCharacter, charId, applyServer],
+  );
   const sheetName = data?.name ?? '';
   useEffect(() => {
     if (meta) setActiveChar({ id: charId, name: sheetName || t('dash.unnamed') });
   }, [meta, charId, sheetName, setActiveChar, t]);
   useEffect(() => () => setActiveChar(null), [setActiveChar]);
 
+  const runServer = useCallback(
+    async <T,>(fn: () => Promise<T>): Promise<T> => {
+      await save();
+      const out = await fn();
+      const c = await api.getCharacter(charId);
+      applyServer(c);
+      return out;
+    },
+    [save, charId, applyServer],
+  );
+
   const der = useMemo(() => (data ? derive(data) : null), [data]);
   const ctx = useMemo(
     () =>
-      data && der ? { charId, data, der, set, update, locked: locked || !!conflict, playLocked: !!conflict } : null,
-    [charId, data, der, set, update, locked, conflict],
+      data && der
+        ? { charId, data, der, set, update, runServer, locked: locked || !!conflict, playLocked: !!conflict }
+        : null,
+    [charId, data, der, set, update, runServer, locked, conflict],
   );
 
   async function toggleLock() {

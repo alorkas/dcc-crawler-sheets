@@ -1,12 +1,13 @@
 import { useEffect, useMemo, useRef, useState, type FormEvent, type ReactNode } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { api, type Message, type PartyMember } from '../lib/api';
+import { api, type LogEvent, type Message, type PartyMember } from '../lib/api';
 import { useAuth } from '../lib/auth';
 import { useI18n, type MsgKey } from '../lib/i18n';
 import { useLive } from '../lib/live';
 import { derive } from '../lib/rules';
 import { normalize } from '../lib/sheet';
 import { ChatIcon, ChevronIcon, DiceIcon, PartyIcon } from './icons';
+import { CombatHeader, Opponents } from './CombatTracker';
 
 /* ---------------- collapsible side panel ---------------- */
 
@@ -136,26 +137,40 @@ const hpTone = (pct: number, dying: boolean) => (dying ? 'dying' : pct >= 60 ? '
 
 export function PartyPanel() {
   const { t } = useI18n();
-  const { party } = useLive();
+  const { party, encounter } = useLive();
   const [open, setOpen] = usePanelState('dcc.panel.party');
   const members = party ?? [];
+  const fighting = !!encounter?.active;
   return (
     <SidePanel
       side="left"
       open={open}
       onToggle={setOpen}
-      title={t('party.title')}
+      title={fighting ? t('combat.title') : t('party.title')}
       icon={<PartyIcon />}
-      rail={members.map((m) => (
-        <RailMember key={m.id} m={m} onOpen={() => setOpen(true)} />
-      ))}
+      rail={
+        <>
+          {fighting && (
+            <span className="rail-round" title={t('combat.round', { n: encounter!.round })}>
+              R{encounter!.round}
+              <small>{encounter!.round === 0 ? 'S' : `P${encounter!.phase}`}</small>
+            </span>
+          )}
+          {members.map((m) => (
+            <RailMember key={m.id} m={m} onOpen={() => setOpen(true)} />
+          ))}
+        </>
+      }
     >
       <div className="side-body">
+        <CombatHeader />
+        {fighting && <div className="side-sub">{t('combat.crawlers')}</div>}
         {party === null && <p className="dim small">{t('common.loading')}</p>}
         {party !== null && members.length === 0 && <PartyEmpty />}
         {members.map((m) => (
           <MemberCard key={m.id} m={m} />
         ))}
+        <Opponents />
       </div>
     </SidePanel>
   );
@@ -302,7 +317,7 @@ export function PartyToggle({
 
 /* ---------------- roll log & chat ---------------- */
 
-type Filter = 'all' | 'roll' | 'chat';
+type Filter = 'all' | 'roll' | 'chat' | 'event';
 const DICE = [4, 6, 8, 10, 12, 20, 100];
 
 export function LogPanel() {
@@ -340,7 +355,7 @@ export function LogPanel() {
       }
     >
       <div className="log-filters seg small">
-        {(['all', 'roll', 'chat'] as Filter[]).map((f) => (
+        {(['all', 'roll', 'chat', 'event'] as Filter[]).map((f) => (
           <button key={f} type="button" className={filter === f ? 'active' : ''} onClick={() => setFilter(f)}>
             {t(`log.filter.${f}` as MsgKey)}
           </button>
@@ -358,7 +373,8 @@ function MessageList({ filter }: { filter: Filter }) {
   const { messages } = useLive();
   const ref = useRef<HTMLDivElement>(null);
   const stick = useRef(true);
-  const shown = messages.filter((m) => filter === 'all' || m.kind === filter);
+  // automatic entries (HP, mana, levels, combat) live in their own Log tab so they don't drown the chat
+  const shown = messages.filter((m) => (filter === 'all' ? m.kind !== 'event' : m.kind === filter));
 
   useEffect(() => {
     const el = ref.current;
@@ -387,6 +403,7 @@ function LogEntry({ m }: { m: Message }) {
   const { t, locale } = useI18n();
   const { user } = useAuth();
   const time = new Date(m.createdAt).toLocaleTimeString(locale, { hour: '2-digit', minute: '2-digit' });
+  if (m.kind === 'event' && m.event) return <EventEntry m={m} ev={m.event} time={time} />;
   const who = m.characterName || m.userName;
   const r = m.roll;
   const crit = r?.natural === 20;
@@ -433,6 +450,132 @@ function LogEntry({ m }: { m: Message }) {
           {fumble && <div className="roll-flag">{t('log.fumble')}</div>}
         </div>
       )}
+    </div>
+  );
+}
+
+/** One automatic log line: HP/mana changes with their source, level-ups, advancement, combat. */
+function EventEntry({ m, ev, time }: { m: Message; ev: LogEvent; time: string }) {
+  const { t } = useI18n();
+  const who = m.characterName || m.userName;
+  const pct = (lost: number) => (10 - lost) * 10;
+  const src = (s: string) => (s ? ` · ${s}` : ` · ${t('log.ev.manual')}`);
+  let icon = '•';
+  let tone = '';
+  let body: ReactNode = null;
+  switch (ev.type) {
+    case 'hp': {
+      const gain = ev.to < ev.from;
+      icon = gain ? '✚' : '✖';
+      tone = gain ? 'good' : 'bad';
+      body = (
+        <>
+          <strong>{who}</strong>{' '}
+          {t(gain ? 'log.ev.hpGain' : 'log.ev.hpLoss', {
+            n: Math.abs(ev.to - ev.from),
+            from: pct(ev.from),
+            to: pct(ev.to),
+          })}
+          <span className="dim">{src(ev.source)}</span>
+        </>
+      );
+      break;
+    }
+    case 'mana':
+      icon = '✦';
+      tone = 'mana';
+      body = (
+        <>
+          <strong>{who}</strong> {t('log.ev.mana', { from: ev.from || '—', to: ev.to || '—' })}
+          <span className="dim">{src(ev.source)}</span>
+        </>
+      );
+      break;
+    case 'level':
+      icon = '▲';
+      tone = 'good';
+      body = (
+        <>
+          <strong>{who}</strong> {t('log.ev.level', { to: ev.to, n: ev.levels })}
+          <span className="dim">
+            {' · '}
+            {t(`prog.src.${ev.source}` as MsgKey)}
+            {ev.source === 'boss' && ev.detail
+              ? ` (${t(`prog.tier.${ev.detail}` as MsgKey)})`
+              : ev.detail
+                ? ` (${ev.detail})`
+                : ''}
+          </span>
+        </>
+      );
+      break;
+    case 'grind':
+      icon = '⏱';
+      body = (
+        <>
+          <strong>{who}</strong> {t('log.ev.grind', { h: ev.hours, total: ev.total, need: Math.max(1, ev.level) })}
+        </>
+      );
+      break;
+    case 'advance':
+      icon = '★';
+      body = (
+        <>
+          <strong>{who}</strong> {t(ev.mode === 'floor' ? 'log.ev.advFloor' : 'log.ev.advSession')}
+          {ev.results.length === 0 ? (
+            <span className="dim"> · {t('adv.none')}</span>
+          ) : (
+            <ul className="ev-list">
+              {ev.results.map((r, i) => (
+                <li key={i} className={r.gained ? 'good' : 'dim'}>
+                  {t(r.gained ? 'adv.gained' : 'adv.failed', {
+                    name: r.name,
+                    roll: r.roll,
+                    rank: r.from,
+                    next: r.from + 1,
+                  })}
+                </li>
+              ))}
+            </ul>
+          )}
+        </>
+      );
+      break;
+    case 'combat':
+      icon = '⚔';
+      tone = 'combat';
+      body = (
+        <strong>
+          {ev.action === 'start'
+            ? t(ev.round === 0 ? 'log.ev.startSurprise' : 'log.ev.start')
+            : ev.action === 'end'
+              ? t('log.ev.end', { n: ev.round })
+              : t('log.ev.round', { n: ev.round })}
+        </strong>
+      );
+      break;
+    case 'opponent':
+      icon = ev.defeated ? '✝' : '✖';
+      tone = 'foe';
+      body = (
+        <>
+          <strong>{ev.name}</strong>{' '}
+          {ev.defeated ? t('log.ev.defeated') : t('log.ev.opponent', { from: ev.from, to: ev.to })}
+          {ev.source && <span className="dim"> · {ev.source}</span>}
+        </>
+      );
+      break;
+  }
+  return (
+    <div className={`log-event tone-${tone} ${m.gmOnly ? 'gm-only' : ''}`}>
+      <span className="ev-icon" aria-hidden>
+        {icon}
+      </span>
+      <div className="ev-body">
+        {body}
+        {m.gmOnly && <span className="pill tiny-pill">{t('log.private')}</span>}
+      </div>
+      <span className="dim tiny log-time">{time}</span>
     </div>
   );
 }

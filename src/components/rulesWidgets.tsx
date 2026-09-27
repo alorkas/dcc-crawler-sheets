@@ -1,6 +1,8 @@
 import { useState, type CSSProperties } from 'react';
 import { useField, useSheet, type Path } from './fields';
 import { useI18n, type MsgKey } from '../lib/i18n';
+import { useAuth } from '../lib/auth';
+import { api } from '../lib/api';
 import {
   DEBUFFS,
   HB_SLOTS,
@@ -12,11 +14,11 @@ import {
   clamp,
   debuffDef,
   effectiveDamage,
+  heal,
   learnUntrained,
   num,
   removeDebuff,
   rest,
-  rollAdvancement,
   slotsLost,
   spendMana,
   type AdvanceMode,
@@ -230,14 +232,20 @@ export function HealthTools() {
   const { data, der, update, set, playLocked: locked } = useSheet();
   const { t } = useI18n();
   const [amount, setAmount] = useState('');
+  const [source, setSource] = useState('');
+  const [healAmt, setHealAmt] = useState('');
+  const [healSrc, setHealSrc] = useState('');
   const [flags, setFlags] = useState({ resistant: false, vulnerable: false, immune: false, bypassDr: false });
   const slot = der.slotValue;
   const dmg = num(amount);
   const eff = dmg === null ? null : effectiveDamage({ amount: dmg, dr: der.drTotal ?? 0, ...flags });
   const lose = eff === null || !slot ? 0 : slotsLost(eff, slot, HB_SLOTS - der.hbLost);
 
-  const doRest = (kind: RestKind) =>
-    update((d) => rest(d, kind), t('undo.rest', { kind: t(`rest.${kind}` as MsgKey) }));
+  const doRest = (kind: RestKind) => {
+    const label = t(`rest.${kind}` as MsgKey);
+    update((d) => rest(d, kind), t('undo.rest', { kind: label }), { hp: label, mana: label });
+  };
+  const healSlots = num(healAmt);
 
   return (
     <div className="hb-tools">
@@ -291,6 +299,16 @@ export function HealthTools() {
                 onChange={(e) => setAmount(e.target.value)}
               />
             </label>
+            <label className="field dmg-src">
+              <span className="lbl">{t('src.label')}</span>
+              <input
+                className="in"
+                value={source}
+                maxLength={60}
+                placeholder={t('src.damagePh')}
+                onChange={(e) => setSource(e.target.value)}
+              />
+            </label>
             <div className="dmg-flags">
               {(['bypassDr', 'resistant', 'vulnerable', 'immune'] as const).map((f) => (
                 <label key={f} className="chip-check">
@@ -312,13 +330,51 @@ export function HealthTools() {
                 className="btn small primary"
                 disabled={eff === null || !slot}
                 onClick={() => {
-                  update((d) => applyHbLoss(d, lose, der.mods.con), t('undo.damage', { slots: lose }));
+                  update((d) => applyHbLoss(d, lose, der.mods.con), t('undo.damage', { slots: lose }), {
+                    hp: `${source.trim() || t('src.damage')} (${t('src.dmgAmount', { n: eff ?? 0 })})`,
+                  });
                   setAmount('');
+                  setSource('');
                 }}
               >
                 {t('dmg.apply')}
               </button>
             </div>
+          </div>
+          <div className="heal-row">
+            <label className="field dmg-amt">
+              <span className="lbl">{t('heal.slots')}</span>
+              <input
+                className="in center"
+                inputMode="numeric"
+                value={healAmt}
+                onChange={(e) => setHealAmt(e.target.value)}
+              />
+            </label>
+            <label className="field dmg-src">
+              <span className="lbl">{t('src.label')}</span>
+              <input
+                className="in"
+                value={healSrc}
+                maxLength={60}
+                placeholder={t('src.healPh')}
+                onChange={(e) => setHealSrc(e.target.value)}
+              />
+            </label>
+            <button
+              type="button"
+              className="btn small"
+              disabled={!healSlots || der.hbLost === 0}
+              onClick={() => {
+                update((d) => heal(d, healSlots ?? 0), t('undo.healSlots', { n: healSlots ?? 0 }), {
+                  hp: healSrc.trim() || t('src.healing'),
+                });
+                setHealAmt('');
+                setHealSrc('');
+              }}
+            >
+              {t('heal.apply')}
+            </button>
           </div>
           <div className="rest-row">
             <span className="lbl">{t('rest.title')}</span>
@@ -346,6 +402,7 @@ export function ManaTools() {
   const { der, update, playLocked: locked } = useSheet();
   const { t } = useI18n();
   const [cost, setCost] = useState('');
+  const [source, setSource] = useState('');
   const [msg, setMsg] = useState('');
   if (locked) return null;
   const fail = () => setMsg(t('mana.notEnough'));
@@ -359,11 +416,15 @@ export function ManaTools() {
         onClick={() => {
           setMsg('');
           let ok = true;
-          update((d) => {
-            const r = castHeal(d);
-            if (!r) ok = false;
-            return r ?? d;
-          }, t('undo.heal'));
+          update(
+            (d) => {
+              const r = castHeal(d);
+              if (!r) ok = false;
+              return r ?? d;
+            },
+            t('undo.heal'),
+            { hp: t('src.healSpell'), mana: t('src.healSpell') },
+          );
           if (!ok) fail();
         }}
       >
@@ -393,14 +454,48 @@ export function ManaTools() {
                 return r ?? d;
               },
               t('undo.spend', { n: c }),
+              { mana: source.trim() || t('src.spend') },
             );
-            if (ok) setCost('');
-            else fail();
+            if (ok) {
+              setCost('');
+              setSource('');
+            } else fail();
           }}
         >
           {t('mana.spend')}
         </button>
+        <button
+          type="button"
+          className="btn small ghost"
+          disabled={!num(cost)}
+          title={t('mana.restoreHint')}
+          onClick={() => {
+            const c = num(cost) ?? 0;
+            update(
+              (d) => {
+                const cur = num(d.manaCurrent) ?? 0;
+                const max = der.manaMax;
+                const v = max === null ? cur + c : Math.min(max, cur + c);
+                return { ...d, manaCurrent: String(v) };
+              },
+              t('undo.restore', { n: c }),
+              { mana: source.trim() || t('src.restore') },
+            );
+            setCost('');
+            setSource('');
+          }}
+        >
+          {t('mana.restore')}
+        </button>
       </div>
+      <input
+        className="in mana-src"
+        value={source}
+        maxLength={60}
+        placeholder={t('src.manaPh')}
+        aria-label={t('src.label')}
+        onChange={(e) => setSource(e.target.value)}
+      />
       {msg && <span className="error small">{msg}</span>}
     </div>
   );
@@ -496,20 +591,23 @@ export function DebuffPanel() {
 /* ---------------- skill advancement ---------------- */
 
 export function AdvancementPanel() {
-  const { data, update, locked } = useSheet();
+  const { data, update, locked, charId, runServer } = useSheet();
+  const { user } = useAuth();
   const { t } = useI18n();
   const [results, setResults] = useState<AdvanceResult[] | null>(null);
   const [learn, setLearn] = useState('');
   const marked = data.skills.filter((s) => s.done && s.name.trim()).length;
+  // Skill Advancement Checks are rolled by the GM, on the server (works on locked sheets too, and is logged)
+  const gm = !!user?.isAdmin && charId !== undefined;
 
-  const run = (mode: AdvanceMode) => {
-    let res: AdvanceResult[] = [];
-    update((d) => {
-      const r = rollAdvancement(d, mode);
-      res = r.results;
-      return r.data;
-    }, t('undo.advance'));
-    setResults(res);
+  const run = async (mode: AdvanceMode) => {
+    if (charId === undefined) return;
+    try {
+      const r = await runServer(() => api.advance(charId, mode));
+      setResults(r.results.map((x, index) => ({ ...x, index })));
+    } catch {
+      setResults([]);
+    }
   };
 
   const untrained = data.untrained.filter((s) => s.trim());
@@ -521,7 +619,7 @@ export function AdvancementPanel() {
           <strong>{t('adv.title')}</strong>
           <div className="dim small">{t('adv.marked', { n: marked, max: MAX_SKILL_RANK })}</div>
         </div>
-        {!locked && (
+        {gm && (
           <div className="advance-actions">
             <button
               type="button"

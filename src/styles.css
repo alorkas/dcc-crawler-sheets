@@ -2930,3 +2930,452 @@ ul.plain {
 .rail-member.tone-dying {
   --tone: var(--red);
 }
+
+/* ---------------- HP / mana sources ---------------- */
+.dmg-src {
+  flex: 1 1 160px;
+  min-width: 140px;
+}
+.heal-row {
+  display: flex;
+  align-items: flex-end;
+  gap: 0.75rem;
+  flex-wrap: wrap;
+  padding: 0.6rem;
+  margin-top: 0.5rem;
+  border: 1px dashed var(--border-2);
+  border-radius: 10px;
+}
+.mana-src {
+  flex: 1 1 100%;
+  font-size: 0.85rem;
+}
+.tiny-in {
+  width: 56px;
+  flex: none;
+}
+.danger-text {
+  color: var(--red);
+}
+
+/* ---------------- combat tracker (party panel) ---------------- */
+.side-sub {
+  font: 600 0.72rem/1 var(--font-label);
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: var(--dim);
+  margin: 0.4rem 0 -0.1rem;
+  display: flex;
+  align-items: center;
+  gap: 0.35rem;
+}
+.combat-start {
+  display: flex;
+  flex-direction: column;
+  gap: 0.45rem;
+  padding-bottom: 0.6rem;
+  border-bottom: 1px solid var(--border);
+}
+.combat-start-row {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  flex-wrap: wrap;
+}
+.two-hours {
+  align-self: flex-start;
+}
+.combat {
+  border: 1px solid color-mix(in srgb, var(--red) 55%, var(--border));
+  border-radius: var(--radius);
+  background: color-mix(in srgb, var(--red) 6%, var(--surface));
+  padding: 0.6rem 0.65rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.45rem;
+}
+.combat-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+}
+.combat-round {
+  font: 1.35rem/1 var(--font-head);
+  letter-spacing: 0.05em;
+  color: var(--text);
+}
+.phases {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.2rem;
+}
+.phases li {
+  display: grid;
+  grid-template-columns: 22px 1fr;
+  column-gap: 0.45rem;
+  align-items: center;
+  color: var(--dim);
+  font-size: 0.82rem;
+}
+.phases li.done {
+  opacity: 0.55;
+}
+.phases li.current {
+  color: var(--text);
+}
+.phase-num {
+  display: grid;
+  place-items: center;
+  width: 20px;
+  height: 20px;
+  border-radius: 50%;
+  background: var(--surface-2);
+  font: 600 0.7rem/1 var(--font-label);
+}
+.phases li.current .phase-num {
+  background: var(--gold);
+  color: #111;
+}
+.phases li.current .phase-name {
+  font-weight: 600;
+}
+.phase-hint {
+  grid-column: 2;
+  font-size: 0.76rem;
+  line-height: 1.35;
+  color: var(--dim);
+  margin: 0.15rem 0 0.25rem;
+}
+.reminders {
+  margin: 0.3rem 0 0;
+  padding-left: 1rem;
+  color: var(--gold);
+}
+.combat-ctrl {
+  display: flex;
+  gap: 0.35rem;
+}
+.combat-ctrl .grow {
+  flex: 1;
+}
+.rail-round {
+  display: grid;
+  place-items: center;
+  width: 38px;
+  padding: 0.25rem 0;
+  border-radius: 8px;
+  background: color-mix(in srgb, var(--red) 25%, var(--surface));
+  font: 600 0.75rem/1.1 var(--font-label);
+  color: var(--text);
+}
+.rail-round small {
+  font-size: 0.6rem;
+  color: var(--dim);
+}
+.opponents {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+  margin-top: 0.3rem;
+}
+.opponent.defeated {
+  opacity: 0.5;
+}
+.opponent.defeated .member-name {
+  text-decoration: line-through;
+}
+.opponent.is-hidden {
+  border-style: dashed;
+}
+.hp-smooth span {
+  background: var(--tone);
+}
+.npc-kind {
+  font: 600 0.8rem/1 var(--font-label);
+}
+.kind-mob {
+  background: color-mix(in srgb, var(--red) 30%, var(--surface-2));
+}
+.kind-elite {
+  background: color-mix(in srgb, #ab47bc 40%, var(--surface-2));
+}
+.kind-boss {
+  background: color-mix(in srgb, var(--gold) 45%, var(--surface-2));
+  color: #111;
+}
+.kind-npc {
+  background: color-mix(in srgb, #4f8cff 35%, var(--surface-2));
+}
+.opp-dmg {
+  display: flex;
+  gap: 0.3rem;
+  align-items: center;
+}
+.add-opp {
+  display: flex;
+  flex-direction: column;
+  gap: 0.45rem;
+  padding: 0.55rem;
+  border: 1px dashed var(--border-2);
+  border-radius: var(--radius);
+}
+.add-opp .seg {
+  margin: 0;
+  align-self: flex-start;
+}
+.quick-opp {
+  display: grid;
+  grid-template-columns: 1fr 1fr 1fr;
+  gap: 0.35rem;
+}
+.quick-opp > .in:first-child {
+  grid-column: 1 / -1;
+}
+.quick-opp > select {
+  grid-column: 1 / -1;
+}
+.add-opp-row {
+  display: flex;
+  align-items: flex-end;
+  gap: 0.4rem;
+  flex-wrap: wrap;
+}
+.mini {
+  display: flex;
+  flex-direction: column;
+  gap: 0.15rem;
+  font: 600 0.62rem/1 var(--font-label);
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--dim);
+}
+.add-opp-row .mini {
+  width: 56px;
+}
+
+/* ---------------- event log entries ---------------- */
+.log-event {
+  display: grid;
+  grid-template-columns: 18px 1fr auto;
+  gap: 0.4rem;
+  align-items: baseline;
+  font-size: 0.84rem;
+  padding: 0.3rem 0.4rem;
+  border-radius: 6px;
+  border-left: 2px solid var(--border-2);
+  background: color-mix(in srgb, var(--surface) 60%, transparent);
+}
+.log-event .ev-icon {
+  text-align: center;
+  color: var(--dim);
+}
+.log-event.tone-good {
+  border-left-color: var(--green);
+}
+.log-event.tone-good .ev-icon {
+  color: var(--green);
+}
+.log-event.tone-bad,
+.log-event.tone-foe {
+  border-left-color: var(--red);
+}
+.log-event.tone-bad .ev-icon,
+.log-event.tone-foe .ev-icon {
+  color: var(--red);
+}
+.log-event.tone-mana {
+  border-left-color: #4f8cff;
+}
+.log-event.tone-mana .ev-icon {
+  color: #4f8cff;
+}
+.log-event.tone-combat {
+  border-left-color: var(--gold);
+  background: color-mix(in srgb, var(--gold) 7%, var(--surface));
+}
+.log-event.gm-only {
+  border-style: dashed;
+}
+.ev-body .tiny-pill {
+  margin-left: 0.35rem;
+}
+.ev-list {
+  margin: 0.2rem 0 0;
+  padding-left: 1rem;
+}
+.ev-list .good {
+  color: var(--green);
+}
+
+/* ---------------- progression ---------------- */
+.prog-summary {
+  display: flex;
+  gap: 1rem;
+  flex-wrap: wrap;
+  align-items: flex-end;
+}
+.prog-stat {
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+  min-width: 90px;
+}
+.prog-stat strong {
+  font: 1.6rem/1 var(--font-head);
+}
+.prog-stat .in {
+  width: 80px;
+}
+.prog-stat.has-points .in {
+  border-color: var(--gold);
+  color: var(--gold);
+}
+.prog-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+  align-items: center;
+  margin: 0.5rem 0;
+}
+.prog-act {
+  display: flex;
+  gap: 0.3rem;
+  align-items: center;
+}
+.prog-act .in.sel {
+  width: auto;
+}
+.prog-history ul {
+  font-size: 0.88rem;
+}
+
+/* ---------------- NPC stat blocks ---------------- */
+.npc-card {
+  position: relative;
+}
+.npc-card .add-combat {
+  position: absolute;
+  right: 0.7rem;
+  bottom: 0.7rem;
+}
+.add-combat {
+  display: flex;
+  gap: 0.3rem;
+  align-items: center;
+}
+.npc-card .char-portrait span {
+  font-size: 1.4rem;
+}
+.npc-page {
+  max-width: 1000px;
+  margin: 0 auto;
+}
+.stat-block .card-body {
+  display: flex;
+  flex-direction: column;
+  gap: 0.9rem;
+}
+.sb-top {
+  display: grid;
+  grid-template-columns: 2fr 1fr 1fr 1.5fr;
+  gap: 0.8rem;
+}
+.sb-hb {
+  display: flex;
+  gap: 1rem;
+  align-items: flex-end;
+  flex-wrap: wrap;
+}
+.sb-hb-inputs {
+  display: flex;
+  gap: 0.6rem;
+}
+.sb-hb-inputs .field {
+  width: 100px;
+}
+.sb-hb-bar {
+  flex: 1;
+  display: flex;
+  gap: 3px;
+  min-width: 200px;
+}
+.sb-slot {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  border-radius: 6px;
+  overflow: hidden;
+  background: color-mix(in srgb, var(--red) 30%, var(--surface-2));
+  font: 600 0.95rem/1.6 var(--font-label);
+}
+.sb-slot small {
+  width: 100%;
+  text-align: center;
+  font-size: 0.62rem;
+  background: rgba(0, 0, 0, 0.3);
+}
+.sb-mid {
+  display: grid;
+  grid-template-columns: repeat(5, minmax(0, 1fr));
+  gap: 0.6rem;
+}
+.sb-stats {
+  display: grid;
+  grid-template-columns: repeat(5, minmax(0, 1fr));
+  gap: 0.6rem;
+}
+.sb-stat {
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+  align-items: stretch;
+  text-align: center;
+}
+.sb-stat .mod {
+  color: var(--gold);
+}
+.sb-attacks {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+.sb-attack {
+  display: grid;
+  grid-template-columns: 1.6fr 0.7fr 1.2fr 0.8fr 28px;
+  gap: 0.4rem;
+  padding: 0.5rem;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--bg-2);
+}
+.sb-effect {
+  grid-column: 1 / -1;
+  resize: vertical;
+}
+@media (max-width: 720px) {
+  .sb-top,
+  .sb-mid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+  .sb-top > .field:first-child {
+    grid-column: 1 / -1;
+  }
+  .sb-stats {
+    grid-template-columns: repeat(5, minmax(0, 1fr));
+    gap: 0.3rem;
+  }
+  .sb-attack {
+    grid-template-columns: 1fr 1fr 28px;
+  }
+  .sb-attack > .in:first-child {
+    grid-column: 1 / 3;
+  }
+  .npc-card .add-combat {
+    position: static;
+    margin-top: 0.4rem;
+  }
+}
