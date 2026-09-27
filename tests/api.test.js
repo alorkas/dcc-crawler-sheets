@@ -300,3 +300,21 @@ test('GM tools: NPCs, combat tracker, level-ups and the event log', async () => 
   await dm('POST', '/api/encounter', { action: 'end' });
   assert.equal((await pl('GET', '/api/encounter')).body.active, false);
 });
+
+test('book stat blocks import once, for the GM only', async () => {
+  const dm = client();
+  const pl = client();
+  await dm('POST', '/api/auth/login', { username: 'dm', password: 'adminpass123' });
+  await pl('POST', '/api/auth/register', { username: 'bookworm', password: 'password1' });
+  assert.equal((await pl('POST', '/api/npcs/import-book', {})).status, 403);
+  const first = await dm('POST', '/api/npcs/import-book', {});
+  assert.ok(first.body.added > 200);
+  assert.equal((await dm('POST', '/api/npcs/import-book', {})).body.added, 0);
+  const list = (await dm('GET', '/api/npcs')).body;
+  const boiler = list.find((n) => n.data.name === 'Brain Boiler');
+  assert.deepEqual(
+    [boiler.data.slots, boiler.data.slotValue, boiler.data.level, boiler.data.evade, boiler.data.source],
+    ['10', '1', '10', '14+F', 'Core Rulebook p. 333'],
+  );
+  assert.equal(boiler.data.attacks[0].damage, '3d4+2 Piercing');
+});

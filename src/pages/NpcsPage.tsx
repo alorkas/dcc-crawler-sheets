@@ -3,7 +3,7 @@ import { Link, useNavigate } from 'react-router-dom';
 import { api, type Npc } from '../lib/api';
 import { useI18n, type MsgKey } from '../lib/i18n';
 import { useLive } from '../lib/live';
-import { loadNpc } from '../lib/npc';
+import { NPC_KINDS, loadNpc } from '../lib/npc';
 
 /** GM-only list of NPC / Mob stat blocks. */
 export default function NpcsPage() {
@@ -12,12 +12,31 @@ export default function NpcsPage() {
   const [npcs, setNpcs] = useState<Npc[] | null>(null);
   const [error, setError] = useState<unknown>(null);
   const [filter, setFilter] = useState('');
+  const [chapter, setChapter] = useState('');
+  const [kind, setKind] = useState('');
+  const [importing, setImporting] = useState(false);
+  const [imported, setImported] = useState<string>('');
 
-  useEffect(() => {
+  const load = () =>
     api
       .npcs()
       .then(setNpcs)
       .catch((e) => setError(e ?? new Error()));
+  const importBook = async () => {
+    setImporting(true);
+    try {
+      const r = await api.importBookNpcs();
+      setImported(t('npc.imported', { n: r.added, total: r.total }));
+      await load();
+    } catch (e) {
+      setError(e);
+    } finally {
+      setImporting(false);
+    }
+  };
+
+  useEffect(() => {
+    load();
   }, []);
 
   const create = async () => {
@@ -29,10 +48,28 @@ export default function NpcsPage() {
     }
   };
 
-  const shown = useMemo(() => {
+  const chapters = useMemo(
+    () => [...new Set((npcs ?? []).map((n) => n.data.chapter || ''))].sort((a, b) => a.localeCompare(b)),
+    [npcs],
+  );
+  // grouped by chapter (Floor), then sorted by name
+  const groups = useMemo(() => {
     const f = filter.trim().toLowerCase();
-    return (npcs ?? []).filter((n) => !f || `${n.data.name ?? ''} ${n.data.tags ?? ''}`.toLowerCase().includes(f));
-  }, [npcs, filter]);
+    const list = (npcs ?? []).filter(
+      (n) =>
+        (!f || `${n.data.name ?? ''} ${n.data.tags ?? ''}`.toLowerCase().includes(f)) &&
+        (!chapter || (n.data.chapter || '') === chapter) &&
+        (!kind || (n.data.kind || 'mob') === kind),
+    );
+    const map = new Map<string, Npc[]>();
+    for (const n of list) map.set(n.data.chapter || '', [...(map.get(n.data.chapter || '') ?? []), n]);
+    return [...map.entries()]
+      .sort(([a], [b]) => (a === '' ? -1 : b === '' ? 1 : a.localeCompare(b)))
+      .map(([ch, items]) => ({
+        ch,
+        items: items.sort((a, b) => (a.data.name ?? '').localeCompare(b.data.name ?? '')),
+      }));
+  }, [npcs, filter, chapter, kind]);
 
   return (
     <div className="page">
@@ -48,27 +85,64 @@ export default function NpcsPage() {
             value={filter}
             onChange={(e) => setFilter(e.target.value)}
           />
+          <select
+            className="in sel"
+            value={chapter}
+            onChange={(e) => setChapter(e.target.value)}
+            aria-label={t('npc.chapter')}
+          >
+            <option value="">{t('npc.allChapters')}</option>
+            {chapters.map((c) => (
+              <option key={c} value={c}>
+                {c || t('npc.ownChapter')}
+              </option>
+            ))}
+          </select>
+          <select className="in sel" value={kind} onChange={(e) => setKind(e.target.value)} aria-label={t('npc.kind')}>
+            <option value="">{t('npc.allKinds')}</option>
+            {NPC_KINDS.map((k) => (
+              <option key={k} value={k}>
+                {t(`npc.kind.${k}` as MsgKey)}
+              </option>
+            ))}
+          </select>
+          <button className="btn" onClick={importBook} disabled={importing} title={t('npc.importHint')}>
+            {importing ? '…' : t('npc.import')}
+          </button>
           <button className="btn primary" onClick={create}>
             {t('npc.new')}
           </button>
         </div>
       </div>
       {!!error && <p className="error">{err(error)}</p>}
+      {imported && <p className="ok small">{imported}</p>}
       {!npcs && !error && <p className="dim">{t('common.loading')}</p>}
       {npcs && npcs.length === 0 && (
         <div className="empty">
           <h2>{t('npc.emptyTitle')}</h2>
           <p className="dim">{t('npc.empty')}</p>
-          <button className="btn primary" onClick={create}>
-            {t('npc.new')}
-          </button>
+          <div className="row-gap center-row">
+            <button className="btn primary" onClick={importBook} disabled={importing}>
+              {t('npc.import')}
+            </button>
+            <button className="btn" onClick={create}>
+              {t('npc.new')}
+            </button>
+          </div>
         </div>
       )}
-      <div className="char-grid">
-        {shown.map((n) => (
-          <NpcCard key={n.id} npc={n} />
-        ))}
-      </div>
+      {groups.map((g) => (
+        <div key={g.ch || 'own'} className="group">
+          <h2 className="group-title">
+            {g.ch || t('npc.ownChapter')} <span className="dim">({g.items.length})</span>
+          </h2>
+          <div className="char-grid">
+            {g.items.map((n) => (
+              <NpcCard key={n.id} npc={n} />
+            ))}
+          </div>
+        </div>
+      ))}
     </div>
   );
 }
@@ -92,8 +166,9 @@ function NpcCard({ npc }: { npc: Npc }) {
           {d.evade && <span className="pill">{t('npc.evadeShort', { v: d.evade })}</span>}
           {d.dr && <span className="pill">{t('npc.drShort', { v: d.dr })}</span>}
         </div>
+        {d.source && <div className="dim tiny">{d.source}</div>}
+        <AddToCombat npcId={npc.id} compact />
       </div>
-      <AddToCombat npcId={npc.id} compact />
     </Link>
   );
 }

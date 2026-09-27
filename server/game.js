@@ -1,4 +1,5 @@
 // GM tools: NPC stat blocks, the combat tracker, and level-ups / skill advancement.
+import { BOOK_NPCS } from './catalog/npcs.js';
 import { BOSS_LEVELS, addGrindHours, advanceSkills, crawlerKillLevels, levelUp, rollDie } from './progress.js';
 
 const PHASES = 5; // Mob Action Declaration, Crawler Reaction, Mob Attack Resolution, Crawler Action, Clean Up
@@ -25,6 +26,26 @@ export function mountGame(app, { db, auth, adminOnly, loadChar, live }) {
     const data = req.body?.data && typeof req.body.data === 'object' ? req.body.data : {};
     const r = db.prepare('INSERT INTO npcs (data) VALUES (?)').run(JSON.stringify(data));
     res.status(201).json(toNpc(db.prepare('SELECT * FROM npcs WHERE id = ?').get(r.lastInsertRowid)));
+  });
+  // add the Core Rulebook's stat blocks (skips ones already imported, so it's safe to run again)
+  app.post('/api/npcs/import-book', auth, adminOnly, (_req, res) => {
+    const have = new Set(
+      db
+        .prepare('SELECT data FROM npcs')
+        .all()
+        .map((r) => {
+          const d = JSON.parse(r.data || '{}');
+          return `${d.name}|${d.source ?? ''}`;
+        }),
+    );
+    const insert = db.prepare('INSERT INTO npcs (data) VALUES (?)');
+    let added = 0;
+    for (const n of BOOK_NPCS) {
+      if (have.has(`${n.name}|${n.source}`)) continue;
+      insert.run(JSON.stringify(n));
+      added++;
+    }
+    res.json({ added, total: BOOK_NPCS.length });
   });
   const loadNpc = (req, res, next) => {
     const row = db.prepare('SELECT * FROM npcs WHERE id = ?').get(Number(req.params.id));

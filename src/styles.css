@@ -3257,9 +3257,7 @@ ul.plain {
   position: relative;
 }
 .npc-card .add-combat {
-  position: absolute;
-  right: 0.7rem;
-  bottom: 0.7rem;
+  margin-top: 0.45rem;
 }
 .add-combat {
   display: flex;
@@ -3378,4 +3376,11 @@ ul.plain {
     position: static;
     margin-top: 0.4rem;
   }
+}
+
+.center-row {
+  justify-content: center;
+}
+.npc-card .dim.tiny {
+  margin-top: 0.2rem;
 }

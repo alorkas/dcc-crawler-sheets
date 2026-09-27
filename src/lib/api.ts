@@ -126,6 +126,9 @@ export type NpcData = {
   stats: Record<'str' | 'int' | 'con' | 'dex' | 'cha', { score: string; mod: string }>;
   attacks: { name: string; toHit: string; damage: string; range: string; effect: string }[];
   notes: string;
+  /** Where a book stat block came from ("Core Rulebook p. 333") and its chapter/Floor. */
+  source: string;
+  chapter: string;
 };
 export type Npc = { id: number; data: Partial<NpcData>; updatedAt: string };
 export type ProgressAction =
@@ -210,6 +213,7 @@ export const api = {
   createNpc: (data: Partial<NpcData> = {}) => request<Npc>('POST', '/api/npcs', { data }),
   saveNpc: (id: number, data: NpcData) => request<Npc>('PUT', `/api/npcs/${id}`, { data }),
   deleteNpc: (id: number) => request('DELETE', `/api/npcs/${id}`),
+  importBookNpcs: () => request<{ added: number; total: number }>('POST', '/api/npcs/import-book', {}),
 
   progress: (id: number, action: ProgressAction) =>
     request<{ data: SheetData; version: number }>('POST', `/api/characters/${id}/progress`, action),

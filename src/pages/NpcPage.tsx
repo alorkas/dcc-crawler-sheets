@@ -89,7 +89,9 @@ export default function NpcPage() {
           </Link>
           <div>
             <h1>{data.name || t('npc.unnamed')}</h1>
-            <div className="dim small">{t(`npc.kind.${data.kind}` as MsgKey)}</div>
+            <div className="dim small">
+              {[t(`npc.kind.${data.kind}` as MsgKey), data.chapter, data.source].filter(Boolean).join(' · ')}
+            </div>
           </div>
         </div>
         <div className="sheet-actions">

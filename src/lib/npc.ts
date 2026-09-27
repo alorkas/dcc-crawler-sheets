@@ -28,6 +28,8 @@ export function emptyNpc(): NpcData {
     stats: Object.fromEntries(NPC_STATS.map((k) => [k, { score: '', mod: '' }])) as NpcData['stats'],
     attacks: [emptyAttack()],
     notes: '',
+    source: '',
+    chapter: '',
   };
 }
 
@@ -53,6 +55,8 @@ export function loadNpc(stored: Partial<NpcData> | undefined): NpcData {
     ) as NpcData['stats'],
     attacks: Array.isArray(d.attacks) ? d.attacks.map((a) => ({ ...emptyAttack(), ...a })) : base.attacks,
     notes: str(d.notes, ''),
+    source: str(d.source, ''),
+    chapter: str(d.chapter, ''),
   };
 }
 
