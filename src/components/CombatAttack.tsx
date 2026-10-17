@@ -2,7 +2,7 @@ import { createContext, useContext, useState, type ReactNode } from 'react';
 import { api, type CrawlerAttack, type Opponent } from '../lib/api';
 import { useI18n, type MsgKey } from '../lib/i18n';
 import { spendMana } from '../lib/rules';
-import { ammoFor, spendOne, weaponFor } from '../../shared/items.js';
+import { ammoFor, isHealSpell, spellRef, spendOne, weaponFor } from '../../shared/items.js';
 import type { Effect } from '../lib/sheet';
 import { DegreeBadge } from './Status';
 import { useLiveOptional } from '../lib/live';
@@ -304,6 +304,8 @@ export function AttackRollButton({
   }
   const { fight, opps, mode } = aim;
   const attack = async () => {
+    // in combat a Spell is cast from the Hotlist (Heal is always available)
+    if (spell && !isHealSpell(name) && !data.hotSlots.includes(spellRef(name))) return say(t('spell.notOnHotlist'));
     if (manaCost && !spendMana(data, manaCost)) return say(t('mana.notEnough'));
     if (noAmmo) return say(t('ammo.none'));
     try {

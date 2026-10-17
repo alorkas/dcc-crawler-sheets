@@ -148,7 +148,7 @@ describe('buildSheet', () => {
     // the Mana Potions are an inventory item sitting in Hotlist slot 3
     const potion = s.inventory.find((i) => i.item === 'Standard Mana Potion')!;
     expect(s.hotSlots[2]).toBe(potion.id);
-    expect(s.hotlist[1]).toContain('Fire Fingers');
+    expect(s.hotSlots[0]).toBe('spell:Fire Fingers');
   });
   it('a ranged weapon starts with 20 Ammunition on the Hotlist', () => {
     const c = human();
@@ -156,9 +156,9 @@ describe('buildSheet', () => {
     c.gear.weapon = 'Hunting Bow (Bow)';
     const s = buildSheet(c, {});
     const bow = s.inventory.find((i) => i.slot === 'eq.mainHand.1')!;
-    expect([bow.ranged, bow.ammo]).toEqual([true, 'Arrow']);
+    expect([bow.ranged, bow.ammo]).toEqual([true, 'Flecha']);
     const arrows = s.inventory.find((i) => i.type === 'ammunition')!;
-    expect([arrows.item, arrows.qty, arrows.ammoType]).toEqual(['Arrows', '20', 'Arrow']);
+    expect([arrows.item, arrows.qty, arrows.ammoType]).toEqual(['Flechas', '20', 'Flecha']);
     expect(s.hotSlots[3]).toBe(arrows.id);
     expect(s.inventory.find((i) => i.item === 'Boxers')?.slot).toBe('eq.chest.1');
   });

@@ -5688,3 +5688,80 @@ ul.plain {
   max-width: 9rem;
   margin-top: 0.2rem;
 }
+
+/* ---------- Inventory sections by category ---------- */
+.inv-group {
+  display: grid;
+  gap: 0.45rem;
+  padding: 0.5rem 0.55rem 0.6rem;
+  border: 1px solid var(--border);
+  border-left: 3px solid var(--cat, var(--border-2));
+  border-radius: 10px;
+  background: color-mix(in srgb, var(--cat, transparent) 4%, transparent);
+}
+.inv-group + .inv-group {
+  margin-top: 0.35rem;
+}
+.inv-group-head {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+.inv-group-title {
+  font: 700 0.78rem/1 var(--font-label);
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--cat, var(--dim));
+}
+.inv-group-add {
+  margin-left: auto;
+}
+.inv-group-equipment {
+  --cat: #e57373;
+}
+.inv-group-accessory {
+  --cat: #ba68c8;
+}
+.inv-group-consumable {
+  --cat: #81c784;
+}
+.inv-group-ammunition {
+  --cat: #ffb74d;
+}
+.inv-group-special {
+  --cat: #ffd54f;
+}
+.inv-group-crafting {
+  --cat: #4fc3f7;
+}
+.inv-group-corpse {
+  --cat: #a1887f;
+}
+.inv-group-other {
+  --cat: #90a4ae;
+}
+.give-more-pick {
+  flex-basis: 100%;
+  display: grid;
+  gap: 0.4rem;
+  justify-items: start;
+}
+.quick-heal {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.5rem;
+  margin-bottom: 0.6rem;
+  padding: 0.45rem 0.6rem;
+  border: 1px solid color-mix(in srgb, #4caf50 45%, transparent);
+  border-radius: 10px;
+  background: color-mix(in srgb, #4caf50 8%, transparent);
+}
+.quick-heal-icon {
+  color: #66bb6a;
+  font-weight: 700;
+}
+.hot-slot.has-spell {
+  border-left: 3px solid #7e57c2;
+  background: color-mix(in srgb, #7e57c2 9%, var(--bg-2));
+}

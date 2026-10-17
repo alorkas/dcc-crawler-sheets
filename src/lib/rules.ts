@@ -5,9 +5,12 @@ import {
   ensureIds,
   gearBonus,
   HOT_SLOTS,
+  dropMissingSpells,
+  hotlistSpells,
   isBlankItem,
   ITEM_TYPES,
   sanitizeEquipped,
+  spellRef,
   syncHot,
   type BonusFrom,
   type ItemType,
@@ -27,7 +30,7 @@ import {
 } from './sheet';
 import { classifySkill } from './skillTypes';
 
-export const SCHEMA_VERSION = 8;
+export const SCHEMA_VERSION = 9;
 /** Default Move and Step in feet (Character Creation Step 7). */
 export const BASE_MOVE = 20;
 export const BASE_STEP = 10;
@@ -436,7 +439,6 @@ export function newSheet(): SheetData {
       notes: 'Rank 1 (max) · Interrupt',
     },
   ];
-  s.hotlist = ['Heal (Interrupt) · 2 Mana · heals 2 HB slots', ...s.hotlist.slice(1)];
   return s;
 }
 
@@ -460,6 +462,7 @@ export function migrate(d: SheetData): SheetData {
   if (out.schema < 6) out = migrateV5(out);
   if (out.schema < 7) out = migrateV6(out);
   if (out.schema < 8) out = migrateV7(out);
+  if (out.schema < 9) out = migrateV8(out);
   out.schema = SCHEMA_VERSION;
   return out;
 }
@@ -502,13 +505,35 @@ function migrateV6(d: SheetData): SheetData {
   return { ...d, hotlist, hotSlots: synced.hotSlots, inventory: synced.inventory };
 }
 
+/**
+ * v8 → v9: Spells go on the Hotlist as Spells. A slot whose text starts with one of the crawler's Spells now holds
+ * that Spell; the old "Heal (Interrupt)…" line goes (Heal is always available, from the Core tab).
+ */
+function migrateV8(d: SheetData): SheetData {
+  const spells = hotlistSpells(d.skills);
+  const hotSlots = [...d.hotSlots];
+  const hotlist = d.hotlist.map((txt, i) => {
+    const low = txt.trim().toLowerCase();
+    if (!low) return txt;
+    if (/^(heal|curar)\b/.test(low) && !hotSlots[i]) return '';
+    const sp = spells.find((s) => low.startsWith(s.name.trim().toLowerCase()));
+    if (sp && !hotSlots[i] && !hotSlots.includes(spellRef(sp.name))) {
+      hotSlots[i] = spellRef(sp.name);
+      return '';
+    }
+    return txt;
+  });
+  return { ...d, hotlist, hotSlots };
+}
+
 const RANGED_WEAPON = /bow\b|gun\b|pistol|rifle|sling/i;
+// in Spanish, as the table plays (ammoFor also matches the English names)
 const AMMO_OF: [RegExp, string][] = [
-  [/crossbow/i, 'Bolt'],
-  [/bow/i, 'Arrow'],
-  [/shotgun/i, 'Shell'],
-  [/gun|pistol|rifle/i, 'Bullet'],
-  [/sling/i, 'Stone'],
+  [/crossbow/i, 'Virote'],
+  [/bow/i, 'Flecha'],
+  [/shotgun/i, 'Cartucho'],
+  [/gun|pistol|rifle/i, 'Bala'],
+  [/sling/i, 'Piedra'],
 ];
 /** Ammunition a ranged weapon (or its skill) fires, '' if it isn't a ranged weapon. */
 export function ammoTypeFor(name: string): string {
@@ -765,7 +790,7 @@ export function loadSheet(stored: unknown): SheetData {
   const m = migrate(normalize(stored));
   const ids = ensureIds(m.inventory);
   // Hotlist slots only point at items that still exist; items know whether they're on the Hotlist
-  const hot = syncHot(sanitizeEquipped(ids, m.slotCounts), m.hotSlots);
+  const hot = syncHot(sanitizeEquipped(ids, m.slotCounts), dropMissingSpells(m.hotSlots, m.skills));
   const d =
     hot.inventory === m.inventory && hot.hotSlots === m.hotSlots
       ? m

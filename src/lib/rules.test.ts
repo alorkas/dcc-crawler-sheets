@@ -21,7 +21,7 @@ import {
   slotsLost,
   statModFromScore,
 } from './rules';
-import { emptyItem, emptySheet, type Item } from './sheet';
+import { emptyItem, emptySheet, emptySkill, type Item } from './sheet';
 import { classifySkill, defaultCheckType } from './skillTypes';
 
 const withStats = (vals: Partial<Record<'str' | 'int' | 'con' | 'dex' | 'cha', string>>) => {
@@ -178,7 +178,7 @@ describe('loading & migration', () => {
     expect(derive(s).step).toBe(10);
     expect(s.dr.aiFavor).toBe('1');
     expect(s.attacks[0].name).toBe('Unarmed Combat');
-    expect(s.hotlist[0]).toMatch(/Heal/);
+    expect(s.hotlist[0]).toBe(''); // Heal is always available: it doesn't take a Hotlist slot
   });
   it('migrates v1 sheets', () => {
     const v1 = emptySheet() as unknown as Record<string, unknown>;
@@ -465,7 +465,7 @@ describe('Hotlist slots', () => {
     const d = loadSheet({ schema: 6, hotlist, inventory: [rope, potion, torch] });
     expect(d.hotSlots.slice(0, 3)).toEqual(['', 'pot', 'rope']);
     expect(d.hotlist[1]).toBe('');
-    expect(d.hotlist[0]).toBe('Heal · 2 Mana');
+    expect(d.hotlist[0]).toBe(''); // (v9: the Heal line goes, Heal doesn't use the Hotlist)
     expect(d.inventory.find((i) => i.id === 'torch')!.hot).toBe(false);
     // a slot pointing at an item that's gone is emptied on load
     const gone = loadSheet({ ...d, inventory: d.inventory.filter((i) => i.id !== 'rope') });
@@ -541,7 +541,7 @@ describe('item categories and body slots (schema 8)', async () => {
       'held',
       'eq.mainHand.1',
       true,
-      'Arrow',
+      'Flecha',
     ]);
     expect([by('b').type, by('b').slot]).toEqual(['equipment', 'eq.chest.1']);
     expect([by('c').fits, by('c').slot]).toEqual(['hands', 'eq.hands.1']);
@@ -607,5 +607,36 @@ describe('item categories and body slots (schema 8)', async () => {
     const inv = [bow, arrows, bolts, loose];
     expect(items.weaponFor(inv, 'Bows')?.id).toBe('b');
     expect(items.ammoFor(inv, ['a', 'c', '', '', '', '', '', '', '', ''], bow).map((x) => x.id)).toEqual(['a']);
+    // English and Spanish names match each other
+    const flechas = mk({ id: 'f', item: 'Flechas', type: 'ammunition', ammoType: 'Flecha', qty: '3' });
+    expect(items.ammoFor([bow, flechas], ['f'], bow).map((x) => x.id)).toEqual(['f']);
+  });
+
+  it('reads healing and Mana effects in Spanish too', async () => {
+    const { itemEffect } = await import('../../shared/combat.js');
+    expect(itemEffect('Cura 5 casillas de salud.')).toEqual({ type: 'heal', amount: 5 });
+    expect(itemEffect('Recupera todo el maná (1 Acción).')).toEqual({ type: 'manaFull' });
+    expect(itemEffect('Recupera 3 de maná')).toEqual({ type: 'mana', amount: 3 });
+    expect(itemEffect('Cura a tu mascota como una poción de curación.')).toBe(null);
+  });
+});
+
+describe('Spells on the Hotlist (schema 9)', async () => {
+  const items = await import('../../shared/items.js');
+  const spell = (name: string) => ({ ...emptySkill(), name, category: 'spell' as const, manaCost: '3' });
+  it('v8 → v9: slot text naming a Spell becomes that Spell; the Heal line goes', () => {
+    const d = loadSheet({
+      schema: 8,
+      skills: [spell('Heal'), spell('Magic Missile')],
+      hotlist: ['Heal (Interrupt) · 2 Mana', 'Magic Missile · 3 Mana', 'Shout loudly', '', '', '', '', '', '', ''],
+    });
+    expect(d.hotlist.slice(0, 3)).toEqual(['', '', 'Shout loudly']);
+    expect(d.hotSlots[1]).toBe('spell:Magic Missile');
+  });
+  it('Spell slots survive syncing; a Spell the sheet no longer has leaves its slot', () => {
+    const synced = items.syncHot([], ['spell:Magic Missile', '', '', '', '', '', '', '', '', '']);
+    expect(synced.hotSlots[0]).toBe('spell:Magic Missile');
+    expect(items.dropMissingSpells(synced.hotSlots, [spell('Fireball')])[0]).toBe('');
+    expect(items.hotlistSpells([spell('Heal'), spell('Fireball')]).map((x) => x.name)).toEqual(['Fireball']);
   });
 });

@@ -399,25 +399,23 @@ export function HealthTools() {
 
 /* ---------------- mana ---------------- */
 
-export function ManaTools() {
+/** Cast Heal: always available (it never needs a Hotlist slot). In combat it's an Interrupt that uses an Action. */
+export function HealButton({ className = 'btn small' }: { className?: string }) {
   const { data, der, update, playLocked: locked } = useSheet();
   const combat = useCombatAction();
   const { t } = useI18n();
-  const [cost, setCost] = useState('');
-  const [source, setSource] = useState('');
   const [msg, setMsg] = useState('');
   if (locked) return null;
-  const fail = () => setMsg(t('mana.notEnough'));
   return (
-    <div className="mana-tools">
+    <>
       <button
         type="button"
-        className="btn small"
+        className={className}
         disabled={der.hbLost === 0}
         title={combat.inCombat ? t('mana.healCombatHint', { n: combat.left }) : t('mana.healHint')}
         onClick={async () => {
           setMsg('');
-          if (!castHeal(data)) return fail();
+          if (!castHeal(data)) return setMsg(t('mana.notEnough'));
           // in combat, Healing is an Interrupt (or an Action in step 4): it uses one of the crawler's Actions
           if (combat.inCombat) {
             const r = await combat.spend('heal');
@@ -428,6 +426,22 @@ export function ManaTools() {
       >
         {t('mana.castHeal', { n: HEAL_MANA_COST })}
       </button>
+      {msg && <span className="error small">{msg}</span>}
+    </>
+  );
+}
+
+export function ManaTools() {
+  const { der, update, playLocked: locked } = useSheet();
+  const { t } = useI18n();
+  const [cost, setCost] = useState('');
+  const [source, setSource] = useState('');
+  const [msg, setMsg] = useState('');
+  if (locked) return null;
+  const fail = () => setMsg(t('mana.notEnough'));
+  return (
+    <div className="mana-tools">
+      <HealButton />
       <div className="spend">
         <input
           className="in center"

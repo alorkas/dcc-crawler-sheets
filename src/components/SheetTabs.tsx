@@ -2,12 +2,12 @@ import { Area, Input, Section, useSheet } from './fields';
 import { ListRows, Portrait } from './widgets';
 import { EffectsPanel } from './Status';
 import { SheetQuickItems } from './QuickItems';
-import { AutoNumber, DebuffPanel, HealthBar, HealthTools, ManaTools, useStatMod } from './rulesWidgets';
+import { AutoNumber, DebuffPanel, HealButton, HealthBar, HealthTools, ManaTools, useStatMod } from './rulesWidgets';
 import { annotateDamage, damageExpr, num, pinnedAttacks, statModFromScore } from '../lib/rules';
 import { useSearchParams } from 'react-router-dom';
 import { CastButton } from './SkillsTab';
 import { RollButton } from './RollButton';
-import { damageBonusFor } from '../../shared/items.js';
+import { damageBonusFor, isSpellRef, spellRef } from '../../shared/items.js';
 import { HotlistSlots } from './Inventory';
 import { AttackRollButton, CombatTargetBar, TargetProvider } from './CombatAttack';
 import { AssignStatPoints } from './AssignStatPoints';
@@ -39,6 +39,7 @@ export function CoreTab() {
         </div>
         <div className="sub-lbl">{t('core.health')}</div>
         <HealthBar lostPath={['hbLost']} slotValue={der.slotValue} />
+        <QuickHeal />
         <HealthTools />
       </Section>
 
@@ -200,9 +201,64 @@ export function CoreTab() {
       </Section>
 
       <Section title={t('core.attacks')} className="span-attacks">
+        <QuickHeal />
         <PinnedAttacks />
+        <HotlistSpells />
         <SheetQuickItems />
       </Section>
+    </div>
+  );
+}
+
+/** Heal is always at hand (it never needs a Hotlist slot). */
+function QuickHeal() {
+  const { t } = useI18n();
+  return (
+    <div className="quick-heal">
+      <span className="quick-heal-icon" aria-hidden>
+        ✚
+      </span>
+      <HealButton className="btn small primary" />
+      <span className="dim tiny">{t('heal.always')}</span>
+    </div>
+  );
+}
+
+/** Spells on the Hotlist (the ones that can be cast in combat), in Hotlist order. */
+function HotlistSpells() {
+  const { data } = useSheet();
+  const { t } = useI18n();
+  const spells = data.hotSlots
+    .map((id, slot) => ({ id, slot }))
+    .filter(({ id }) => isSpellRef(id))
+    .map(({ id, slot }) => ({
+      slot,
+      i: data.skills.findIndex((s) => s.category === 'spell' && spellRef(s.name) === id),
+    }))
+    .filter(({ i }) => i >= 0);
+  if (!spells.length) return null;
+  return (
+    <div className="quick-items hot-spells">
+      <div className="lbl">✦ {t('hot.spellsTitle')}</div>
+      <ul>
+        {spells.map(({ slot, i }) => {
+          const sk = data.skills[i];
+          const attack = sk.pinned;
+          return (
+            <li key={slot}>
+              <span className="grow" title={sk.effect || sk.description}>
+                <strong>{sk.name}</strong>{' '}
+                <span className="dim tiny">
+                  · {t('gear.slot', { n: slot + 1 })}
+                  {sk.manaCost && ` · ${t('skill.sumMana', { n: sk.manaCost })}`}
+                  {attack && ` · ${t('hot.spellAttackHint')}`}
+                </span>
+              </span>
+              {!attack && <CastButton i={i} compact />}
+            </li>
+          );
+        })}
+      </ul>
     </div>
   );
 }

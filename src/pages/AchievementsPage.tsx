@@ -254,30 +254,48 @@ function GiveMore({
   onGive: (ids: number[]) => void;
 }) {
   const { t } = useI18n();
-  const [pick, setPick] = useState('');
+  const [open, setOpen] = useState(false);
+  const [ids, setIds] = useState<number[]>([]);
   const left = crawlers.filter((c) => !a.awards.some((w) => w.characterId === c.id));
   if (!left.length) return null;
+  const party = left.filter((c) => c.inParty);
+  const others = left.filter((c) => !c.inParty);
+  const give = (list: number[]) => {
+    if (!list.length) return;
+    onGive(list);
+    setIds([]);
+    setOpen(false);
+  };
+  const toggle = (id: number) => setIds((s) => (s.includes(id) ? s.filter((x) => x !== id) : [...s, id]));
+  const pickRow = (c: CharacterSummary) => (
+    <label key={c.id} className="recipient-pick">
+      <input type="checkbox" checked={ids.includes(c.id)} onChange={() => toggle(c.id)} />
+      {c.summary.name || '?'} <span className="dim tiny">({c.ownerName})</span>
+    </label>
+  );
   return (
     <div className="give-more">
-      <select className="in sel" value={pick} onChange={(e) => setPick(e.target.value)}>
-        <option value="">{t('achPage.giveTo')}</option>
-        {left.map((c) => (
-          <option key={c.id} value={c.id}>
-            {c.summary.name || '?'} ({c.ownerName})
-          </option>
-        ))}
-      </select>
-      <button
-        type="button"
-        className="btn small"
-        disabled={!pick}
-        onClick={() => {
-          onGive([Number(pick)]);
-          setPick('');
-        }}
-      >
-        {t('achPage.give')}
+      {party.length > 0 && (
+        <button type="button" className="btn small" onClick={() => give(party.map((c) => c.id))}>
+          {t('achPage.giveParty', { n: party.length })}
+        </button>
+      )}
+      <button type="button" className="btn small ghost" onClick={() => setOpen((o) => !o)} aria-expanded={open}>
+        {t('achPage.giveTo')}
       </button>
+      {open && (
+        <div className="give-more-pick">
+          <div className="recipient-picks">
+            {party.length > 0 && <div className="dim tiny">{t('party.title')}</div>}
+            {party.map(pickRow)}
+            {others.length > 0 && party.length > 0 && <div className="dim tiny">{t('achPage.others')}</div>}
+            {others.map(pickRow)}
+          </div>
+          <button type="button" className="btn small primary" disabled={!ids.length} onClick={() => give(ids)}>
+            {t('achPage.giveN', { n: ids.length })}
+          </button>
+        </div>
+      )}
     </div>
   );
 }
@@ -409,24 +427,41 @@ const pick = <T,>(list: T[]) => list[Math.floor(Math.random() * list.length)];
 /** Book staples by tier (Core Rulebook "Loot Boxes"), plus gold. */
 function staples(tier: string): RewardItem[] {
   const d = (n: number) => 1 + Math.floor(Math.random() * n);
-  const item = (name: string, qty: number, notes = ''): RewardItem => ({
+  // the book's staples, named and described in Spanish (the table plays in Spanish)
+  const item = (name: string, qty: number, notes = '', type: RewardItem['type'] = 'consumable'): RewardItem => ({
     ...newItem(),
     item: name,
     qty: String(qty),
-    type: name === 'Gold' ? 'other' : name === 'Torch' ? 'special' : 'consumable',
+    type,
     notes,
   });
+  const oro = (n: number) => item('Oro', n, '', 'other');
   if (tier === 'bronze')
     return [
-      pick([item('Healing Potion', 1), item('Bandage', d(6)), item('Torch', 10), item('Mana Potion', 1)]),
-      item('Gold', d(10)),
+      pick([
+        item('Poción de curación', 1, 'Cura 5 casillas de salud.'),
+        item('Venda', d(6), 'Gasta una Acción: quita Rastro de sangre.'),
+        item('Antorcha', 10, 'Luz brillante 20 pies y tenue 20 más; dura como una hora.', 'special'),
+        item('Poción de maná', 1, 'Recupera todo el maná (1 Acción para pimplártela).'),
+      ]),
+      oro(d(10)),
     ];
   if (tier === 'silver')
     return [
-      pick([item('Good Healing Potion', 1), item('Poison Antidote', 2), item('Heal Pet Potion', 1)]),
-      item('Gold', d(10) * 10),
+      pick([
+        item('Poción de curación buena', 1, 'Cura 6 casillas de salud.'),
+        item('Antídoto', 2, 'Quita el veneno.'),
+        item('Poción de curar mascota', 1, 'Cura a tu mascota como una poción de curación.'),
+      ]),
+      oro(d(10) * 10),
     ];
-  return [pick([item('Gold Standard Healing Potion', 1), item('Good Healing Potion', 2)]), item('Gold', d(10) * 100)];
+  return [
+    pick([
+      item('Poción de curación de oro', 1, 'Cura 7 casillas de salud y arregla una Lesión menor.'),
+      item('Poción de curación buena', 2, 'Cura 6 casillas de salud.'),
+    ]),
+    oro(d(10) * 100),
+  ];
 }
 /**
  * A box filled the way the book describes it: one magic item of the box's tier (or the best below it), a

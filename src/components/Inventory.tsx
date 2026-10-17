@@ -12,11 +12,14 @@ import {
   equipItem,
   fitsSlot,
   hotlistable,
+  hotlistSpells,
   isBlankItem,
+  isSpellRef,
   isWorn,
   setHotSlot,
   slotKeyOf,
   slotList,
+  spellRef,
   syncHot,
   toggleHot,
 } from '../../shared/items.js';
@@ -96,8 +99,8 @@ function withType(d: SheetData, id: string, type: ItemType): SheetData {
 }
 
 /* ---------------- sorting (remembered per user) ---------------- */
-type SortMode = 'manual' | 'qty' | 'alpha' | 'type';
-const SORTS: SortMode[] = ['manual', 'alpha', 'qty', 'type'];
+type SortMode = 'manual' | 'qty' | 'alpha' | 'rarity';
+const SORTS: SortMode[] = ['manual', 'alpha', 'qty', 'rarity'];
 
 function useSortMode(): [SortMode, (m: SortMode) => void] {
   const { user } = useAuth();
@@ -123,22 +126,24 @@ function useSortMode(): [SortMode, (m: SortMode) => void] {
 
 const qtyOf = (it: Item) => Number(String(it.qty).match(/\d+/)?.[0] ?? 0);
 
-/** Indexes of the inventory in display order (empty rows stay at the end in every mode). */
-function sortedIndexes(list: Item[], mode: SortMode, typeLabel: (t: string) => string): number[] {
-  const idx = list.map((_, i) => i);
+/** Indexes of some inventory rows in display order (empty rows stay at the end in every mode). */
+function sortedIndexes(list: Item[], idx: number[], mode: SortMode): number[] {
   const filled = idx.filter((i) => !isBlankItem(list[i]));
   const blank = idx.filter((i) => isBlankItem(list[i]));
+  const rank = (r: string) => (r ? (RARITIES as string[]).indexOf(r) : -1);
   const by = (a: number, b: number) => {
     const x = list[a];
     const y = list[b];
     if (mode === 'alpha') return x.item.localeCompare(y.item);
     if (mode === 'qty') return qtyOf(y) - qtyOf(x) || x.item.localeCompare(y.item);
-    if (mode === 'type')
-      return typeLabel(x.type || 'zz').localeCompare(typeLabel(y.type || 'zz')) || x.item.localeCompare(y.item);
+    if (mode === 'rarity') return rank(y.rarity) - rank(x.rarity) || x.item.localeCompare(y.item);
     return 0;
   };
   return [...(mode === 'manual' ? filled : [...filled].sort(by)), ...blank];
 }
+
+/** Inventory sections: one per category, then items without one (and new rows). */
+const GROUPS: (ItemType | '')[] = [...ITEM_TYPES, ''];
 
 export const rarityClass = (r: string) => (r ? `rar-${r}` : '');
 
@@ -149,8 +154,10 @@ export function InventoryTab() {
   const [mode, setMode] = useSortMode();
   const [open, setOpen] = useState<number | null>(null);
   const [drag, setDrag] = useState<number | null>(null);
-  const typeLabel = (x: string) => (x === 'zz' ? '~' : t(`itemType.${x}` as MsgKey));
-  const order = sortedIndexes(data.inventory, mode, typeLabel);
+  const groups = GROUPS.map((type) => {
+    const idx = data.inventory.map((_, i) => i).filter((i) => (data.inventory[i].type || '') === type);
+    return { type, order: sortedIndexes(data.inventory, idx, mode) };
+  }).filter((g) => g.order.length > 0);
   const move = (from: number, to: number) => {
     if (from === to) return;
     update((d) => {
@@ -162,9 +169,11 @@ export function InventoryTab() {
   };
   const onDrop = (e: DragEvent, to: number) => {
     e.preventDefault();
-    if (drag !== null) move(drag, to);
+    // rows only move within their category
+    if (drag !== null && (data.inventory[drag].type || '') === (data.inventory[to].type || '')) move(drag, to);
     setDrag(null);
   };
+  const add = (type: ItemType | '') => update((d) => ({ ...d, inventory: [...d.inventory, { ...emptyItem(), type }] }));
   return (
     <Section
       title={t('inv.title')}
@@ -191,31 +200,44 @@ export function InventoryTab() {
           <span>{t('inv.notes')}</span>
           <span />
         </div>
-        {order.map((i, pos) => (
-          <div
-            key={data.inventory[i].id}
-            className={`list-row inv-row ${drag === i ? 'dragging' : ''} ${rarityClass(data.inventory[i].rarity)}`}
-            draggable={mode === 'manual' && !playLocked && !isBlankItem(data.inventory[i])}
-            onDragStart={() => setDrag(i)}
-            onDragOver={(e) => mode === 'manual' && e.preventDefault()}
-            onDrop={(e) => onDrop(e, i)}
-            onDragEnd={() => setDrag(null)}
-          >
-            <InventoryRow
-              i={i}
-              manual={mode === 'manual'}
-              onUp={pos > 0 ? () => move(i, order[pos - 1]) : undefined}
-              onDown={pos < order.length - 1 ? () => move(i, order[pos + 1]) : undefined}
-              onOpen={() => setOpen(i)}
-            />
-          </div>
+        {groups.map(({ type, order }) => (
+          <section key={type || 'none'} className={`inv-group inv-group-${type || 'none'}`}>
+            <div className="inv-group-head">
+              <span className="inv-group-title">{type ? t(`itemType.${type}` as MsgKey) : t('inv.uncategorized')}</span>
+              <span className="pill tiny-pill">{order.filter((i) => !isBlankItem(data.inventory[i])).length}</span>
+              {!playLocked && type && (
+                <button type="button" className="btn small ghost inv-group-add" onClick={() => add(type)}>
+                  + {t('inv.addHere')}
+                </button>
+              )}
+            </div>
+            {order.map((i, pos) => (
+              <div
+                key={data.inventory[i].id}
+                className={`list-row inv-row ${drag === i ? 'dragging' : ''} ${rarityClass(data.inventory[i].rarity)}`}
+                draggable={mode === 'manual' && !playLocked && !isBlankItem(data.inventory[i])}
+                onDragStart={() => setDrag(i)}
+                onDragOver={(e) => mode === 'manual' && e.preventDefault()}
+                onDrop={(e) => onDrop(e, i)}
+                onDragEnd={() => setDrag(null)}
+              >
+                <InventoryRow
+                  i={i}
+                  manual={mode === 'manual'}
+                  onUp={pos > 0 ? () => move(i, order[pos - 1]) : undefined}
+                  onDown={
+                    pos < order.length - 1 && !isBlankItem(data.inventory[order[pos + 1]])
+                      ? () => move(i, order[pos + 1])
+                      : undefined
+                  }
+                  onOpen={() => setOpen(i)}
+                />
+              </div>
+            ))}
+          </section>
         ))}
         {!playLocked && (
-          <button
-            type="button"
-            className="btn ghost add-row"
-            onClick={() => update((d) => ({ ...d, inventory: [...d.inventory, emptyItem()] }))}
-          >
+          <button type="button" className="btn ghost add-row" onClick={() => add('')}>
             + {t('inv.add')}
           </button>
         )}
@@ -622,11 +644,13 @@ export function ItemDialog({ i, onClose }: { i: number; onClose: () => void }) {
                     return (
                       <option key={n} value={n}>
                         {t('gear.slot', { n: n + 1 })}
-                        {other
-                          ? ` · ${other.item} (${t('hot.replace')})`
-                          : data.hotlist[n]?.trim()
-                            ? ` · ${data.hotlist[n].trim().slice(0, 24)}`
-                            : ''}
+                        {isSpellRef(data.hotSlots[n])
+                          ? ` · ✦ ${data.hotSlots[n].slice(6)} (${t('hot.replace')})`
+                          : other
+                            ? ` · ${other.item} (${t('hot.replace')})`
+                            : data.hotlist[n]?.trim()
+                              ? ` · ${data.hotlist[n].trim().slice(0, 24)}`
+                              : ''}
                       </option>
                     );
                   })}
@@ -659,6 +683,7 @@ export function HotlistSlots() {
   const [open, setOpen] = useState<number | null>(null);
   const index = new Map(data.inventory.map((it, i) => [it.id, i]));
   const free = data.inventory.filter((it) => !isBlankItem(it) && hotlistable(it) && !data.hotSlots.includes(it.id));
+  const freeSpells = hotlistSpells(data.skills).filter((sk) => !data.hotSlots.includes(spellRef(sk.name)));
   return (
     <>
       {hot.inFight && <div className="dim tiny">{t('hot.costsAction')}</div>}
@@ -668,6 +693,36 @@ export function HotlistSlots() {
           const idx = index.get(data.hotSlots[s]);
           const it = idx !== undefined ? data.inventory[idx] : null;
           const text = data.hotlist[s]?.trim();
+          const sk = isSpellRef(data.hotSlots[s])
+            ? data.skills.find((x) => x.category === 'spell' && spellRef(x.name) === data.hotSlots[s])
+            : undefined;
+          if (sk)
+            return (
+              <div key={s} className="hot-slot has-item has-spell">
+                <div className="hot-slot-head">
+                  <span className="dim tiny">{t('gear.slot', { n: s + 1 })}</span>
+                  {!playLocked && (
+                    <button
+                      type="button"
+                      className="icon-btn small"
+                      title={t('hot.remove')}
+                      aria-label={t('hot.remove')}
+                      onClick={() => hot.change(s, '')}
+                    >
+                      ×
+                    </button>
+                  )}
+                </div>
+                <strong className="hot-item">✦ {sk.name}</strong>
+                <span className="dim tiny">
+                  {t('hot.spell')}
+                  {sk.manaCost && ` · ${t('skill.sumMana', { n: sk.manaCost })}`}
+                </span>
+                {(sk.effect || sk.description) && (
+                  <div className="dim tiny hot-notes">{sk.effect || sk.description}</div>
+                )}
+              </div>
+            );
           return (
             <div key={s} className={`hot-slot ${it ? `has-item ${rarityClass(it.rarity)}` : ''}`}>
               <div className="hot-slot-head">
@@ -700,7 +755,7 @@ export function HotlistSlots() {
               ) : (
                 <>
                   <Area path={['hotlist', s]} rows={2} placeholder={t('hot.textPh')} />
-                  {!playLocked && free.length > 0 && (
+                  {!playLocked && free.length + freeSpells.length > 0 && (
                     <select
                       className="in sel tiny-sel"
                       value=""
@@ -708,12 +763,26 @@ export function HotlistSlots() {
                       onChange={(e) => e.target.value && hot.change(s, e.target.value)}
                     >
                       <option value="">★ {t('hot.assign')}</option>
-                      {free.map((x) => (
-                        <option key={x.id} value={x.id}>
-                          {x.item}
-                          {(Number(x.qty) || 1) > 1 ? ` ×${x.qty}` : ''}
-                        </option>
-                      ))}
+                      {free.length > 0 && (
+                        <optgroup label={t('hot.items')}>
+                          {free.map((x) => (
+                            <option key={x.id} value={x.id}>
+                              {x.item}
+                              {(Number(x.qty) || 1) > 1 ? ` ×${x.qty}` : ''}
+                            </option>
+                          ))}
+                        </optgroup>
+                      )}
+                      {freeSpells.length > 0 && (
+                        <optgroup label={t('hot.spells')}>
+                          {freeSpells.map((x) => (
+                            <option key={x.name} value={spellRef(x.name)}>
+                              ✦ {x.name}
+                              {x.manaCost ? ` · ${t('skill.sumMana', { n: x.manaCost })}` : ''}
+                            </option>
+                          ))}
+                        </optgroup>
+                      )}
                     </select>
                   )}
                 </>

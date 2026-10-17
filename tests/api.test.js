@@ -1151,6 +1151,16 @@ test('Phase 4: effects tick down, Evade degrees, Advantage, Intervene, Taunt, Ca
   );
   const encNow = (await p1('GET', '/api/encounter')).body;
   assert.equal(encNow.actions[A].used.length, 2, 'Evade and the potion use Ana’s Actions');
+  // undo the last potion: Bo loses the healing again, the potion and its Hotlist slot come back, the Action too
+  const potionMsg = (await p1('GET', '/api/messages')).body.filter((m) => m.event?.type === 'item').at(-1);
+  assert.equal((await p2('POST', `/api/messages/${potionMsg.id}/undo`, {})).status, 404, 'not Bo’s to undo');
+  assert.equal((await p1('POST', `/api/messages/${potionMsg.id}/undo`, {})).status, 200);
+  assert.equal((await sheet(p2, B)).hbLost, 3);
+  const anaBack = await sheet(p1, A);
+  assert.equal(anaBack.inventory.find((i) => i.id === 'hp1').qty, '1');
+  assert.equal(anaBack.hotSlots[0], 'hp1');
+  assert.equal((await p1('GET', '/api/encounter')).body.actions[A].used.length, 1);
+  await p1('POST', `/api/characters/${A}/use-item`, { itemId: 'hp1', targetId: B });
 
   // Area attack: one roll, one Action, a result per opponent (Bo still has… no Actions: free one first)
   await dm('POST', '/api/encounter/actions', { characterId: B, op: 'free', index: 0 });
@@ -1331,12 +1341,14 @@ test('campaign loot: valid items, GM-only list, claimed items bring their bonuse
   const c = await pl('POST', '/api/characters', { data: { schema: 7, name: 'Looter' } });
   const ach = await dm('POST', '/api/achievements', {
     title: 'Ring bearer',
-    reward: { boxes: [{ tier: 'silver', kind: 'adventurer', items: [{ item: 'Silver Ring of Grace', qty: '1' }] }] },
+    reward: {
+      boxes: [{ tier: 'silver', kind: 'adventurer', items: [{ item: 'Anillo de Plata del Estilazo', qty: '1' }] }],
+    },
     characterIds: [c.body.id],
   });
   await pl('POST', `/api/awards/${ach.body.awards[0].id}/claim`);
   const ring = (await pl('GET', `/api/characters/${c.body.id}`)).body.data.inventory.find(
-    (i) => i.item === 'Silver Ring of Grace',
+    (i) => i.item === 'Anillo de Plata del Estilazo',
   );
   assert.equal(ring.bonus.dex, '2');
   assert.equal(ring.rarity, 'silver');
@@ -1376,7 +1388,11 @@ test('item categories: what can be used, Hotlist changes cost an Action in comba
     { ...base, id: 'wand', item: 'Wand of Sparks', type: 'consumable', maxCharges: '2', charges: '', slot: '' },
   ];
   const hotSlots = ['arr', 'ring', '', '', '', '', '', '', '', ''];
-  const c = await pl('POST', '/api/characters', { data: { schema: 8, name: 'Robin', inventory, hotSlots } });
+  const skills = [
+    { name: 'Heal', category: 'spell', rank: '1' },
+    { name: 'Magic Missile', category: 'spell', rank: '2', manaCost: '3' },
+  ];
+  const c = await pl('POST', '/api/characters', { data: { schema: 9, name: 'Robin', inventory, hotSlots, skills } });
   const id = c.body.id;
   const sheet = async () => (await pl('GET', `/api/characters/${id}`)).body;
 
@@ -1386,6 +1402,22 @@ test('item categories: what can be used, Hotlist changes cost an Action in comba
   const zap = await pl('POST', `/api/characters/${id}/use-item`, { itemId: 'wand' });
   assert.equal(zap.status, 200);
   assert.equal((await sheet()).data.inventory.find((i) => i.id === 'wand').charges, '1', 'a charge, not the wand');
+  // every use can be undone from the log: the charge comes back
+  const zapMsg = (await pl('GET', '/api/messages')).body.filter((m) => m.event?.type === 'item').at(-1);
+  assert.equal((await pl('POST', `/api/messages/${zapMsg.id}/undo`, {})).status, 200);
+  assert.equal((await sheet()).data.inventory.find((i) => i.id === 'wand').charges, '2');
+  // the last of a stack (here: the wand's last charge on its only wand) disappears, and Undo brings it back
+  await pl('POST', `/api/characters/${id}/use-item`, { itemId: 'wand' });
+  await pl('POST', `/api/characters/${id}/use-item`, { itemId: 'wand' });
+  assert.equal(
+    (await sheet()).data.inventory.some((i) => i.id === 'wand'),
+    false,
+  );
+  const last = (await pl('GET', '/api/messages')).body.filter((m) => m.event?.type === 'item').at(-1);
+  assert.equal((await pl('POST', `/api/messages/${last.id}/undo`, {})).status, 200);
+  const back = (await sheet()).data.inventory.find((i) => i.id === 'wand');
+  assert.deepEqual([back.qty, back.charges], ['1', '1']);
+  assert.equal((await pl('POST', `/api/messages/${last.id}/undo`, {})).body.code, 'already_undone');
   const glow = await pl('POST', `/api/characters/${id}/use-item`, { itemId: 'ring' });
   assert.equal(glow.status, 200);
   assert.ok(
@@ -1396,6 +1428,16 @@ test('item categories: what can be used, Hotlist changes cost an Action in comba
     (await pl('POST', `/api/characters/${id}/hotlist`, { slot: 2, itemId: 'rope' })).body.code,
     'not_hotlistable',
   );
+  // Spells go on the Hotlist too; Heal never does (it's always available)
+  assert.equal(
+    (await pl('POST', `/api/characters/${id}/hotlist`, { slot: 5, itemId: 'spell:Heal' })).body.code,
+    'not_hotlistable',
+  );
+  assert.equal(
+    (await pl('POST', `/api/characters/${id}/hotlist`, { slot: 5, itemId: 'spell:Magic Missile' })).status,
+    200,
+  );
+  assert.equal((await sheet()).data.hotSlots[5], 'spell:Magic Missile');
   const calm = await pl('POST', `/api/characters/${id}/hotlist`, { slot: 2, itemId: 'wand' });
   assert.equal(calm.status, 200);
   assert.equal(calm.body.messageId, null, 'no log entry (and no Action) out of combat');

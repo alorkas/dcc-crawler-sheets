@@ -1,6 +1,7 @@
 // Character creation data and logic (Core Rulebook ch.3 "First Steps" / Crawlers & Customization).
 // Everything here is from the public character-creation chapter of the player books.
 import { ammoTypeFor, newSheet, statModFromScore } from './rules';
+import { spellRef } from '../../shared/items.js';
 import { emptyItem, emptySkill, type Item, type SheetData, type Skill, type StatKey, type StatSel } from './sheet';
 import { classifySkill } from './skillTypes';
 import { fillSkill } from './catalog';
@@ -416,10 +417,10 @@ export function buildSheet(c: Choices, hits: Record<string, CatalogHit | null>):
   skills.push(s.skills.find((x) => x.name === 'Heal')!);
   s.skills = skills;
 
-  // Hotlist: Heal, plus 5 Mana Potions for spell-casters
-  s.hotlist = [...s.hotlist];
+  // Hotlist: the attack Spell (Heal is always available and doesn't use it), plus 5 Mana Potions for spell-casters
   if (c.combat?.kind === 'spell') {
-    s.hotlist[1] = `${c.combat.skill} · ${hits[c.combat.skill]?.entry.manaCost ?? '?'} Mana`;
+    const ref = spellRef(c.combat.skill);
+    s.hotSlots = s.hotSlots.map((id, i) => (i === 0 ? ref : id));
   }
 
   // Step 10: starting gear (clothing and weapon are equipped; spell-casters also carry their Mana Potions)
@@ -454,7 +455,7 @@ export function buildSheet(c: Choices, hits: Record<string, CatalogHit | null>):
     .map((item): Item => ({ ...emptyItem(), item, qty: '1', type: 'other' }));
   // a ranged weapon starts with 20 rounds of its Ammunition, on the Hotlist
   if (g.weapon.trim() && ammo)
-    carried.push({ ...emptyItem(), item: `${ammo}s`, qty: '20', type: 'ammunition', ammoType: ammo });
+    carried.push({ ...emptyItem(), item: `${ammo}s`, qty: '20', type: 'ammunition', ammoType: ammo }); // Flechas, Balas…
   if (c.combat?.kind === 'spell')
     carried.push({
       ...emptyItem(),

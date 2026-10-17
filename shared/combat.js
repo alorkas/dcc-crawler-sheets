@@ -123,5 +123,11 @@ export function itemEffect(notes) {
   if (/fully\s+restores?\s+mana/i.test(s)) return { type: 'manaFull' };
   const mana = s.match(/\brestores?\s+(\d+)\s+mana\b(?!\s+per)/i);
   if (mana) return { type: 'mana', amount: Number(mana[1]) };
+  // the same in Spanish ("Cura 5 casillas de salud", "Recupera todo el maná", "Recupera 3 de maná")
+  const cura = s.match(/\bcura\s+(\d+)\s+casillas?/i);
+  if (cura && !/mascota/i.test(s)) return { type: 'heal', amount: Number(cura[1]) };
+  if (/(recupera|restaura)\s+todo\s+el\s+man[aá]/i.test(s)) return { type: 'manaFull' };
+  const mana2 = s.match(/\b(?:recupera|restaura)\s+(\d+)\s+(?:de\s+|puntos\s+de\s+)?man[aá]/i);
+  if (mana2) return { type: 'mana', amount: Number(mana2[1]) };
   return null;
 }

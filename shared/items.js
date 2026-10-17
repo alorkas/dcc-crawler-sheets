@@ -120,8 +120,12 @@ export const hotlistable = (it) =>
   (['consumable', 'ammunition', 'special'].includes(it.type) || (isWorn(it.type) && !!String(it.ability || '').trim()));
 
 /** Ammunition on the Hotlist that a ranged weapon can fire ("Arrow" matches "Arrows"; a weapon without a type takes any). */
+const AMMO_SYNONYMS = { arrow: 'flecha', bolt: 'virote', bullet: 'bala', shell: 'cartucho', stone: 'piedra' };
 export function ammoFor(inventory, hotSlots, weapon) {
-  const one = (v) => norm(v).replace(/(es|s)$/, '');
+  const one = (v) => {
+    const w = norm(v).replace(/(es|s)$/, '');
+    return AMMO_SYNONYMS[w] ?? w;
+  };
   const want = one(weapon?.ammo);
   return (hotSlots || [])
     .map((id) => (inventory || []).find((it) => it.id === id))
@@ -278,11 +282,20 @@ export function damageBonusFor(inventory, skillName, isSpell = false) {
   return { total, from };
 }
 
-/* ---------------- the Hotlist: 10 quick-access slots holding inventory items ---------------- */
+/* ---------------- the Hotlist: 10 quick-access slots holding inventory items or Spells ---------------- */
 export const HOT_SLOTS = 10;
+/** A Spell on the Hotlist is stored as 'spell:<Skill name>' (Heal is always available and never goes there). */
+export const SPELL_REF = 'spell:';
+export const isSpellRef = (id) => String(id || '').startsWith(SPELL_REF);
+export const spellRef = (name) => `${SPELL_REF}${String(name || '').trim()}`;
+export const isHealSpell = (name) => norm(name) === 'heal' || norm(name) === 'curar';
+/** Spells that can go on the Hotlist: the sheet's Spell skills, except Heal. */
+export const hotlistSpells = (skills) =>
+  (skills || []).filter((s) => s && s.category === 'spell' && norm(s.name) && !isHealSpell(s.name));
 
 /**
- * Keep the Hotlist and the items in line: a slot only points at an item that still exists (and isn't empty), and
+ * Keep the Hotlist and the items in line: a slot only points at an item that still exists (and isn't empty) or a
+ * Spell (checked against the skills by `dropMissingSpells`), and
  * an item's `hot` flag says whether it sits in a slot. Returns the same objects when nothing changed.
  */
 export function syncHot(inventory, hotSlots) {
@@ -291,7 +304,7 @@ export function syncHot(inventory, hotSlots) {
   const seen = new Set();
   const slots = Array.from({ length: HOT_SLOTS }, (_, i) => {
     const id = (hotSlots || [])[i] || '';
-    if (!id || !ids.has(id) || seen.has(id)) return '';
+    if (!id || (!ids.has(id) && !isSpellRef(id)) || seen.has(id)) return '';
     seen.add(id);
     return id;
   });
@@ -304,6 +317,13 @@ export function syncHot(inventory, hotSlots) {
     return { ...it, hot };
   });
   return { inventory: changed ? nextInv : inventory, hotSlots: sameSlots ? hotSlots : slots };
+}
+
+/** Empty the Hotlist slots of Spells the sheet no longer has (renamed or removed). */
+export function dropMissingSpells(hotSlots, skills) {
+  const have = new Set(hotlistSpells(skills).map((s) => spellRef(s.name)));
+  const out = (hotSlots || []).map((id) => (isSpellRef(id) && !have.has(id) ? '' : id));
+  return out.every((id, i) => id === hotSlots[i]) ? hotSlots : out;
 }
 
 /** Put an item in a Hotlist slot ('' empties the slot). An item sits in one slot at most. */

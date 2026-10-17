@@ -161,6 +161,9 @@ export type LogEvent =
       ability?: string;
       /** Charges left on the current one. */
       charges?: number;
+      /** Present when it can be undone from the log. */
+      undo?: unknown;
+      undone?: boolean;
     }
   | {
       type: 'hotlist';

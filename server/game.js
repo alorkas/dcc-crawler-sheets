@@ -15,7 +15,16 @@ import {
   newEffectId,
   tickRound,
 } from '../shared/combat.js';
-import { hotlistable, isWorn, setHotSlot, spendOne, HOT_SLOTS } from '../shared/items.js';
+import {
+  hotlistable,
+  hotlistSpells,
+  isSpellRef,
+  isWorn,
+  setHotSlot,
+  spellRef,
+  spendOne,
+  HOT_SLOTS,
+} from '../shared/items.js';
 import { BOSS_LEVELS, addGrindHours, advanceSkills, crawlerKillLevels, levelUp, rollDie } from './progress.js';
 
 const PHASES = 5; // Mob Action Declaration, Crawler Reaction, Mob Attack Resolution, Crawler Action, Clean Up
@@ -244,7 +253,8 @@ export function mountGame(app, { db, auth, adminOnly, loadChar, live, hooks = {}
     // crawler attacks this round; the Mob's Evade (the target number) is for the GM only
     attacks: (enc.active ? enc.attacks || [] : [])
       .filter((x) => x.round === enc.round)
-      .map((x) => (admin ? x : { ...x, dc: undefined })),
+      // eslint-disable-next-line no-unused-vars
+      .map(({ ammo, ...x }) => (admin ? x : { ...x, dc: undefined })),
     active: enc.active,
     round: enc.round,
     phase: enc.phase,
@@ -894,7 +904,8 @@ export function mountGame(app, { db, auth, adminOnly, loadChar, live, hooks = {}
     const target = targetId === req.char.id ? req.char : charRow(targetId);
     if (!target || (target.id !== req.char.id && !target.party_since))
       return res.status(404).json({ error: 'Character not found', code: 'char_not_found' });
-    if (inFight && !useAction(enc, req.char.id, enc.phase === 2 && fx?.type === 'heal' ? 'heal' : 'action'))
+    const actionKind = enc.phase === 2 && fx?.type === 'heal' ? 'heal' : 'action';
+    if (inFight && !useAction(enc, req.char.id, actionKind))
       return res.status(409).json({ error: 'No Actions left', code: 'no_actions_left' });
     const spent = kept ? null : spendOne(inv, hotSlots, it.id);
     if (!kept && !spent) return res.status(409).json({ error: 'None left', code: 'none_left' });
@@ -902,7 +913,9 @@ export function mountGame(app, { db, auth, adminOnly, loadChar, live, hooks = {}
     const name = clip(it.item);
     let mine = spent ? { ...data, inventory: spent.inventory, hotSlots: spent.hotSlots } : data;
     let applied = null;
+    let manaBefore = null;
     const applyTo = (d, self) => {
+      manaBefore = d.manaCurrent ?? '';
       if (fx?.type === 'heal') {
         const lost = int(d.hbLost, 0);
         applied = { type: 'heal', slots: Math.min(lost, fx.amount) };
@@ -940,6 +953,17 @@ export function mountGame(app, { db, auth, adminOnly, loadChar, live, hooks = {}
         applied,
         ...(kept ? { kept: true, ability: clip(it.ability || it.notes, 200) } : {}),
         ...(spent?.charges ? { charges: spent.charges } : {}),
+        // what Undo needs: the item as it was, where it sat, the Action and the effect on the target
+        undo: {
+          item: it,
+          index: inv.indexOf(it),
+          slot: hotSlots.indexOf(it.id),
+          action: inFight ? actionKind : null,
+          round: enc.round,
+          targetId: target.id,
+          manaBefore: applied?.type === 'mana' ? manaBefore : null,
+        },
+        undone: false,
       },
       gmOnly: !req.char.party_since,
     });
@@ -955,8 +979,14 @@ export function mountGame(app, { db, auth, adminOnly, loadChar, live, hooks = {}
     const slot = int(req.body?.slot, -1);
     if (slot < 0 || slot >= HOT_SLOTS) return res.status(400).json({ error: 'Bad slot', code: 'bad_request' });
     const itemId = String(req.body?.itemId || '');
-    const it = itemId ? inv.find((x) => x && x.id === itemId) : null;
-    if (itemId && !it) return res.status(404).json({ error: 'Not found', code: 'not_found' });
+    // a Spell ('spell:<name>', any of the crawler's Spells but Heal) or an inventory item
+    const sp = isSpellRef(itemId)
+      ? hotlistSpells(Array.isArray(data.skills) ? data.skills : []).find((x) => spellRef(x.name) === itemId)
+      : null;
+    if (isSpellRef(itemId) && !sp)
+      return res.status(409).json({ error: 'This item cannot go on the Hotlist', code: 'not_hotlistable' });
+    const it = itemId && !sp ? inv.find((x) => x && x.id === itemId) : null;
+    if (itemId && !sp && !it) return res.status(404).json({ error: 'Not found', code: 'not_found' });
     if (it && !hotlistable(it))
       return res.status(409).json({ error: 'This item cannot go on the Hotlist', code: 'not_hotlistable' });
     const before = Array.from({ length: HOT_SLOTS }, (_, i) => (data.hotSlots || [])[i] || '');
@@ -972,7 +1002,8 @@ export function mountGame(app, { db, auth, adminOnly, loadChar, live, hooks = {}
     let messageId = null;
     if (inFight) {
       putEnc(enc);
-      const prev = inv.find((x) => x.id === before[slot]);
+      const prevId = before[slot];
+      const prev = isSpellRef(prevId) ? { item: prevId.slice(6) } : inv.find((x) => x.id === prevId);
       const msg = live.postEvent({
         ownerId: req.char.owner_id,
         characterId: req.char.id,
@@ -980,7 +1011,7 @@ export function mountGame(app, { db, auth, adminOnly, loadChar, live, hooks = {}
         event: {
           type: 'hotlist',
           slot: slot + 1,
-          item: it ? clip(it.item) : '',
+          item: it ? clip(it.item) : sp ? clip(sp.name) : '',
           prev: prev ? clip(prev.item) : '',
           before,
           after: next.hotSlots,
@@ -994,28 +1025,73 @@ export function mountGame(app, { db, auth, adminOnly, loadChar, live, hooks = {}
     res.json({ data: mine, version: charRow(req.char.id).version, messageId });
   });
 
-  // Undo a Hotlist change made in combat (its owner or the GM): the slots go back and the Action is returned
+  /** Give back the Action an undone entry used (only within the same round of the same fight). */
+  const freeAction = (cid, kind, round) => {
+    const enc = getEnc();
+    if (!kind || !enc.active || enc.round !== round) return;
+    const a = actionsOf(enc, cid);
+    const i = a.used.lastIndexOf(kind);
+    if (i >= 0) a.used.splice(i, 1);
+    putEnc(enc);
+  };
+
+  /** Put back one use of an item: a charge or one of the stack; the row (and its Hotlist slot) if it was used up. */
+  function restoreItem(data, u) {
+    const inv = Array.isArray(data.inventory) ? [...data.inventory] : [];
+    const was = u.item;
+    const max = int(was.maxCharges, 0);
+    const i = inv.findIndex((x) => x && x.id === was.id);
+    const hotSlots = Array.from({ length: HOT_SLOTS }, (_, k) => (data.hotSlots || [])[k] || '');
+    if (i >= 0) {
+      const now = inv[i];
+      const chargeSpent = max > 0 && int(now.qty, 1) === int(was.qty, 1);
+      inv[i] = chargeSpent
+        ? { ...now, charges: String(Math.min(max, int(now.charges, max) + 1)) }
+        : { ...now, qty: String(int(now.qty, 0) + 1), ...(max > 0 ? { charges: String(was.charges ?? '') } : {}) };
+    } else {
+      inv.splice(Math.max(0, Math.min(inv.length, int(u.index, inv.length))), 0, { ...was, qty: '1' });
+      if (u.slot >= 0 && !hotSlots[u.slot]) hotSlots[u.slot] = was.id;
+    }
+    return { ...data, inventory: inv, hotSlots };
+  }
+
+  // Undo from the chat/log (its owner or the GM): a Hotlist change made in combat (slots back, Action returned) or
+  // using an item (the use comes back, the healing or Mana it gave is taken away, the Action is returned)
   app.post('/api/messages/:id/undo', auth, (req, res) => {
     const m = live.rawMessage(req.params.id);
     const ev = m?.event ? JSON.parse(m.event) : null;
-    if (!m || ev?.type !== 'hotlist') return res.status(404).json({ error: 'Not found', code: 'not_found' });
+    if (!m || !['hotlist', 'item'].includes(ev?.type) || (ev.type === 'item' && !ev.undo))
+      return res.status(404).json({ error: 'Not found', code: 'not_found' });
     const row = charRow(m.character_id);
     if (!row || (row.owner_id !== req.user.id && !req.user.is_admin))
       return res.status(404).json({ error: 'Not found', code: 'not_found' });
     if (ev.undone) return res.status(409).json({ error: 'Already undone', code: 'already_undone' });
     const data = JSON.parse(row.data || '{}');
-    const now = Array.from({ length: HOT_SLOTS }, (_, i) => (data.hotSlots || [])[i] || '');
-    if (!now.every((id, i) => id === (ev.after[i] || '')))
-      return res.status(409).json({ error: 'The Hotlist changed since', code: 'hotlist_changed' });
-    // the items it held might have been used up since: setHotSlot/syncHot drop missing ones
-    const back = setHotSlot(data.inventory || [], ev.before, -1, '');
-    writeSheetWith(row, { ...data, inventory: back.inventory, hotSlots: back.hotSlots }, req.user.id, {});
-    const enc = getEnc();
-    if (enc.active && enc.round === ev.round) {
-      const a = actionsOf(enc, row.id);
-      const i = a.used.lastIndexOf('hotlist');
-      if (i >= 0) a.used.splice(i, 1);
-      putEnc(enc);
+    if (ev.type === 'hotlist') {
+      const now = Array.from({ length: HOT_SLOTS }, (_, i) => (data.hotSlots || [])[i] || '');
+      if (!now.every((id, i) => id === (ev.after[i] || '')))
+        return res.status(409).json({ error: 'The Hotlist changed since', code: 'hotlist_changed' });
+      // the items it held might have been used up since: setHotSlot/syncHot drop missing ones
+      const back = setHotSlot(data.inventory || [], ev.before, -1, '');
+      writeSheetWith(row, { ...data, inventory: back.inventory, hotSlots: back.hotSlots }, req.user.id, {});
+      freeAction(row.id, 'hotlist', ev.round);
+    } else {
+      const u = ev.undo;
+      const sources = { hp: [`Undo: ${clip(ev.item)}`], mana: [`Undo: ${clip(ev.item)}`] };
+      const takeBack = (d) => {
+        if (ev.applied?.type === 'heal' && ev.applied.slots)
+          return { ...d, hbLost: Math.min(10, int(d.hbLost, 0) + int(ev.applied.slots, 0)) };
+        if (ev.applied?.type === 'mana' && u.manaBefore !== null) return { ...d, manaCurrent: u.manaBefore };
+        return d;
+      };
+      let mine = ev.kept ? data : restoreItem(data, u);
+      if (u.targetId === row.id) mine = takeBack(mine);
+      if (mine !== data) writeSheetWith(row, mine, req.user.id, sources);
+      if (u.targetId !== row.id) {
+        const target = charRow(u.targetId);
+        if (target) writeSheetWith(target, takeBack(JSON.parse(target.data || '{}')), req.user.id, sources);
+      }
+      freeAction(row.id, u.action, u.round);
     }
     live.updateEvent(m.id, { ...ev, undone: true });
     res.json({ ok: true });
@@ -1177,6 +1253,13 @@ export function mountGame(app, { db, auth, adminOnly, loadChar, live, hooks = {}
         applied: null,
       };
     });
+    // the Ammunition it used comes back if the GM undoes the attack
+    if (ammo)
+      records[0].ammo = {
+        item: ammo,
+        index: data.inventory.indexOf(ammo),
+        slot: (data.hotSlots || []).indexOf(ammo.id),
+      };
     enc.attacks = [...(enc.attacks || []), ...records];
     const shown = opps.map((o) => (o.hidden ? '???' : o.name)).join(', ');
     const posted = live.postRoll({
@@ -1217,7 +1300,10 @@ export function mountGame(app, { db, auth, adminOnly, loadChar, live, hooks = {}
     const atk = findAttack(enc, req.params.id);
     if (!atk) return res.status(404).json({ error: 'Not found', code: 'not_found' });
     // an Area Attack is one roll (and one Action) against several opponents: undo all of it
-    enc.attacks = enc.attacks.filter((x) => x !== atk && !(atk.group && x.group === atk.group));
+    const removed = enc.attacks.filter((x) => x === atk || (atk.group && x.group === atk.group));
+    enc.attacks = enc.attacks.filter((x) => !removed.includes(x));
+    const shot = removed.find((x) => x.ammo)?.ammo;
+    if (shot) changeSheet(atk.characterId, (d) => restoreItem(d, shot), req.user.id);
     const a = actionsOf(enc, atk.characterId);
     const i = a.used.lastIndexOf('attack');
     if (i >= 0) a.used.splice(i, 1);

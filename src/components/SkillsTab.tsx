@@ -3,6 +3,7 @@ import { Area, Check, Input, Section, useSheet } from './fields';
 import { AdvancementPanel, RankBadge, StatMod, useStatMod } from './rulesWidgets';
 import { useI18n, type MsgKey } from '../lib/i18n';
 import { canPin, castHeal, num, spendMana } from '../lib/rules';
+import { spellRef } from '../../shared/items.js';
 import { emptySkill, signed, type Skill } from '../lib/sheet';
 import { SKILL_CATEGORIES, isCategory, isValidType, type SkillCategory } from '../lib/skillTypes';
 import { fillSkill, hitType, lookup } from '../lib/catalog';
@@ -571,6 +572,8 @@ export function CastButton({ i, compact }: { i: number; compact?: boolean }) {
   if (locked || (cost === null && !isHeal)) return null;
   const cast = async () => {
     setMsg('');
+    // in combat a Spell is cast from the Hotlist (Heal is always available)
+    if (!isHeal && combat.inCombat && !data.hotSlots.includes(spellRef(s.name))) return setMsg(t('spell.notOnHotlist'));
     // in combat, Heal is an Interrupt (or an Action in step 4): it uses one of the crawler's Actions
     if (isHeal && combat.inCombat) {
       if (!castHeal(data)) return setMsg(t('mana.notEnough'));

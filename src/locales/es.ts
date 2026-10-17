@@ -951,7 +951,6 @@ export const es: Messages = {
   'inv.sort.manual': 'Mi orden (arrastrar)',
   'inv.sort.alpha': 'A–Z',
   'inv.sort.qty': 'Cantidad',
-  'inv.sort.type': 'Tipo',
   'inv.type': 'Tipo',
   'inv.drag': 'Arrastra para reordenar',
   'inv.up': 'Subir',
@@ -1046,14 +1045,12 @@ export const es: Messages = {
   'achPage.delete': 'Eliminar',
   'achPage.deleteConfirm':
     '¿Eliminar el logro «{title}» para todos? Los objetos ya reclamados se quedan en los inventarios.',
-  'achPage.giveTo': 'Dárselo a otro crawler…',
   'achPage.give': 'Dar',
   'achPage.fTitle': 'Título',
   'achPage.fDesc': 'Descripción',
   'achPage.fDescHint': 'Qué hicieron para conseguirlo (el anuncio de la IA del Sistema, si quieres)',
   'achPage.editNote':
     'Los crawlers que aún no lo han reclamado reciben la nueva recompensa; las ya reclamadas no cambian.',
-  'achPage.wholeParty': 'Todo el grupo',
   'achPage.others': 'Otros crawlers',
   'achPage.create': 'Crear',
   'achPage.createGive': 'Crear y dárselo a {n}',
@@ -1298,8 +1295,6 @@ export const es: Messages = {
   'hot.on': 'Poner en acceso rápido (primer hueco libre)',
   'hot.off': 'Quitar del acceso rápido',
   'hot.remove': 'Quitarlo de este hueco (sigue en el inventario)',
-  'hot.assign': 'Poner un objeto aquí…',
-  'hot.textPh': 'Vacío: pon un objeto o escribe un hechizo o lo que quieras',
   'bonus.str': 'FUE',
   'bonus.int': 'INT',
   'bonus.con': 'CON',
@@ -1312,8 +1307,6 @@ export const es: Messages = {
     'Llena esta caja como dice el libro: un objeto mágico de su nivel (del botín de la campaña), un consumible, una poción o suministros, y oro. Sustituye lo que tenga.',
   'tab.gear': 'Acceso rápido y notas',
   'tab.equipment': 'Equipo',
-  'gear.hotlistHint':
-    'Aquí van los consumibles, la munición, los objetos especiales y las habilidades de tu equipo y accesorios (toca ★ en una fila del inventario o elige uno abajo); un hueco vacío puede llevar texto, como un hechizo. Los consumibles se gastan; las habilidades de equipo, accesorios y especiales, no. En combate, usar un objeto o cambiar un hueco gasta una Acción.',
   'inv.hint':
     'Arrastra las filas (o usa ▲▼) para ordenarlas a tu gusto. ⋯ abre un objeto: categoría, rareza, dónde se lleva, bonificaciones, hueco de acceso rápido. Fuera de combate, los consumibles se usan desde aquí. Los objetos se pueden editar con la hoja bloqueada.',
   'inv.bonusHint':
@@ -1390,4 +1383,23 @@ export const es: Messages = {
   'err.no_ammo': 'No te queda munición para esa arma.',
   'err.already_undone': 'Ya está deshecho.',
   'err.hotlist_changed': 'El acceso rápido ha cambiado desde entonces; no se puede deshacer.',
+  'inv.uncategorized': 'Sin categoría / nuevos',
+  'inv.addHere': 'Añadir',
+  'inv.sort.rarity': 'Rareza',
+  'achPage.giveTo': 'Dar a crawlers…',
+  'achPage.giveParty': 'Dar a todo el grupo ({n})',
+  'achPage.giveN': 'Dar a {n}',
+  'achPage.wholeParty': 'Todo el grupo activo',
+  'heal.always':
+    'Curar siempre está disponible: no ocupa hueco de acceso rápido. En combate es una Interrupción (1 Acción).',
+  'hot.items': 'Objetos',
+  'hot.spells': 'Hechizos',
+  'hot.spellsTitle': 'Hechizos en acceso rápido',
+  'hot.spellAttackHint': 'atácalo desde la lista de arriba',
+  'spell.notOnHotlist': 'En combate, pon el hechizo en el acceso rápido para lanzarlo',
+  'gear.hotlistHint':
+    'Aquí van los consumibles, la munición, los objetos especiales, las habilidades de tu equipo y accesorios, y tus hechizos (toca ★ en una fila del inventario o elige uno abajo); un hueco vacío puede llevar texto. En combate solo puedes lanzar los hechizos que estén en el acceso rápido (Curar siempre está disponible, desde la pestaña Principal). Los consumibles se gastan; las habilidades y los hechizos, no. En combate, usar un objeto o cambiar un hueco gasta una Acción.',
+  'hot.textPh': 'Vacío: pon un objeto o un hechizo, o escribe lo que quieras',
+  'hot.spell': 'Hechizo',
+  'hot.assign': 'Poner un objeto o hechizo…',
 };

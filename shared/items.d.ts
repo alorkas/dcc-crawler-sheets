@@ -65,6 +65,12 @@ export function equipped(inventory: Item[]): Item[];
 export function gearBonus(inventory: Item[], key: BonusKey): BonusFrom;
 export function damageBonusFor(inventory: Item[], skillName: string, isSpell?: boolean): BonusFrom;
 export const HOT_SLOTS: number;
+export const SPELL_REF: string;
+export function isSpellRef(id: string | undefined): boolean;
+export function spellRef(name: string): string;
+export function isHealSpell(name: string): boolean;
+export function hotlistSpells<S extends { category: string; name: string }>(skills: S[]): S[];
+export function dropMissingSpells(hotSlots: string[], skills: { category: string; name: string }[]): string[];
 export function syncHot(inventory: Item[], hotSlots: string[]): { inventory: Item[]; hotSlots: string[] };
 export function setHotSlot(
   inventory: Item[],
