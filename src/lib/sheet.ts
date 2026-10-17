@@ -46,7 +46,7 @@ export type Skill = {
   effect: string;
   baseDamage: string;
 };
-import { emptyItem as newItem, type Item } from '../../shared/items.js';
+import { emptyItem as newItem, SLOT_KEYS, type Item } from '../../shared/items.js';
 export type { Item, GearSlot, ItemType, Rarity } from '../../shared/items.js';
 export type LevelEntry = {
   at: string;
@@ -90,6 +90,8 @@ export type SheetData = {
   hotlist: string[];
   /** Inventory item ids in the 10 Hotlist slots ('' = no item; the slot's text in `hotlist` is used instead). */
   hotSlots: string[];
+  /** Equipment/Accessory slot counts by kind ('eq.head', 'acc.finger'…; '' = the default). Only the GM changes them. */
+  slotCounts: Record<string, string>;
   /** Legacy (≤ v5) free-text gear slots; since v6 gear is equipped inventory items (Item.slot). */
   gear: { head: string; torso: string; arms: string; hands: string; legs: string; feet: string; accessories: string };
   popularity: string;
@@ -215,6 +217,7 @@ export function emptySheet(): SheetData {
     attacks: Array.from({ length: 5 }, emptyAttack),
     hotlist: Array(10).fill(''),
     hotSlots: Array(10).fill(''),
+    slotCounts: Object.fromEntries(SLOT_KEYS.map((k) => [k, ''])),
     gear: { head: '', torso: '', arms: '', hands: '', legs: '', feet: '', accessories: '' },
     popularity: '',
     pastTrauma: '',

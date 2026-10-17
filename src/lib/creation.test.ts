@@ -130,9 +130,9 @@ describe('buildSheet', () => {
     expect(names).toContain('Heal');
     // 1 unarmed + weapon + 8 background skills + heal
     expect(s.skills).toHaveLength(11);
-    const hands = s.inventory.find((i) => i.slot === 'hands');
+    const hands = s.inventory.find((i) => i.slot === 'eq.mainHand.1');
     expect(hands?.item).toBe('Tire Iron (Club)');
-    expect(hands?.type).toBe('weapon');
+    expect([hands?.type, hands?.fits, hands?.ranged]).toEqual(['equipment', 'held', false]);
     expect(s.inventory.map((i) => i.item)).toEqual(expect.arrayContaining(['Lighter', 'A googly eye']));
     const career = s.skills.find((k) => k.name === human().backgrounds.career.picks[0])!;
     expect(career.rank).toBe('3');
@@ -149,6 +149,18 @@ describe('buildSheet', () => {
     const potion = s.inventory.find((i) => i.item === 'Standard Mana Potion')!;
     expect(s.hotSlots[2]).toBe(potion.id);
     expect(s.hotlist[1]).toContain('Fire Fingers');
+  });
+  it('a ranged weapon starts with 20 Ammunition on the Hotlist', () => {
+    const c = human();
+    c.combat = { kind: 'weapon', skill: 'Bow', label: 'Hunting Bow (Bow)' };
+    c.gear.weapon = 'Hunting Bow (Bow)';
+    const s = buildSheet(c, {});
+    const bow = s.inventory.find((i) => i.slot === 'eq.mainHand.1')!;
+    expect([bow.ranged, bow.ammo]).toEqual([true, 'Arrow']);
+    const arrows = s.inventory.find((i) => i.type === 'ammunition')!;
+    expect([arrows.item, arrows.qty, arrows.ammoType]).toEqual(['Arrows', '20', 'Arrow']);
+    expect(s.hotSlots[3]).toBe(arrows.id);
+    expect(s.inventory.find((i) => i.item === 'Boxers')?.slot).toBe('eq.chest.1');
   });
   it('animals get Slice Attack and a size', () => {
     const c = human();

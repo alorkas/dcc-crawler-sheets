@@ -12,6 +12,7 @@ import { mountRewards } from './rewards.js';
 import { mountMaps } from './maps.js';
 import { backupNow, listBackups } from './backup.js';
 import { applyPlay } from '../shared/lockRules.js';
+import { SLOT_KEYS } from '../shared/items.js';
 
 const COOKIE = 'dcc_session';
 const VIEW_COOKIE = 'dcc_view_as';
@@ -260,8 +261,10 @@ export function createApp({
     // A locked sheet only takes the play fields (health, mana, buffs, debuffs, advancement marks);
     // everything else is kept as stored. One-time format upgrades (higher schema) are saved whole.
     const stored = JSON.parse(req.char.data || '{}');
-    const next =
-      req.char.locked && !(Number(data.schema) > Number(stored.schema || 0)) ? applyPlay(stored, data) : data;
+    let next = req.char.locked && !(Number(data.schema) > Number(stored.schema || 0)) ? applyPlay(stored, data) : data;
+    // only the GM changes how many Equipment/Accessory slots a crawler has
+    if (!req.user.is_admin)
+      next = { ...next, slotCounts: stored.slotCounts ?? Object.fromEntries(SLOT_KEYS.map((k) => [k, ''])) };
     db.prepare(`UPDATE characters SET data = ?, version = version + 1, updated_at = datetime('now') WHERE id = ?`).run(
       JSON.stringify(next),
       req.char.id,

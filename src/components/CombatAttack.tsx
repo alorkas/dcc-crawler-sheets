@@ -2,6 +2,7 @@ import { createContext, useContext, useState, type ReactNode } from 'react';
 import { api, type CrawlerAttack, type Opponent } from '../lib/api';
 import { useI18n, type MsgKey } from '../lib/i18n';
 import { spendMana } from '../lib/rules';
+import { ammoFor, spendOne, weaponFor } from '../../shared/items.js';
 import type { Effect } from '../lib/sheet';
 import { DegreeBadge } from './Status';
 import { useLiveOptional } from '../lib/live';
@@ -224,6 +225,7 @@ export function AttackRollButton({
   name,
   damage,
   manaCost = null,
+  spell = false,
   className,
 }: {
   expr: string;
@@ -234,20 +236,76 @@ export function AttackRollButton({
   damage: string | null;
   /** Attack spells: their Mana cost is spent when cast at a target. */
   manaCost?: number | null;
+  /** Spells never use Ammunition. */
+  spell?: boolean;
   className?: string;
 }) {
   const { t, err } = useI18n();
-  const { data, update } = useSheet();
+  const { data, update, playLocked } = useSheet();
   const aim = useAim();
   const [flash, setFlash] = useState<string | null>(null);
-  if (!aim || !aim.opps.length) return <RollButton expr={expr} text={text} label={label} className={className} />;
+  const [ammoPick, setAmmoPick] = useState('');
+  // a ranged weapon (held, tied to this attack) fires one Ammunition from the Hotlist
+  const weapon = spell ? null : weaponFor(data.inventory, name);
+  const ammoList = weapon?.ranged ? ammoFor(data.inventory, data.hotSlots, weapon) : [];
+  const ammo = weapon?.ranged ? (ammoList.find((a) => a.id === ammoPick) ?? ammoList[0] ?? null) : null;
+  const noAmmo = !!weapon?.ranged && !ammo;
+  const say = (msg: string) => {
+    setFlash(msg);
+    setTimeout(() => setFlash(null), 2500);
+  };
+  const picker =
+    ammoList.length > 1 ? (
+      <select
+        className="in sel tiny-sel ammo-pick"
+        value={ammo?.id ?? ''}
+        aria-label={t('ammo.pick')}
+        onChange={(e) => setAmmoPick(e.target.value)}
+      >
+        {ammoList.map((a) => (
+          <option key={a.id} value={a.id}>
+            {a.item} ×{Number(a.qty) || 0}
+          </option>
+        ))}
+      </select>
+    ) : ammo ? (
+      <span className="dim tiny">
+        {ammo.item} ×{Number(ammo.qty) || 0}
+      </span>
+    ) : noAmmo ? (
+      <span className="tiny error">{t('ammo.none')}</span>
+    ) : null;
+  if (!aim || !aim.opps.length) {
+    // a plain roll: the shot still uses up one Ammunition
+    const beforeRoll = () => {
+      if (!weapon?.ranged) return true;
+      if (!ammo || playLocked) {
+        if (!ammo) say(t('ammo.none'));
+        return !!ammo;
+      }
+      update((d) => {
+        const r = spendOne(d.inventory, d.hotSlots, ammo.id);
+        return r ? { ...d, inventory: r.inventory, hotSlots: r.hotSlots } : d;
+      });
+      return true;
+    };
+    return (
+      <>
+        <RollButton
+          expr={expr}
+          text={flash ?? text}
+          label={label}
+          className={className}
+          beforeRoll={weapon?.ranged ? beforeRoll : undefined}
+        />
+        {picker}
+      </>
+    );
+  }
   const { fight, opps, mode } = aim;
   const attack = async () => {
-    if (manaCost && !spendMana(data, manaCost)) {
-      setFlash(t('mana.notEnough'));
-      setTimeout(() => setFlash(null), 2500);
-      return;
-    }
+    if (manaCost && !spendMana(data, manaCost)) return say(t('mana.notEnough'));
+    if (noAmmo) return say(t('ammo.none'));
     try {
       const enc = await api.crawlerAttack({
         characterId: fight.charId,
@@ -255,6 +313,7 @@ export function AttackRollButton({
         expr: withMode(expr, mode),
         damage,
         label: name,
+        ...(ammo ? { ammoItemId: ammo.id } : {}),
       });
       fight.live.setEncounter(enc);
       if (manaCost) update((d) => spendMana(d, manaCost) ?? d, undefined, { mana: t('src.cast', { name }) });
@@ -268,20 +327,23 @@ export function AttackRollButton({
   };
   const names = opps.map((o: Opponent) => o.name).join(', ');
   return (
-    <button
-      type="button"
-      className={`roll-total roll-btn target-roll ${flash ? 'rolled' : ''} ${className ?? ''}`}
-      onClick={attack}
-      title={[
-        t('atkt.attackHint', { name: names }),
-        mode !== 'normal' && t(`atkt.mode.${mode}` as MsgKey),
-        manaCost && t('skill.sumMana', { n: manaCost }),
-      ]
-        .filter(Boolean)
-        .join(' · ')}
-    >
-      {flash ?? `${opps.length > 1 ? '💥' : '🎯'} ${mode === 'adv' ? '▲ ' : mode === 'dis' ? '▼ ' : ''}${text}`}
-    </button>
+    <>
+      <button
+        type="button"
+        className={`roll-total roll-btn target-roll ${flash ? 'rolled' : ''} ${className ?? ''}`}
+        onClick={attack}
+        title={[
+          t('atkt.attackHint', { name: names }),
+          mode !== 'normal' && t(`atkt.mode.${mode}` as MsgKey),
+          manaCost && t('skill.sumMana', { n: manaCost }),
+        ]
+          .filter(Boolean)
+          .join(' · ')}
+      >
+        {flash ?? `${opps.length > 1 ? '💥' : '🎯'} ${mode === 'adv' ? '▲ ' : mode === 'dis' ? '▼ ' : ''}${text}`}
+      </button>
+      {picker}
+    </>
   );
 }
 

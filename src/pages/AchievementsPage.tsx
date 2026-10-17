@@ -14,7 +14,7 @@ import {
 } from '../lib/api';
 import { useI18n, type MsgKey } from '../lib/i18n';
 import { useLive } from '../lib/live';
-import { BONUS_KEYS, ITEM_TYPES, RARITIES } from '../../shared/items.js';
+import { ACCESSORY_FITS, BONUS_KEYS, EQUIP_FITS, ITEM_TYPES, RARITIES } from '../../shared/items.js';
 import { BoxChip } from '../components/Achievements';
 import { ItemNameList, rarityClass } from '../components/Inventory';
 
@@ -400,6 +400,9 @@ const fromCollection = (h: HomebrewItem, qty = '1'): RewardItem => ({
   type: h.type,
   rarity: h.rarity,
   notes: h.notes,
+  fits: h.fits ?? '',
+  ranged: !!h.ranged,
+  ammo: h.ammo ?? '',
   bonus: { ...newItem().bonus, ...h.bonus },
 });
 const pick = <T,>(list: T[]) => list[Math.floor(Math.random() * list.length)];
@@ -410,7 +413,7 @@ function staples(tier: string): RewardItem[] {
     ...newItem(),
     item: name,
     qty: String(qty),
-    type: name === 'Gold' ? 'misc' : 'consumable',
+    type: name === 'Gold' ? 'other' : name === 'Torch' ? 'special' : 'consumable',
     notes,
   });
   if (tier === 'bronze')
@@ -497,7 +500,10 @@ export function RewardEditor({ value, onChange }: { value: Reward; onChange: (r:
             </button>
           </div>
           {b.items.map((it, ii) => (
-            <div key={ii} className={`box-item ${rarityClass(it.rarity)}`}>
+            <div
+              key={ii}
+              className={`box-item ${rarityClass(it.rarity)} ${it.type === 'equipment' || it.type === 'accessory' ? 'has-fits' : ''}`}
+            >
               <input
                 className="in"
                 list="item-names"
@@ -531,6 +537,21 @@ export function RewardEditor({ value, onChange }: { value: Reward; onChange: (r:
                   </option>
                 ))}
               </select>
+              {(it.type === 'equipment' || it.type === 'accessory') && (
+                <select
+                  className="in sel"
+                  value={it.fits ?? ''}
+                  aria-label={t('inv.fits')}
+                  onChange={(e) => setItem(bi, ii, { fits: e.target.value as RewardItem['fits'] })}
+                >
+                  <option value="">{t('inv.fits')}…</option>
+                  {(it.type === 'equipment' ? EQUIP_FITS : ACCESSORY_FITS).map((f) => (
+                    <option key={f} value={f}>
+                      {t(`part.${f}` as MsgKey)}
+                    </option>
+                  ))}
+                </select>
+              )}
               <select
                 className="in sel"
                 value={it.rarity}

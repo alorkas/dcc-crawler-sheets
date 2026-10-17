@@ -1,7 +1,17 @@
 // Game rules from "Rules for Survival" and "Crawlers & Customization" (DCC RPG, Tutorial Floors).
 // Everything here is pure data → data so it can be unit tested and reused by the UI.
 import { clearRestEffects } from '../../shared/combat.js';
-import { ensureIds, gearBonus, HOT_SLOTS, isBlankItem, syncHot, type BonusFrom } from '../../shared/items.js';
+import {
+  ensureIds,
+  gearBonus,
+  HOT_SLOTS,
+  isBlankItem,
+  ITEM_TYPES,
+  sanitizeEquipped,
+  syncHot,
+  type BonusFrom,
+  type ItemType,
+} from '../../shared/items.js';
 import {
   emptyAttack,
   emptyItem,
@@ -10,7 +20,6 @@ import {
   normalize,
   sumNumbers,
   type ActiveDebuff,
-  type GearSlot,
   type Item,
   type SheetData,
   type StatKey,
@@ -18,7 +27,7 @@ import {
 } from './sheet';
 import { classifySkill } from './skillTypes';
 
-export const SCHEMA_VERSION = 7;
+export const SCHEMA_VERSION = 8;
 /** Default Move and Step in feet (Character Creation Step 7). */
 export const BASE_MOVE = 20;
 export const BASE_STEP = 10;
@@ -450,6 +459,7 @@ export function migrate(d: SheetData): SheetData {
   if (out.schema < 5) out = migrateV4(out);
   if (out.schema < 6) out = migrateV5(out);
   if (out.schema < 7) out = migrateV6(out);
+  if (out.schema < 8) out = migrateV7(out);
   out.schema = SCHEMA_VERSION;
   return out;
 }
@@ -492,12 +502,89 @@ function migrateV6(d: SheetData): SheetData {
   return { ...d, hotlist, hotSlots: synced.hotSlots, inventory: synced.inventory };
 }
 
+const RANGED_WEAPON = /bow\b|gun\b|pistol|rifle|sling/i;
+const AMMO_OF: [RegExp, string][] = [
+  [/crossbow/i, 'Bolt'],
+  [/bow/i, 'Arrow'],
+  [/shotgun/i, 'Shell'],
+  [/gun|pistol|rifle/i, 'Bullet'],
+  [/sling/i, 'Stone'],
+];
+/** Ammunition a ranged weapon (or its skill) fires, '' if it isn't a ranged weapon. */
+export function ammoTypeFor(name: string): string {
+  if (!RANGED_WEAPON.test(name)) return '';
+  return AMMO_OF.find(([re]) => re.test(name))?.[1] ?? '';
+}
+
+/**
+ * v7 → v8: item categories (Equipment, Accessory, Consumable, Ammunition, Special, Crafting, Corpse, Other) and
+ * body slots. Old types map to the new ones; old equip slots become slot ids (two items in the hands → main and
+ * off hand, accessories → fingers in order).
+ */
+function migrateV7(d: SheetData): SheetData {
+  const typeOf: Record<string, ItemType> = {
+    weapon: 'equipment',
+    armor: 'equipment',
+    accessory: 'accessory',
+    consumable: 'consumable',
+    material: 'crafting',
+    lootbox: 'special',
+    quest: 'special',
+    misc: 'other',
+  };
+  const partOf: Record<string, string> = { head: 'head', torso: 'chest', arms: 'bracers', legs: 'pants', feet: 'feet' };
+  let hands = 0;
+  let fingers = 0;
+  const inventory = d.inventory.map((it) => {
+    if (isBlankItem(it)) return { ...it, type: '' as ItemType, slot: '' };
+    const old = String(it.type || '');
+    const type: ItemType = typeOf[old] ?? ((ITEM_TYPES as string[]).includes(old) ? (old as ItemType) : 'other');
+    const out = { ...it, type };
+    const slot = String(it.slot || '');
+    const ranged = old === 'weapon' && !!RANGED_WEAPON.test(`${it.item} ${it.skill}`);
+    if (ranged) {
+      out.ranged = true;
+      out.ammo = ammoTypeFor(`${it.item} ${it.skill}`);
+    }
+    if (old === 'weapon') out.fits = 'held';
+    if (!slot || slot.includes('.')) return out; // carried, or already a body slot id
+    if (partOf[slot]) {
+      if (out.type === 'accessory')
+        return { ...out, fits: partOf[slot] as Item['fits'], slot: `acc.${partOf[slot]}.1` };
+      return {
+        ...out,
+        type: 'equipment' as ItemType,
+        fits: partOf[slot] as Item['fits'],
+        slot: `eq.${partOf[slot]}.1`,
+      };
+    }
+    if (slot === 'hands') {
+      if (old === 'armor')
+        return { ...out, type: 'equipment' as ItemType, fits: 'hands' as Item['fits'], slot: 'eq.hands.1' };
+      hands++;
+      const held = hands === 1 ? 'eq.mainHand.1' : hands === 2 ? 'eq.offHand.1' : '';
+      return { ...out, type: 'equipment' as ItemType, fits: 'held' as Item['fits'], slot: held };
+    }
+    if (slot === 'accessory') {
+      fingers++;
+      return {
+        ...out,
+        type: 'accessory' as ItemType,
+        fits: 'finger' as Item['fits'],
+        slot: fingers <= 10 ? `acc.finger.${fingers}` : '',
+      };
+    }
+    return { ...out, slot: '' };
+  });
+  return { ...d, inventory: sanitizeEquipped(inventory, d.slotCounts) };
+}
+
 /**
  * v5 → v6: items got structure (type, rarity, bonuses, equipped slot…). Each line of the old free-text gear
  * slots becomes an inventory item equipped in that slot, so nothing written there is lost.
  */
 function migrateV5(d: SheetData): SheetData {
-  const slotOf: Record<keyof SheetData['gear'], GearSlot> = {
+  const slotOf: Record<keyof SheetData['gear'], string> = {
     head: 'head',
     torso: 'torso',
     arms: 'arms',
@@ -507,7 +594,7 @@ function migrateV5(d: SheetData): SheetData {
     accessories: 'accessory',
   };
   const worn: Item[] = [];
-  for (const [key, slot] of Object.entries(slotOf) as [keyof SheetData['gear'], GearSlot][]) {
+  for (const [key, slot] of Object.entries(slotOf) as [keyof SheetData['gear'], string][]) {
     for (const line of (d.gear[key] || '')
       .split('\n')
       .map((l) => l.trim())
@@ -517,7 +604,8 @@ function migrateV5(d: SheetData): SheetData {
         item: line,
         qty: '1',
         slot,
-        type: slot === 'hands' ? 'weapon' : slot === 'accessory' ? 'accessory' : 'armor',
+        // the pre-v8 types; migrateV7 turns them into the current categories
+        type: (slot === 'hands' ? 'weapon' : slot === 'accessory' ? 'accessory' : 'armor') as ItemType,
       });
     }
   }
@@ -677,7 +765,7 @@ export function loadSheet(stored: unknown): SheetData {
   const m = migrate(normalize(stored));
   const ids = ensureIds(m.inventory);
   // Hotlist slots only point at items that still exist; items know whether they're on the Hotlist
-  const hot = syncHot(ids, m.hotSlots);
+  const hot = syncHot(sanitizeEquipped(ids, m.slotCounts), m.hotSlots);
   const d =
     hot.inventory === m.inventory && hot.hotSlots === m.hotSlots
       ? m

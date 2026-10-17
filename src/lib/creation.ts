@@ -1,6 +1,6 @@
 // Character creation data and logic (Core Rulebook ch.3 "First Steps" / Crawlers & Customization).
 // Everything here is from the public character-creation chapter of the player books.
-import { newSheet, statModFromScore } from './rules';
+import { ammoTypeFor, newSheet, statModFromScore } from './rules';
 import { emptyItem, emptySkill, type Item, type SheetData, type Skill, type StatKey, type StatSel } from './sheet';
 import { classifySkill } from './skillTypes';
 import { fillSkill } from './catalog';
@@ -425,20 +425,36 @@ export function buildSheet(c: Choices, hits: Record<string, CatalogHit | null>):
   // Step 10: starting gear (clothing and weapon are equipped; spell-casters also carry their Mana Potions)
   const g = c.gear;
   const worn: Item[] = [];
-  if (g.clothing.trim()) worn.push({ ...emptyItem(), item: g.clothing.trim(), qty: '1', type: 'armor', slot: 'torso' });
+  if (g.clothing.trim())
+    worn.push({
+      ...emptyItem(),
+      item: g.clothing.trim(),
+      qty: '1',
+      type: 'equipment',
+      fits: 'chest',
+      slot: 'eq.chest.1',
+    });
+  const weaponSkill = c.combat?.kind === 'weapon' ? c.combat.skill : '';
+  const ammo = ammoTypeFor(`${g.weapon} ${weaponSkill}`);
   if (g.weapon.trim())
     worn.push({
       ...emptyItem(),
       item: g.weapon.trim(),
       qty: '1',
-      type: 'weapon',
-      slot: 'hands',
-      skill: c.combat?.kind === 'weapon' ? c.combat.skill : '',
+      type: 'equipment',
+      fits: 'held',
+      slot: 'eq.mainHand.1',
+      skill: weaponSkill,
+      ranged: !!ammo,
+      ammo,
     });
   const carried = [g.item, g.weird]
     .map((x) => x.trim())
     .filter(Boolean)
-    .map((item) => ({ ...emptyItem(), item, qty: '1' }));
+    .map((item): Item => ({ ...emptyItem(), item, qty: '1', type: 'other' }));
+  // a ranged weapon starts with 20 rounds of its Ammunition, on the Hotlist
+  if (g.weapon.trim() && ammo)
+    carried.push({ ...emptyItem(), item: `${ammo}s`, qty: '20', type: 'ammunition', ammoType: ammo });
   if (c.combat?.kind === 'spell')
     carried.push({
       ...emptyItem(),
@@ -452,6 +468,8 @@ export function buildSheet(c: Choices, hits: Record<string, CatalogHit | null>):
   // the Mana Potions sit in Hotlist slot 3
   const potion = s.inventory.find((it) => it.item === 'Standard Mana Potion');
   if (potion) s.hotSlots = s.hotSlots.map((id, i) => (i === 2 ? potion.id : id));
+  const rounds = s.inventory.find((it) => it.type === 'ammunition');
+  if (rounds) s.hotSlots = s.hotSlots.map((id, i) => (i === 3 ? rounds.id : id));
   return c.third ? applyThirdFloor(s, c, c.third) : s;
 }
 
@@ -511,12 +529,14 @@ function applyThirdFloor(s: SheetData, c: Choices, t: ThirdFloor): SheetData {
       const tier = row[slot];
       const asSpells = slot !== 'consumable' && t.spells[slot];
       const base = { ...emptyItem(), qty: '1', rarity: tier, upgrades: 'Starting Loot (Table 25)' } as Item;
-      if (asSpells) return { ...base, item: `Spells (${tier})`, type: 'misc', notes: LOOT_TEXT.spells[tier] } as Item;
+      if (asSpells)
+        return { ...base, item: `Spells (${tier})`, type: 'special', notes: LOOT_TEXT.spells[tier] } as Item;
       if (slot === 'armor')
         return {
           ...base,
           item: `Starting armor (${tier})`,
-          type: 'armor',
+          type: 'equipment',
+          fits: 'chest',
           notes: LOOT_TEXT.armor[tier],
           bonus: { ...base.bonus, dr: String(LOOT_ARMOR_DR[tier]) },
         } as Item;
@@ -524,7 +544,8 @@ function applyThirdFloor(s: SheetData, c: Choices, t: ThirdFloor): SheetData {
         return {
           ...base,
           item: `Starting weapon (${tier})`,
-          type: 'weapon',
+          type: 'equipment',
+          fits: 'held',
           notes: LOOT_TEXT.weapon[tier],
           skill: c.combat?.kind === 'weapon' ? c.combat.skill : '',
           bonus: { ...base.bonus, damage: tier === 'silver' ? '1' : '' },
@@ -532,7 +553,7 @@ function applyThirdFloor(s: SheetData, c: Choices, t: ThirdFloor): SheetData {
       return {
         ...base,
         item: `Starting ${slot === 'item' ? 'item' : 'consumable'} (${tier})`,
-        type: slot === 'item' ? 'misc' : 'consumable',
+        type: slot === 'item' ? 'other' : 'consumable',
         notes: LOOT_TEXT[slot][tier],
       } as Item;
     });

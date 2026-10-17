@@ -424,10 +424,12 @@ function MessageList({ filter }: { filter: Filter }) {
   const ref = useRef<HTMLDivElement>(null);
   const stick = useRef(true);
   // automatic entries (HP, mana, levels, combat) live in their own Log tab so they don't drown the chat
-  // "All" is rolls and chat, plus the Mobs' declared attacks (players need those during combat)
+  // "All" is rolls and chat, plus the Mobs' declared attacks (players need those during combat) and Hotlist
+  // changes made in combat (they can be undone from here)
   const shown = messages.filter((m) =>
     filter === 'all'
-      ? m.kind !== 'event' || ['declare', 'world', 'achievement', 'reward', 'interrupt'].includes(m.event?.type ?? '')
+      ? m.kind !== 'event' ||
+        ['declare', 'world', 'achievement', 'reward', 'interrupt', 'hotlist'].includes(m.event?.type ?? '')
       : m.kind === filter,
   );
 
@@ -635,6 +637,33 @@ function LogEntry({ m }: { m: Message }) {
   );
 }
 
+/** Undo a Hotlist change made in combat (its owner or the GM): the slots go back and the Action is returned. */
+function UndoHotlist({ m }: { m: Message }) {
+  const { t, err } = useI18n();
+  const { user } = useAuth();
+  const live = useLive();
+  const [error, setError] = useState('');
+  if (!user || (!user.isAdmin && m.userId !== user.id)) return null;
+  const undo = async () => {
+    setError('');
+    try {
+      await api.undoEvent(m.id);
+      live.setEncounter(await api.encounter());
+    } catch (e) {
+      setError(err(e));
+    }
+  };
+  return (
+    <>
+      {' '}
+      <button type="button" className="btn small ghost" onClick={undo}>
+        ↶ {t('log.undo')}
+      </button>
+      {error && <span className="tiny error"> {error}</span>}
+    </>
+  );
+}
+
 /** One automatic log line: HP/mana changes with their source, level-ups, advancement, combat. */
 function EventEntry({ m, ev, time }: { m: Message; ev: LogEvent; time: string }) {
   const { t, lang } = useI18n();
@@ -793,10 +822,37 @@ function EventEntry({ m, ev, time }: { m: Message; ev: LogEvent; time: string })
       body = (
         <>
           <strong>{who}</strong>{' '}
-          {ev.target ? t('log.ev.itemOn', { item: ev.item, target: ev.target }) : t('log.ev.item', { item: ev.item })}
+          {ev.kept
+            ? t('log.ev.itemAbility', { item: ev.item })
+            : ev.target
+              ? t('log.ev.itemOn', { item: ev.item, target: ev.target })
+              : t('log.ev.item', { item: ev.item })}
+          {ev.kept && ev.ability && <span className="dim"> · {ev.ability}</span>}
           {ev.applied?.type === 'heal' && <span> · {t('log.ev.itemHeal', { n: ev.applied.slots })}</span>}
           {ev.applied?.type === 'mana' && <span> · {t('log.ev.itemMana')}</span>}
-          <span className="dim"> · {t('log.ev.itemLeft', { n: ev.left })}</span>
+          {!ev.kept && (
+            <span className="dim">
+              {' '}
+              · {t('log.ev.itemLeft', { n: ev.left })}
+              {ev.charges ? ` · ${t('log.ev.itemCharges', { n: ev.charges })}` : ''}
+            </span>
+          )}
+        </>
+      );
+      break;
+    case 'hotlist':
+      icon = '★';
+      tone = ev.undone ? '' : 'combat';
+      body = (
+        <>
+          <span className={ev.undone ? 'struck' : ''}>
+            <strong>{who}</strong>{' '}
+            {ev.item
+              ? t('log.ev.hotlistSet', { n: ev.slot, item: ev.item })
+              : t('log.ev.hotlistClear', { n: ev.slot, item: ev.prev })}
+            {ev.item && ev.prev && <span className="dim"> · {t('log.ev.hotlistWas', { item: ev.prev })}</span>}
+          </span>
+          {ev.undone ? <span className="dim"> · {t('log.ev.undone')}</span> : <UndoHotlist m={m} />}
         </>
       );
       break;

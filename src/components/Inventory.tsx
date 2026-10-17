@@ -1,24 +1,99 @@
 import { useEffect, useState, type DragEvent } from 'react';
 import { api } from '../lib/api';
 import {
+  ACCESSORY_FITS,
   BONUS_KEYS,
+  DEFAULT_SLOT_COUNTS,
+  EQUIP_FITS,
   STAT_BONUS_KEYS,
-  GEAR_SLOTS,
   HOT_SLOTS,
   ITEM_TYPES,
   RARITIES,
-  SLOT_LIMITS,
+  equipItem,
+  fitsSlot,
+  hotlistable,
   isBlankItem,
+  isWorn,
   setHotSlot,
+  slotKeyOf,
+  slotList,
   syncHot,
   toggleHot,
 } from '../../shared/items.js';
 import { useAuth } from '../lib/auth';
 import { fillItem, lookup } from '../lib/catalog';
 import { useI18n, type MsgKey } from '../lib/i18n';
-import { emptyItem, signed, type GearSlot, type Item } from '../lib/sheet';
+import { useLiveOptional } from '../lib/live';
+import { emptyItem, signed, type Item, type ItemType, type SheetData } from '../lib/sheet';
 import { Area, Input, Section, useSheet } from './fields';
 import { UseItemControls } from './QuickItems';
+
+type T = ReturnType<typeof useI18n>['t'];
+
+/** "Head", "Head · Accessory", "Finger 3", "Main hand". */
+export function slotLabel(id: string, t: T): string {
+  const key = slotKeyOf(id);
+  const [kind, part] = key.split('.');
+  const n = Number(String(id).match(/\.(\d+)$/)?.[1] ?? 1);
+  const name = t(`part.${part}` as MsgKey);
+  const numbered = (DEFAULT_SLOT_COUNTS[key] ?? 1) > 1 || n > 1 ? `${name} ${n}` : name;
+  return kind === 'acc' && part !== 'neck' && part !== 'finger' ? `${numbered} · ${t('itemType.accessory')}` : numbered;
+}
+
+/** The sheet's crawler is in the current fight (in the party, combat on). */
+export function useInFight(): boolean {
+  const { charId } = useSheet();
+  const live = useLiveOptional();
+  return !!(charId && live?.encounter?.active && live.party?.some((p) => p.id === charId));
+}
+
+/**
+ * Change a Hotlist slot. Out of combat it's a normal sheet edit; in combat it goes through the server, which
+ * spends an Action and logs it (the log entry can undo it).
+ */
+export function useHotlistChange() {
+  const { charId, data, update, runServer } = useSheet();
+  const live = useLiveOptional();
+  const { err } = useI18n();
+  const inFight = useInFight();
+  const [error, setError] = useState('');
+  const change = async (slot: number, itemId: string) => {
+    setError('');
+    if (!inFight || !charId) {
+      update((d) => ({ ...d, ...setHotSlot(d.inventory, d.hotSlots, slot, itemId) }));
+      return;
+    }
+    try {
+      await runServer(() => api.setHotSlot(charId, slot, itemId));
+      if (live) live.setEncounter(await api.encounter());
+    } catch (e) {
+      setError(err(e));
+    }
+  };
+  /** ★ on an inventory row: into the first free slot, or off the Hotlist. */
+  const toggle = (itemId: string, on: boolean) => {
+    if (!on) return change(data.hotSlots.indexOf(itemId), '');
+    const next = toggleHot(data.inventory, data.hotSlots, data.hotlist, itemId, true);
+    const slot = next.hotSlots.indexOf(itemId);
+    return slot >= 0 ? change(slot, itemId) : undefined;
+  };
+  return { inFight, change, toggle, error };
+}
+
+/** Change an item's category: a non-worn item is unequipped, and one that can't be on the Hotlist leaves it. */
+function withType(d: SheetData, id: string, type: ItemType): SheetData {
+  const inventory = d.inventory.map((x) => {
+    if (x.id !== id) return x;
+    const fitsOk =
+      (type === 'equipment' && (EQUIP_FITS as string[]).includes(x.fits)) ||
+      (type === 'accessory' && (ACCESSORY_FITS as string[]).includes(x.fits));
+    const next = { ...x, type, fits: fitsOk ? x.fits : ('' as Item['fits']) };
+    return isWorn(type) && fitsSlot(next, x.slot) ? next : { ...next, slot: '' };
+  });
+  const it = inventory.find((x) => x.id === id);
+  const hotSlots = it && !hotlistable(it) ? d.hotSlots.map((h) => (h === id ? '' : h)) : d.hotSlots;
+  return { ...d, ...syncHot(inventory, hotSlots) };
+}
 
 /* ---------------- sorting (remembered per user) ---------------- */
 type SortMode = 'manual' | 'qty' | 'alpha' | 'type';
@@ -164,14 +239,16 @@ function InventoryRow({
   onDown?: () => void;
   onOpen: () => void;
 }) {
-  const { data, playLocked, update, set } = useSheet();
+  const { data, playLocked, update, charId, der, runServer } = useSheet();
   const { t } = useI18n();
   const [msg, setMsg] = useState('');
+  const hot = useHotlistChange();
   const it = data.inventory[i];
   const blank = isBlankItem(it);
   const hotSlot = data.hotSlots.indexOf(it.id);
-  const toggleHotlist = () =>
-    update((d) => ({ ...d, ...toggleHot(d.inventory, d.hotSlots, d.hotlist, it.id, hotSlot < 0) }));
+  const toggleHotlist = () => hot.toggle(it.id, hotSlot < 0);
+  // out of combat a Consumable is used straight from the inventory (in combat: from the Hotlist)
+  const usable = !blank && !hot.inFight && (it.type === 'consumable' || it.type === '') && !!charId;
   const fill = async () => {
     setMsg('');
     try {
@@ -213,7 +290,7 @@ function InventoryRow({
         />
         {!blank && (
           <span className="inv-tags">
-            {it.slot && <span className="pill tiny-pill gold">{t(`slot.${it.slot}` as MsgKey)}</span>}
+            {it.slot && <span className="pill tiny-pill gold">{slotLabel(it.slot, t)}</span>}
             {it.rarity && (
               <span className={`pill tiny-pill rar-pill ${rarityClass(it.rarity)}`}>
                 {t(`rarity.${it.rarity}` as MsgKey)}
@@ -234,7 +311,7 @@ function InventoryRow({
         value={it.type}
         disabled={playLocked}
         aria-label={t('inv.type')}
-        onChange={(e) => set(['inventory', i, 'type'], e.target.value)}
+        onChange={(e) => update((d) => withType(d, it.id, e.target.value as ItemType))}
       >
         <option value="">—</option>
         {ITEM_TYPES.map((x) => (
@@ -246,9 +323,11 @@ function InventoryRow({
       <div>
         <Input path={['inventory', i, 'notes']} ariaLabel={t('inv.notes')} placeholder={t('inv.notes')} />
         {msg && <span className="dim tiny">{msg}</span>}
+        {hot.error && <span className="tiny error">{hot.error}</span>}
       </div>
       <span className="inv-actions">
-        {!blank && !playLocked && (
+        {usable && <UseItemControls memberId={charId!} it={it} manaMax={der.manaMax} run={runServer} />}
+        {!blank && !playLocked && (hotlistable(it) || hotSlot >= 0) && (
           <button
             type="button"
             className={`btn small ghost hot-toggle ${hotSlot >= 0 ? 'on' : ''}`}
@@ -325,16 +404,23 @@ export function ItemNameList() {
   );
 }
 
-/* ---------------- item details (inventory "⋯" and gear slots) ---------------- */
+/* ---------------- item details (inventory "⋯", Equipment slots, Hotlist) ---------------- */
 export function ItemDialog({ i, onClose }: { i: number; onClose: () => void }) {
   const { t } = useI18n();
   const { data, set, update, playLocked } = useSheet();
+  const hot = useHotlistChange();
   const it = data.inventory[i];
   if (!it) return null;
-  const usedIn = (slot: GearSlot) => data.inventory.filter((x, j) => j !== i && x.slot === slot).length;
-  const full = (slot: GearSlot) => usedIn(slot) >= SLOT_LIMITS[slot];
+  const type = it.type;
+  const worn = isWorn(type);
+  const held = type === 'equipment' && it.fits === 'held';
+  const fitsList: string[] = type === 'equipment' ? EQUIP_FITS : type === 'accessory' ? ACCESSORY_FITS : [];
+  const slots = worn && it.fits ? slotList(data.slotCounts).filter((s) => fitsSlot(it, s.id)) : [];
   const skills = data.skills.filter((s) => s.category === 'combat' && s.name.trim()).map((s) => s.name);
   const p = (k: keyof Item) => ['inventory', i, k] as (string | number)[];
+  const onItem = (fn: (x: Item) => Item) =>
+    update((d) => ({ ...d, inventory: d.inventory.map((x) => (x.id === it.id ? fn(x) : x)) }));
+  const twoHandedMain = data.inventory.find((x) => x.twoHanded && x.slot.startsWith('eq.mainHand.') && x.id !== it.id);
   return (
     <div className="modal-back" onClick={onClose}>
       <div className={`modal item-modal ${rarityClass(it.rarity)}`} onClick={(e) => e.stopPropagation()}>
@@ -349,7 +435,11 @@ export function ItemDialog({ i, onClose }: { i: number; onClose: () => void }) {
           <Input path={p('qty')} label={t('inv.qty')} center numeric />
           <label className="field">
             <span className="lbl">{t('inv.type')}</span>
-            <select className="in sel" value={it.type} onChange={(e) => set(p('type'), e.target.value)}>
+            <select
+              className="in sel"
+              value={type}
+              onChange={(e) => update((d) => withType(d, it.id, e.target.value as ItemType))}
+            >
               <option value="">—</option>
               {ITEM_TYPES.map((x) => (
                 <option key={x} value={x}>
@@ -369,90 +459,187 @@ export function ItemDialog({ i, onClose }: { i: number; onClose: () => void }) {
               ))}
             </select>
           </label>
+          {type && <p className="dim tiny span-2 type-hint">{t(`itemType.${type}.hint` as MsgKey)}</p>}
           <label className="field span-2">
             <span className="lbl">{t('inv.notes')}</span>
             <textarea className="in" rows={3} value={it.notes} onChange={(e) => set(p('notes'), e.target.value)} />
           </label>
-          <label className="field span-2">
-            <span className="lbl">{t('inv.upgrades')}</span>
-            <input className="in" value={it.upgrades} onChange={(e) => set(p('upgrades'), e.target.value)} />
-          </label>
-          <div className="field span-2">
-            <span className="lbl">{t('inv.bonuses')}</span>
-            <div className="bonus-row">
-              {BONUS_KEYS.map((k) => (
-                <label key={k} className="mini">
-                  <span>{t(`bonus.${k}` as MsgKey)}</span>
-                  <input
-                    className="in center"
-                    value={it.bonus[k]}
-                    placeholder="+0"
-                    onChange={(e) => set(['inventory', i, 'bonus', k], e.target.value)}
-                  />
-                </label>
-              ))}
-              {(it.type === 'weapon' || it.bonus.damage) && (
+
+          {worn && (
+            <>
+              <label className="field">
+                <span className="lbl">{t('inv.fits')}</span>
+                <select
+                  className="in sel"
+                  value={it.fits}
+                  onChange={(e) =>
+                    onItem((x) => ({ ...x, fits: e.target.value as Item['fits'], slot: '', twoHanded: false }))
+                  }
+                >
+                  <option value="">—</option>
+                  {fitsList.map((f) => (
+                    <option key={f} value={f}>
+                      {t(`part.${f}` as MsgKey)}
+                    </option>
+                  ))}
+                </select>
+              </label>
+              <label className="field">
+                <span className="lbl">{t('inv.equip')}</span>
+                <select
+                  className="in sel"
+                  value={it.slot}
+                  disabled={!it.fits}
+                  onChange={(e) => update((d) => ({ ...d, inventory: equipItem(d.inventory, it.id, e.target.value) }))}
+                >
+                  <option value="">{t('inv.notEquipped')}</option>
+                  {slots.map((s) => {
+                    const other = data.inventory.find((x) => x.slot === s.id && x.id !== it.id);
+                    const blocked = s.key === 'eq.offHand' && !!twoHandedMain;
+                    return (
+                      <option key={s.id} value={s.id}>
+                        {slotLabel(s.id, t)}
+                        {other ? ` · ${other.item} (${t('hot.replace')})` : ''}
+                        {blocked ? ` · ${t('equip.twoHandedBusy', { item: twoHandedMain.item })}` : ''}
+                      </option>
+                    );
+                  })}
+                </select>
+              </label>
+            </>
+          )}
+
+          {held && (
+            <div className="field span-2 item-flags">
+              <label className="gm-check">
+                <input
+                  type="checkbox"
+                  checked={it.twoHanded}
+                  onChange={(e) =>
+                    update((d) => {
+                      const inv = d.inventory.map((x) => (x.id === it.id ? { ...x, twoHanded: e.target.checked } : x));
+                      return { ...d, inventory: it.slot ? equipItem(inv, it.id, it.slot) : inv };
+                    })
+                  }
+                />
+                {t('inv.twoHanded')}
+              </label>
+              <label className="gm-check">
+                <input type="checkbox" checked={it.ranged} onChange={(e) => set(p('ranged'), e.target.checked)} />
+                {t('inv.ranged')}
+              </label>
+              {it.ranged && (
                 <label className="mini grow">
-                  <span>{t('inv.skill')}</span>
+                  <span>{t('inv.ammo')}</span>
                   <input
                     className="in"
-                    list="item-skill-names"
-                    value={it.skill}
-                    placeholder={t('inv.skillAny')}
-                    onChange={(e) => set(p('skill'), e.target.value)}
+                    value={it.ammo}
+                    placeholder={t('inv.ammoAny')}
+                    onChange={(e) => set(p('ammo'), e.target.value)}
                   />
-                  <datalist id="item-skill-names">
-                    {skills.map((s) => (
-                      <option key={s} value={s} />
-                    ))}
-                  </datalist>
                 </label>
               )}
             </div>
-            <span className="dim tiny">{t('inv.bonusHint')}</span>
-          </div>
-          <label className="field">
-            <span className="lbl">{t('inv.equip')}</span>
-            <select className="in sel" value={it.slot} onChange={(e) => set(p('slot'), e.target.value)}>
-              <option value="">{t('inv.notEquipped')}</option>
-              {GEAR_SLOTS.map((s) => (
-                <option key={s} value={s} disabled={s !== it.slot && full(s)}>
-                  {t(`slot.${s}` as MsgKey)} ({usedIn(s) + (it.slot === s ? 1 : 0)}/{SLOT_LIMITS[s]})
-                </option>
-              ))}
-            </select>
-          </label>
-          <div className="field item-flags">
-            <label className="gm-check hot-pick">
-              ★ {t('hot.slot')}
-              <select
-                className="in sel tiny-sel"
-                value={data.hotSlots.indexOf(it.id)}
-                onChange={(e) =>
-                  update((d) => ({ ...d, ...setHotSlot(d.inventory, d.hotSlots, Number(e.target.value), it.id) }))
-                }
-              >
-                <option value={-1}>{t('hot.none')}</option>
-                {Array.from({ length: HOT_SLOTS }, (_, n) => {
-                  const other = data.inventory.find((x) => x.id === data.hotSlots[n] && x.id !== it.id);
-                  return (
-                    <option key={n} value={n}>
-                      {t('gear.slot', { n: n + 1 })}
-                      {other
-                        ? ` · ${other.item} (${t('hot.replace')})`
-                        : data.hotlist[n]?.trim()
-                          ? ` · ${data.hotlist[n].trim().slice(0, 24)}`
-                          : ''}
-                    </option>
-                  );
-                })}
-              </select>
+          )}
+
+          {worn && (
+            <div className="field span-2">
+              <span className="lbl">{t('inv.bonuses')}</span>
+              <div className="bonus-row">
+                {BONUS_KEYS.map((k) => (
+                  <label key={k} className="mini">
+                    <span>{t(`bonus.${k}` as MsgKey)}</span>
+                    <input
+                      className="in center"
+                      value={it.bonus[k]}
+                      placeholder="+0"
+                      onChange={(e) => set(['inventory', i, 'bonus', k], e.target.value)}
+                    />
+                  </label>
+                ))}
+                {(held || it.bonus.damage) && (
+                  <label className="mini grow">
+                    <span>{t('inv.skill')}</span>
+                    <input
+                      className="in"
+                      list="item-skill-names"
+                      value={it.skill}
+                      placeholder={t('inv.skillAny')}
+                      onChange={(e) => set(p('skill'), e.target.value)}
+                    />
+                    <datalist id="item-skill-names">
+                      {skills.map((s) => (
+                        <option key={s} value={s} />
+                      ))}
+                    </datalist>
+                  </label>
+                )}
+              </div>
+              <span className="dim tiny">{t('inv.bonusHint')}</span>
+            </div>
+          )}
+
+          {(worn || type === 'special') && (
+            <label className="field span-2">
+              <span className="lbl">{t('inv.ability')}</span>
+              <input
+                className="in"
+                value={it.ability}
+                placeholder={t('inv.abilityPh')}
+                onChange={(e) => set(p('ability'), e.target.value)}
+              />
             </label>
+          )}
+          {worn && (
+            <label className="field span-2">
+              <span className="lbl">{t('inv.upgrades')}</span>
+              <input className="in" value={it.upgrades} onChange={(e) => set(p('upgrades'), e.target.value)} />
+            </label>
+          )}
+          {type === 'consumable' && (
+            <>
+              <Input path={p('charges')} label={t('inv.charges')} center numeric />
+              <Input path={p('maxCharges')} label={t('inv.maxCharges')} center numeric />
+            </>
+          )}
+          {type === 'ammunition' && <Input path={p('ammoType')} label={t('inv.ammoType')} />}
+
+          <div className="field span-2 item-flags">
+            {hotlistable(it) && (
+              <label className="gm-check hot-pick">
+                ★ {t('hot.slot')}
+                <select
+                  className="in sel tiny-sel"
+                  value={data.hotSlots.indexOf(it.id)}
+                  onChange={(e) => {
+                    const n = Number(e.target.value);
+                    hot.change(n < 0 ? data.hotSlots.indexOf(it.id) : n, n < 0 ? '' : it.id);
+                  }}
+                >
+                  <option value={-1}>{t('hot.none')}</option>
+                  {Array.from({ length: HOT_SLOTS }, (_, n) => {
+                    const other = data.inventory.find((x) => x.id === data.hotSlots[n] && x.id !== it.id);
+                    return (
+                      <option key={n} value={n}>
+                        {t('gear.slot', { n: n + 1 })}
+                        {other
+                          ? ` · ${other.item} (${t('hot.replace')})`
+                          : data.hotlist[n]?.trim()
+                            ? ` · ${data.hotlist[n].trim().slice(0, 24)}`
+                            : ''}
+                      </option>
+                    );
+                  })}
+                </select>
+              </label>
+            )}
             <label className="gm-check">
               <input type="checkbox" checked={it.unique} onChange={(e) => set(p('unique'), e.target.checked)} />
               {t('inv.unique')}
             </label>
           </div>
+          {hot.inFight && hotlistable(it) && <p className="dim tiny span-2">{t('hot.costsAction')}</p>}
+          {hot.error && <p className="tiny error span-2">{hot.error}</p>}
         </fieldset>
         <div className="modal-actions">
           <button type="button" className="btn primary" onClick={onClose}>
@@ -464,75 +651,18 @@ export function ItemDialog({ i, onClose }: { i: number; onClose: () => void }) {
   );
 }
 
-/* ---------------- Gear tab: equipped items per slot ---------------- */
-export function EquippedSlots() {
-  const { t } = useI18n();
-  const { data, set, playLocked } = useSheet();
-  const [open, setOpen] = useState<number | null>(null);
-  const carried = data.inventory.map((it, i) => ({ it, i })).filter(({ it }) => !it.slot && !isBlankItem(it));
-  return (
-    <div className="slots">
-      {GEAR_SLOTS.map((slot) => {
-        const here = data.inventory
-          .map((it, i) => ({ it, i }))
-          .filter(({ it }) => it.slot === slot && !isBlankItem(it));
-        const room = here.length < SLOT_LIMITS[slot];
-        return (
-          <div key={slot} className="slot">
-            <div className="slot-head">
-              <span className="lbl">{t(`slot.${slot}` as MsgKey)}</span>
-              <span className={`count ${here.length > SLOT_LIMITS[slot] ? 'warn' : ''}`}>
-                {here.length}/{SLOT_LIMITS[slot]}
-              </span>
-            </div>
-            {here.map(({ it, i }) => (
-              <button
-                key={it.id}
-                type="button"
-                className={`slot-item ${rarityClass(it.rarity)}`}
-                onClick={() => setOpen(i)}
-              >
-                <strong>{it.item}</strong>
-                <span className="dim tiny">
-                  {[it.rarity && t(`rarity.${it.rarity}` as MsgKey), bonusText(it, t)].filter(Boolean).join(' · ')}
-                </span>
-              </button>
-            ))}
-            {room && !playLocked && carried.length > 0 && (
-              <select
-                className="in sel slot-add"
-                value=""
-                aria-label={t('inv.equipTo', { slot: t(`slot.${slot}` as MsgKey) })}
-                onChange={(e) => e.target.value && set(['inventory', Number(e.target.value), 'slot'], slot)}
-              >
-                <option value="">+ {t('inv.equipShort')}</option>
-                {carried.map(({ it, i }) => (
-                  <option key={it.id} value={i}>
-                    {it.item}
-                  </option>
-                ))}
-              </select>
-            )}
-            {here.length === 0 && (playLocked || carried.length === 0) && <span className="dim tiny">—</span>}
-          </div>
-        );
-      })}
-      {open !== null && <ItemDialog i={open} onClose={() => setOpen(null)} />}
-    </div>
-  );
-}
-
 /* ---------------- the Hotlist (Gear tab): 10 slots holding inventory items, or text ---------------- */
 export function HotlistSlots() {
   const { t } = useI18n();
-  const { data, update, charId, runServer, der, playLocked } = useSheet();
+  const { data, charId, runServer, der, playLocked } = useSheet();
+  const hot = useHotlistChange();
   const [open, setOpen] = useState<number | null>(null);
   const index = new Map(data.inventory.map((it, i) => [it.id, i]));
-  const assign = (slot: number, id: string) =>
-    update((d) => ({ ...d, ...setHotSlot(d.inventory, d.hotSlots, slot, id) }));
-  const free = data.inventory.filter((it) => !isBlankItem(it) && !data.hotSlots.includes(it.id));
+  const free = data.inventory.filter((it) => !isBlankItem(it) && hotlistable(it) && !data.hotSlots.includes(it.id));
   return (
     <>
+      {hot.inFight && <div className="dim tiny">{t('hot.costsAction')}</div>}
+      {hot.error && <div className="tiny error">{hot.error}</div>}
       <div className="hotlist">
         {Array.from({ length: HOT_SLOTS }, (_, s) => {
           const idx = index.get(data.hotSlots[s]);
@@ -548,7 +678,7 @@ export function HotlistSlots() {
                     className="icon-btn small"
                     title={t('hot.remove')}
                     aria-label={t('hot.remove')}
-                    onClick={() => assign(s, '')}
+                    onClick={() => hot.change(s, '')}
                   >
                     ×
                   </button>
@@ -557,10 +687,15 @@ export function HotlistSlots() {
               {it ? (
                 <>
                   <button type="button" className="hot-item link-btn" onClick={() => setOpen(idx!)}>
-                    <strong>{it.item}</strong> <span className="loot-qty">×{Number(it.qty) || 1}</span>
+                    <strong>{it.item}</strong> {qtyText(it)}
                   </button>
-                  {(it.notes || text) && <div className="dim tiny hot-notes">{it.notes || text}</div>}
-                  {charId && <UseItemControls memberId={charId} it={it} manaMax={der.manaMax} run={runServer} />}
+                  <span className="dim tiny">{t(`itemType.${it.type || 'other'}` as MsgKey)}</span>
+                  {(it.ability || it.notes || text) && (
+                    <div className="dim tiny hot-notes">{it.ability || it.notes || text}</div>
+                  )}
+                  {charId && it.type !== 'ammunition' && (
+                    <UseItemControls memberId={charId} it={it} manaMax={der.manaMax} run={runServer} />
+                  )}
                 </>
               ) : (
                 <>
@@ -570,7 +705,7 @@ export function HotlistSlots() {
                       className="in sel tiny-sel"
                       value=""
                       aria-label={t('hot.assign')}
-                      onChange={(e) => e.target.value && assign(s, e.target.value)}
+                      onChange={(e) => e.target.value && hot.change(s, e.target.value)}
                     >
                       <option value="">★ {t('hot.assign')}</option>
                       {free.map((x) => (
@@ -589,5 +724,18 @@ export function HotlistSlots() {
       </div>
       {open !== null && <ItemDialog i={open} onClose={() => setOpen(null)} />}
     </>
+  );
+}
+
+/** "×3", or "×3 · 2/5 charges" for items with charges. Kept items (Equipment…) show no count. */
+export function qtyText(it: Pick<Item, 'qty' | 'type' | 'charges' | 'maxCharges'>) {
+  if (isWorn(it.type) || it.type === 'special') return null;
+  const max = Number(it.maxCharges) || 0;
+  const charges = String(it.charges ?? '').trim() === '' ? max : Number(it.charges) || 0;
+  return (
+    <span className="loot-qty">
+      ×{Number(it.qty) || 1}
+      {max > 0 && ` · ${charges}/${max} ⚡`}
+    </span>
   );
 }

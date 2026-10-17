@@ -1,6 +1,11 @@
-export type ItemType = '' | 'weapon' | 'armor' | 'accessory' | 'consumable' | 'material' | 'lootbox' | 'quest' | 'misc';
+export type ItemType =
+  '' | 'equipment' | 'accessory' | 'consumable' | 'ammunition' | 'special' | 'crafting' | 'corpse' | 'other';
 export type Rarity = '' | 'common' | 'bronze' | 'silver' | 'gold' | 'platinum' | 'legendary' | 'celestial' | 'unique';
-export type GearSlot = 'head' | 'torso' | 'arms' | 'hands' | 'legs' | 'feet' | 'accessory';
+export type BodyPart = 'head' | 'shoulders' | 'chest' | 'bracers' | 'hands' | 'back' | 'waist' | 'pants' | 'feet';
+export type Fits = '' | BodyPart | 'held' | 'neck' | 'finger';
+/** A slot id like 'eq.head.1', 'eq.mainHand.1' or 'acc.finger.3'. */
+export type GearSlot = string;
+export type SlotInfo = { id: string; key: string; part: string; kind: 'eq' | 'acc'; n: number };
 export type Item = {
   id: string;
   item: string;
@@ -18,6 +23,14 @@ export type Item = {
   /** Weapon skill it's used with (its damage bonus applies to that attack). */
   skill: string;
   upgrades: string;
+  fits: Fits;
+  twoHanded: boolean;
+  ranged: boolean;
+  ammo: string;
+  ammoType: string;
+  charges: string;
+  maxCharges: string;
+  ability: string;
   bonus: Record<BonusKey, string>;
 };
 export type BonusKey = 'damage' | 'dr' | 'evade' | 'str' | 'int' | 'con' | 'dex' | 'cha';
@@ -27,8 +40,21 @@ export type BonusFrom = { total: number; from: { name: string; value: number }[]
 
 export const ITEM_TYPES: Exclude<ItemType, ''>[];
 export const RARITIES: Exclude<Rarity, ''>[];
-export const GEAR_SLOTS: GearSlot[];
-export const SLOT_LIMITS: Record<GearSlot, number>;
+export const BODY_PARTS: BodyPart[];
+export const EQUIP_FITS: Exclude<Fits, '' | 'neck' | 'finger'>[];
+export const ACCESSORY_FITS: Exclude<Fits, '' | 'held'>[];
+export const DEFAULT_SLOT_COUNTS: Record<string, number>;
+export const SLOT_KEYS: string[];
+export function isWorn(type: string): boolean;
+export function slotList(slotCounts: Record<string, number | string> | undefined): SlotInfo[];
+export function slotKeyOf(id: string): string;
+export function fitsSlot(it: Partial<Item> | undefined, slot: string): boolean;
+export function isHeld(it: Partial<Item> | undefined): boolean;
+export function sanitizeEquipped(inventory: Item[], slotCounts: Record<string, number | string> | undefined): Item[];
+export function equipItem(inventory: Item[], itemId: string, slotId: string): Item[];
+export function hotlistable(it: Partial<Item> | undefined): boolean;
+export function ammoFor(inventory: Item[], hotSlots: string[], weapon: Partial<Item> | null): Item[];
+export function weaponFor(inventory: Item[], skillName: string): Item | null;
 export function newItemId(): string;
 export function emptyItem(): Item;
 export function isBlankItem(it: Partial<Item> | undefined): boolean;
@@ -53,3 +79,8 @@ export function toggleHot(
   itemId: string,
   on: boolean,
 ): { inventory: Item[]; hotSlots: string[] };
+export function spendOne(
+  inventory: Item[],
+  hotSlots: string[],
+  itemId: string,
+): { inventory: Item[]; hotSlots: string[]; left: number; charges: number | null } | null;

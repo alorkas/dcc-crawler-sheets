@@ -15,6 +15,7 @@ import {
   newEffectId,
   tickRound,
 } from '../shared/combat.js';
+import { hotlistable, isWorn, setHotSlot, spendOne, HOT_SLOTS } from '../shared/items.js';
 import { BOSS_LEVELS, addGrindHours, advanceSkills, crawlerKillLevels, levelUp, rollDie } from './progress.js';
 
 const PHASES = 5; // Mob Action Declaration, Crawler Reaction, Mob Attack Resolution, Crawler Action, Clean Up
@@ -866,29 +867,40 @@ export function mountGame(app, { db, auth, adminOnly, loadChar, live, hooks = {}
   /* ---------------- quick-access items ---------------- */
   // Use an item from the inventory: one fewer (the row goes at 0), healing and mana items apply themselves
   // (to the crawler or a party member), and in combat it takes an Action (an Interrupt in Crawler Reaction).
+  // Use an item. Consumables spend a charge or one of the stack; Equipment, Accessories and Special items use
+  // their ability and stay. In combat only Hotlist items can be used, and it takes an Action (a healing item is
+  // an Interrupt in Crawler Reaction). Ammunition is spent by attacks, not here.
   app.post('/api/characters/:id/use-item', auth, loadChar, (req, res) => {
     const data = JSON.parse(req.char.data || '{}');
     const inv = Array.isArray(data.inventory) ? data.inventory : [];
+    const hotSlots = Array.isArray(data.hotSlots) ? data.hotSlots : [];
     const it = inv.find((x) => x && x.id === String(req.body?.itemId));
     if (!it || !String(it.item || '').trim()) return res.status(404).json({ error: 'Not found', code: 'not_found' });
-    const have = int(it.qty, 1);
-    if (have <= 0) return res.status(409).json({ error: 'None left', code: 'none_left' });
+    const type = String(it.type || '');
+    if (type === 'ammunition')
+      return res.status(409).json({ error: 'Ammunition is fired with a ranged attack', code: 'ammo_via_attack' });
+    // kept items (their ability is used); consumables (and untyped items from before categories) are used up
+    const kept = isWorn(type) || type === 'special';
+    if (!kept && type && type !== 'consumable')
+      return res.status(409).json({ error: 'This item cannot be used', code: 'not_usable' });
+    const have = String(it.qty ?? '').trim() === '' ? 1 : int(it.qty, 1);
+    if (!kept && have <= 0) return res.status(409).json({ error: 'None left', code: 'none_left' });
     const enc = getEnc();
     const inFight = enc.active && !!req.char.party_since;
-    const fx = itemEffect(it.notes) ?? itemEffect(lookupNotes(it.item));
+    if (inFight && !hotSlots.includes(it.id))
+      return res.status(409).json({ error: 'Only Hotlist items can be used in combat', code: 'not_on_hotlist' });
+    const fx = kept ? null : (itemEffect(it.notes) ?? itemEffect(lookupNotes(it.item)));
     const targetId = Number(req.body?.targetId) || req.char.id;
     const target = targetId === req.char.id ? req.char : charRow(targetId);
     if (!target || (target.id !== req.char.id && !target.party_since))
       return res.status(404).json({ error: 'Character not found', code: 'char_not_found' });
     if (inFight && !useAction(enc, req.char.id, enc.phase === 2 && fx?.type === 'heal' ? 'heal' : 'action'))
       return res.status(409).json({ error: 'No Actions left', code: 'no_actions_left' });
-    const left = have - 1;
-    const nextInv =
-      left > 0 ? inv.map((x) => (x === it ? { ...x, qty: String(left) } : x)) : inv.filter((x) => x !== it);
+    const spent = kept ? null : spendOne(inv, hotSlots, it.id);
+    if (!kept && !spent) return res.status(409).json({ error: 'None left', code: 'none_left' });
+    const left = spent ? spent.left : have;
     const name = clip(it.item);
-    let mine = { ...data, inventory: nextInv };
-    // the last one is gone: its Hotlist slot empties
-    if (left <= 0 && Array.isArray(data.hotSlots)) mine.hotSlots = data.hotSlots.map((id) => (id === it.id ? '' : id));
+    let mine = spent ? { ...data, inventory: spent.inventory, hotSlots: spent.hotSlots } : data;
     let applied = null;
     const applyTo = (d, self) => {
       if (fx?.type === 'heal') {
@@ -911,7 +923,7 @@ export function mountGame(app, { db, auth, adminOnly, loadChar, live, hooks = {}
     const targetName = target.id === req.char.id ? clip(data.name) : clip(JSON.parse(target.data || '{}').name);
     const sources = { hp: [`${name}`], mana: [`${name}`] };
     if (target.id === req.char.id) mine = applyTo(mine, true);
-    writeSheetWith(req.char, mine, req.user.id, sources);
+    if (mine !== data) writeSheetWith(req.char, mine, req.user.id, sources);
     if (target.id !== req.char.id) {
       const td = JSON.parse(target.data || '{}');
       writeSheetWith(target, applyTo(td, false), req.user.id, sources);
@@ -920,11 +932,93 @@ export function mountGame(app, { db, auth, adminOnly, loadChar, live, hooks = {}
       ownerId: req.char.owner_id,
       characterId: req.char.id,
       charName: clip(data.name),
-      event: { type: 'item', item: name, target: target.id !== req.char.id ? targetName : '', left, applied },
+      event: {
+        type: 'item',
+        item: name,
+        target: target.id !== req.char.id ? targetName : '',
+        left,
+        applied,
+        ...(kept ? { kept: true, ability: clip(it.ability || it.notes, 200) } : {}),
+        ...(spent?.charges ? { charges: spent.charges } : {}),
+      },
       gmOnly: !req.char.party_since,
     });
     if (inFight) putEnc(enc);
     res.json({ left, applied, data: mine, version: charRow(req.char.id).version });
+  });
+
+  // Put an item on a Hotlist slot ({ slot, itemId }; '' empties it). In combat this takes an Action and is logged,
+  // so it can be undone from the log; out of combat the sheet just saves it.
+  app.post('/api/characters/:id/hotlist', auth, loadChar, (req, res) => {
+    const data = JSON.parse(req.char.data || '{}');
+    const inv = Array.isArray(data.inventory) ? data.inventory : [];
+    const slot = int(req.body?.slot, -1);
+    if (slot < 0 || slot >= HOT_SLOTS) return res.status(400).json({ error: 'Bad slot', code: 'bad_request' });
+    const itemId = String(req.body?.itemId || '');
+    const it = itemId ? inv.find((x) => x && x.id === itemId) : null;
+    if (itemId && !it) return res.status(404).json({ error: 'Not found', code: 'not_found' });
+    if (it && !hotlistable(it))
+      return res.status(409).json({ error: 'This item cannot go on the Hotlist', code: 'not_hotlistable' });
+    const before = Array.from({ length: HOT_SLOTS }, (_, i) => (data.hotSlots || [])[i] || '');
+    const next = setHotSlot(inv, before, slot, itemId);
+    if (next.hotSlots.every((id, i) => id === before[i]))
+      return res.json({ data, version: req.char.version, messageId: null });
+    const enc = getEnc();
+    const inFight = enc.active && !!req.char.party_since;
+    if (inFight && !useAction(enc, req.char.id, 'hotlist'))
+      return res.status(409).json({ error: 'No Actions left', code: 'no_actions_left' });
+    const mine = { ...data, inventory: next.inventory, hotSlots: next.hotSlots };
+    writeSheetWith(req.char, mine, req.user.id, {});
+    let messageId = null;
+    if (inFight) {
+      putEnc(enc);
+      const prev = inv.find((x) => x.id === before[slot]);
+      const msg = live.postEvent({
+        ownerId: req.char.owner_id,
+        characterId: req.char.id,
+        charName: clip(data.name),
+        event: {
+          type: 'hotlist',
+          slot: slot + 1,
+          item: it ? clip(it.item) : '',
+          prev: prev ? clip(prev.item) : '',
+          before,
+          after: next.hotSlots,
+          round: enc.round,
+          undone: false,
+        },
+        gmOnly: false,
+      });
+      messageId = msg?.id ?? null;
+    }
+    res.json({ data: mine, version: charRow(req.char.id).version, messageId });
+  });
+
+  // Undo a Hotlist change made in combat (its owner or the GM): the slots go back and the Action is returned
+  app.post('/api/messages/:id/undo', auth, (req, res) => {
+    const m = live.rawMessage(req.params.id);
+    const ev = m?.event ? JSON.parse(m.event) : null;
+    if (!m || ev?.type !== 'hotlist') return res.status(404).json({ error: 'Not found', code: 'not_found' });
+    const row = charRow(m.character_id);
+    if (!row || (row.owner_id !== req.user.id && !req.user.is_admin))
+      return res.status(404).json({ error: 'Not found', code: 'not_found' });
+    if (ev.undone) return res.status(409).json({ error: 'Already undone', code: 'already_undone' });
+    const data = JSON.parse(row.data || '{}');
+    const now = Array.from({ length: HOT_SLOTS }, (_, i) => (data.hotSlots || [])[i] || '');
+    if (!now.every((id, i) => id === (ev.after[i] || '')))
+      return res.status(409).json({ error: 'The Hotlist changed since', code: 'hotlist_changed' });
+    // the items it held might have been used up since: setHotSlot/syncHot drop missing ones
+    const back = setHotSlot(data.inventory || [], ev.before, -1, '');
+    writeSheetWith(row, { ...data, inventory: back.inventory, hotSlots: back.hotSlots }, req.user.id, {});
+    const enc = getEnc();
+    if (enc.active && enc.round === ev.round) {
+      const a = actionsOf(enc, row.id);
+      const i = a.used.lastIndexOf('hotlist');
+      if (i >= 0) a.used.splice(i, 1);
+      putEnc(enc);
+    }
+    live.updateEvent(m.id, { ...ev, undone: true });
+    res.json({ ok: true });
   });
 
   // mark a crawler's Actions: { op: 'use', kind: 'interrupt' | 'action' }, { op: 'free', index },
@@ -1045,9 +1139,17 @@ export function mountGame(app, { db, auth, adminOnly, loadChar, live, hooks = {}
     const attacks = a.used.filter((k) => k === 'attack').length;
     if (a.used.length >= max || attacks >= ACTIONS)
       return res.status(409).json({ error: 'No Actions left', code: 'no_actions_left' });
+    const data = JSON.parse(row.data || '{}');
+    // a ranged weapon fires one of the chosen Ammunition (from the Hotlist)
+    const ammoId = b.ammoItemId ? String(b.ammoItemId) : '';
+    const ammo = ammoId ? (data.inventory || []).find((x) => x && x.id === ammoId) : null;
+    if (
+      ammoId &&
+      (!ammo || ammo.type !== 'ammunition' || int(ammo.qty, 0) <= 0 || !(data.hotSlots || []).includes(ammoId))
+    )
+      return res.status(409).json({ error: 'No ammunition', code: 'no_ammo' });
     a.used.push('attack');
     const r = rollDice(expr);
-    const data = JSON.parse(row.data || '{}');
     const name = clip(data.name) || '?';
     const label = clip(b.label, 60) || 'Attack';
     const area = opps.length > 1;
@@ -1095,10 +1197,14 @@ export function mountGame(app, { db, auth, adminOnly, loadChar, live, hooks = {}
     const hitIds = new Set(opps.map((o) => o.id));
     changeSheet(
       cid,
-      (d) =>
-        Array.isArray(d.effects) && d.effects.some((e) => e.kind === 'advantage' && hitIds.has(e.vsOpponent))
-          ? { ...d, effects: d.effects.filter((e) => !(e.kind === 'advantage' && hitIds.has(e.vsOpponent))) }
-          : d,
+      (d0) => {
+        let d = d0;
+        if (Array.isArray(d.effects) && d.effects.some((e) => e.kind === 'advantage' && hitIds.has(e.vsOpponent)))
+          d = { ...d, effects: d.effects.filter((e) => !(e.kind === 'advantage' && hitIds.has(e.vsOpponent))) };
+        const spent = ammoId ? spendOne(d.inventory || [], d.hotSlots || [], ammoId) : null;
+        if (spent) d = { ...d, inventory: spent.inventory, hotSlots: spent.hotSlots };
+        return d;
+      },
       req.user.id,
     );
     putEnc(enc);

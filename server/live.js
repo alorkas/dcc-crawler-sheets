@@ -60,6 +60,9 @@ export function partyView(data, withMana) {
           hot: !!it.hot,
           bonus: it.bonus ?? {},
           notes: it.hot ? String(it.notes ?? '').slice(0, 200) : '',
+          ability: it.hot ? String(it.ability ?? '').slice(0, 200) : '',
+          charges: it.charges ?? '',
+          maxCharges: it.maxCharges ?? '',
         })),
     });
   return view;
@@ -240,7 +243,9 @@ export function mountLive(app, { db, auth, adminOnly, loadChar }) {
       )
       .run(uid, characterId, charName, JSON.stringify(event), gmOnly ? 1 : 0);
     const row = msgById.get(r.lastInsertRowid);
-    send('message', toMessage(row), (u) => visible(u, row));
+    const message = toMessage(row);
+    send('message', message, (u) => visible(u, row));
+    return message;
   }
 
   /** A dice roll posted by the server, e.g. for a Mob ("Bad Llama 2") or a crawler's Evade. */
@@ -262,6 +267,13 @@ export function mountLive(app, { db, auth, adminOnly, loadChar }) {
   /** Change a posted roll (e.g. mark it as rerolled with AI Favor) and tell the clients that can see it. */
   function updateRoll(id, roll) {
     db.prepare('UPDATE messages SET roll = ? WHERE id = ?').run(JSON.stringify(roll), Number(id));
+    const row = msgById.get(Number(id));
+    if (row) send('message-update', toMessage(row), (u) => visible(u, row));
+  }
+
+  /** Change a posted log entry (e.g. mark a Hotlist change as undone). */
+  function updateEvent(id, event) {
+    db.prepare('UPDATE messages SET event = ? WHERE id = ?').run(JSON.stringify(event), Number(id));
     const row = msgById.get(Number(id));
     if (row) send('message-update', toMessage(row), (u) => visible(u, row));
   }
@@ -344,5 +356,5 @@ export function mountLive(app, { db, auth, adminOnly, loadChar }) {
     res.json({ ok: true });
   });
 
-  return { characterChanged, postEvent, postRoll, send, rawMessage, updateRoll };
+  return { characterChanged, postEvent, postRoll, send, rawMessage, updateRoll, updateEvent };
 }

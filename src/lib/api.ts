@@ -67,7 +67,9 @@ export type HomebrewItem = {
   type: Item['type'];
   rarity: Item['rarity'];
   floor: number;
-  wear?: string;
+  fits?: Item['fits'];
+  ranged?: boolean;
+  ammo?: string;
   bonus: Item['bonus'];
   notes: string;
 };
@@ -154,6 +156,21 @@ export type LogEvent =
       target: string;
       left: number;
       applied: { type: 'heal'; slots: number } | { type: 'mana'; amount?: number } | null;
+      /** Equipment / Accessory / Special: its ability was used, the item stays. */
+      kept?: boolean;
+      ability?: string;
+      /** Charges left on the current one. */
+      charges?: number;
+    }
+  | {
+      type: 'hotlist';
+      slot: number;
+      item: string;
+      prev: string;
+      before: string[];
+      after: string[];
+      round: number;
+      undone: boolean;
     }
   | { type: 'interrupt'; kind: 'catch'; ally: string; attack: string }
   | { type: 'reward'; title: string; boxes: Pick<LootBox, 'tier' | 'kind' | 'label'>[] }
@@ -394,10 +411,11 @@ export const BOX_KINDS: BoxKind[] = [
   'custom',
 ];
 /** An item inside a loot box (`special` gets the spotlight when it's opened). */
-export type RewardItem = Pick<Item, 'item' | 'qty' | 'notes' | 'type' | 'rarity' | 'unique' | 'skill' | 'upgrades'> & {
-  bonus: Item['bonus'];
-  special: boolean;
-};
+export type RewardItem = Pick<Item, 'item' | 'qty' | 'notes' | 'type' | 'rarity' | 'unique' | 'skill' | 'upgrades'> &
+  Partial<Pick<Item, 'fits' | 'twoHanded' | 'ranged' | 'ammo' | 'ammoType' | 'charges' | 'maxCharges' | 'ability'>> & {
+    bonus: Item['bonus'];
+    special: boolean;
+  };
 export type LootBox = { tier: BoxTier; kind: BoxKind; label: string; items: RewardItem[] };
 export type Reward = { boxes: LootBox[]; note: string };
 export type Achievement = {
@@ -532,7 +550,15 @@ export const api = {
     expr: string;
     damage?: string | null;
     label: string;
+    /** A ranged weapon's Ammunition (inventory item id, on the Hotlist): one is spent. */
+    ammoItemId?: string;
   }) => request<Encounter>('POST', '/api/encounter/attacks', a),
+  setHotSlot: (characterId: number, slot: number, itemId: string) =>
+    request<{ version: number; messageId: number | null }>('POST', `/api/characters/${characterId}/hotlist`, {
+      slot,
+      itemId,
+    }),
+  undoEvent: (messageId: number) => request<{ ok: boolean }>('POST', `/api/messages/${messageId}/undo`, {}),
   intervene: (messageId: number, characterId: number) =>
     request<Encounter>('POST', `/api/messages/${messageId}/intervene`, { characterId }),
   taunt: (declId: number, characterId: number, expr: string) =>

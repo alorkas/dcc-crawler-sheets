@@ -6,13 +6,17 @@ import { useLiveOptional } from '../lib/live';
 import type { Item } from '../lib/sheet';
 import { useSheet } from './fields';
 
-type QuickItem = Pick<Item, 'id' | 'item' | 'qty' | 'notes'> & { hot?: boolean };
+type QuickItem = Pick<Item, 'id' | 'item' | 'qty' | 'notes'> &
+  Partial<Pick<Item, 'type' | 'ability' | 'charges' | 'maxCharges'>> & { hot?: boolean };
+
+/** Equipment, Accessories and Special items aren't used up: their ability is used. */
+const keeps = (it: QuickItem) => ['equipment', 'accessory', 'special'].includes(it.type ?? '');
 
 type Run = <T>(fn: () => Promise<T>) => Promise<T>;
 const direct: Run = (fn) => fn();
 
 /**
- * Use one of an item: healing and mana items apply themselves (to this crawler or, for healing, a party member);
+ * Use an item: Consumables spend a charge or one of the stack (healing and mana items apply themselves (to this crawler or, for healing, a party member);
  * in combat it takes an Action (an Interrupt in Crawler Reaction).
  */
 export function UseItemControls({
@@ -32,7 +36,8 @@ export function UseItemControls({
   const [target, setTarget] = useState(0);
   const [msg, setMsg] = useState<{ text: string; bad?: boolean } | null>(null);
   const party = (live?.party ?? []).filter((p) => p.id !== memberId);
-  const fx = itemEffect(it.notes);
+  const kept = keeps(it);
+  const fx = kept ? null : itemEffect(it.notes);
   const use = async () => {
     setMsg(null);
     try {
@@ -44,7 +49,9 @@ export function UseItemControls({
             ? t('quick.healed', { n: ap.slots ?? 0 })
             : ap?.type === 'mana'
               ? t('quick.mana')
-              : t('quick.used', { n: r.left }),
+              : kept
+                ? t('quick.usedAbility')
+                : t('quick.used', { n: r.left }),
       });
       if (live?.encounter?.active) live.setEncounter(await api.encounter());
     } catch (e) {
@@ -68,8 +75,14 @@ export function UseItemControls({
           ))}
         </select>
       )}
-      <button type="button" className="btn small" disabled={(Number(it.qty) || 1) <= 0} onClick={use}>
-        {t('quick.use')}
+      <button
+        type="button"
+        className="btn small"
+        disabled={!kept && (Number(it.qty) || 1) <= 0}
+        onClick={use}
+        title={kept ? it.ability || it.notes : undefined}
+      >
+        {kept ? t('quick.useAbility') : t('quick.use')}
       </button>
       {msg && <span className={`tiny ${msg.bad ? 'error' : 'ok'}`}>{msg.text}</span>}
     </span>
@@ -101,14 +114,15 @@ export function QuickItems({
       </div>
       <ul>
         {hot.map((it) => {
-          const fx = itemEffect(it.notes);
+          const fx = keeps(it) ? null : itemEffect(it.notes);
           return (
             <li key={it.id}>
               <span className="grow" title={it.notes}>
-                <strong>{it.item}</strong> <span className="loot-qty">×{Number(it.qty) || 1}</span>
+                <strong>{it.item}</strong> {!keeps(it) && <span className="loot-qty">×{Number(it.qty) || 1}</span>}
                 {fx?.type === 'heal' && <span className="dim tiny"> · {t('quick.heals', { n: fx.amount })}</span>}
+                {it.type === 'ammunition' && <span className="dim tiny"> · {t('itemType.ammunition')}</span>}
               </span>
-              <UseItemControls memberId={memberId} it={it} manaMax={manaMax} run={run} />
+              {it.type !== 'ammunition' && <UseItemControls memberId={memberId} it={it} manaMax={manaMax} run={run} />}
             </li>
           );
         })}

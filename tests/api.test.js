@@ -1034,6 +1034,7 @@ test('Phase 4: effects tick down, Evade degrees, Advantage, Intervene, Taunt, Ca
       hbLost: 6,
       effects,
       inventory: [potion],
+      hotSlots: ['hp1'],
       debuffList: [{ id: 'enraged', stacks: 1, note: '', rounds: 2 }],
     },
   });
@@ -1311,13 +1312,14 @@ test('book stat blocks carry Spanish rules notes', async () => {
 
 test('campaign loot: valid items, GM-only list, claimed items bring their bonuses and description', async () => {
   const { HOMEBREW_ITEMS } = await import('../server/catalog/homebrew.js');
-  const { ITEM_TYPES, RARITIES, BONUS_KEYS, GEAR_SLOTS } = await import('../shared/items.js');
+  const { ITEM_TYPES, RARITIES, BONUS_KEYS, EQUIP_FITS, ACCESSORY_FITS } = await import('../shared/items.js');
   assert.ok(HOMEBREW_ITEMS.length >= 40);
   assert.equal(new Set(HOMEBREW_ITEMS.map((h) => h.name)).size, HOMEBREW_ITEMS.length, 'unique names');
   for (const h of HOMEBREW_ITEMS) {
     assert.ok(ITEM_TYPES.includes(h.type) && RARITIES.includes(h.rarity), h.name);
     assert.deepEqual(Object.keys(h.bonus).sort(), [...BONUS_KEYS].sort(), h.name);
-    assert.ok(!h.wear || GEAR_SLOTS.includes(h.wear), h.name);
+    if (h.type === 'equipment') assert.ok(EQUIP_FITS.includes(h.fits), h.name);
+    if (h.type === 'accessory') assert.ok(ACCESSORY_FITS.includes(h.fits), h.name);
     assert.ok(h.notes.includes('IA: «'), h.name);
   }
   const dm = client();
@@ -1338,5 +1340,113 @@ test('campaign loot: valid items, GM-only list, claimed items bring their bonuse
   );
   assert.equal(ring.bonus.dex, '2');
   assert.equal(ring.rarity, 'silver');
+  assert.deepEqual([ring.type, ring.fits], ['accessory', 'finger']);
   assert.match(ring.notes, /\+2 DES/);
+});
+
+test('item categories: what can be used, Hotlist changes cost an Action in combat and can be undone, ammunition', async () => {
+  const dm = client();
+  const pl = client();
+  await dm('POST', '/api/auth/login', { username: 'dm', password: 'adminpass123' });
+  await pl('POST', '/api/auth/register', { username: 'archer', password: 'password1' });
+  const base = { qty: '1', notes: '', rarity: '', unique: false, hot: false, bonus: {} };
+  const inventory = [
+    {
+      ...base,
+      id: 'bow',
+      item: 'Longbow',
+      type: 'equipment',
+      fits: 'held',
+      slot: 'eq.mainHand.1',
+      skill: 'Bows',
+      ranged: true,
+      ammo: 'Arrow',
+    },
+    { ...base, id: 'arr', item: 'Arrows', type: 'ammunition', ammoType: 'Arrow', qty: '2', slot: '' },
+    {
+      ...base,
+      id: 'ring',
+      item: 'Glow Ring',
+      type: 'accessory',
+      fits: 'finger',
+      slot: 'acc.finger.1',
+      ability: 'Glows',
+    },
+    { ...base, id: 'rope', item: 'Rope', type: 'crafting', slot: '' },
+    { ...base, id: 'wand', item: 'Wand of Sparks', type: 'consumable', maxCharges: '2', charges: '', slot: '' },
+  ];
+  const hotSlots = ['arr', 'ring', '', '', '', '', '', '', '', ''];
+  const c = await pl('POST', '/api/characters', { data: { schema: 8, name: 'Robin', inventory, hotSlots } });
+  const id = c.body.id;
+  const sheet = async () => (await pl('GET', `/api/characters/${id}`)).body;
+
+  // out of combat
+  assert.equal((await pl('POST', `/api/characters/${id}/use-item`, { itemId: 'rope' })).body.code, 'not_usable');
+  assert.equal((await pl('POST', `/api/characters/${id}/use-item`, { itemId: 'arr' })).body.code, 'ammo_via_attack');
+  const zap = await pl('POST', `/api/characters/${id}/use-item`, { itemId: 'wand' });
+  assert.equal(zap.status, 200);
+  assert.equal((await sheet()).data.inventory.find((i) => i.id === 'wand').charges, '1', 'a charge, not the wand');
+  const glow = await pl('POST', `/api/characters/${id}/use-item`, { itemId: 'ring' });
+  assert.equal(glow.status, 200);
+  assert.ok(
+    (await sheet()).data.inventory.some((i) => i.id === 'ring'),
+    'abilities are not used up',
+  );
+  assert.equal(
+    (await pl('POST', `/api/characters/${id}/hotlist`, { slot: 2, itemId: 'rope' })).body.code,
+    'not_hotlistable',
+  );
+  const calm = await pl('POST', `/api/characters/${id}/hotlist`, { slot: 2, itemId: 'wand' });
+  assert.equal(calm.status, 200);
+  assert.equal(calm.body.messageId, null, 'no log entry (and no Action) out of combat');
+
+  // slot counts: only the GM
+  let s = await sheet();
+  await pl('PUT', `/api/characters/${id}`, {
+    version: s.version,
+    data: { ...s.data, slotCounts: { 'acc.finger': '12' } },
+  });
+  s = await sheet();
+  assert.notEqual(s.data.slotCounts?.['acc.finger'], '12');
+  await dm('PUT', `/api/characters/${id}`, {
+    version: s.version,
+    data: { ...s.data, slotCounts: { 'acc.finger': '12' } },
+  });
+  assert.equal((await sheet()).data.slotCounts['acc.finger'], '12');
+
+  // in combat
+  await dm('PATCH', `/api/characters/${id}/party`, { inParty: true });
+  await dm('POST', '/api/encounter', { action: 'end' });
+  await dm('POST', '/api/encounter', { action: 'start', floor: 1 });
+  const enc = (await dm('POST', '/api/encounter/opponents', { name: 'Rat', slots: 10, slotValue: 1, evade: '1' })).body;
+  const rat = enc.opponents.at(-1).id;
+  const off = await pl('POST', `/api/characters/${id}/hotlist`, { slot: 2, itemId: '' });
+  assert.equal(off.status, 200);
+  assert.ok(off.body.messageId);
+  let acts = (await pl('GET', '/api/encounter')).body.actions[id].used;
+  assert.deepEqual(acts, ['hotlist']);
+  assert.equal((await pl('POST', `/api/characters/${id}/use-item`, { itemId: 'wand' })).body.code, 'not_on_hotlist');
+  const undo = await pl('POST', `/api/messages/${off.body.messageId}/undo`, {});
+  assert.equal(undo.status, 200);
+  assert.equal((await sheet()).data.hotSlots[2], 'wand');
+  acts = (await pl('GET', '/api/encounter')).body.actions[id].used;
+  assert.deepEqual(acts, [], 'the Action comes back');
+  assert.equal((await pl('POST', `/api/messages/${off.body.messageId}/undo`, {})).body.code, 'already_undone');
+  const msg = (await pl('GET', '/api/messages')).body.find((m) => m.id === off.body.messageId);
+  assert.equal(msg.event.undone, true);
+
+  // a shot spends one arrow; the last one empties its Hotlist slot
+  const shot = { characterId: id, opponentId: rat, expr: 'd20+5', damage: '1d6', label: 'Bows', ammoItemId: 'arr' };
+  assert.equal((await dm('POST', '/api/encounter/attacks', shot)).status, 201);
+  assert.equal((await sheet()).data.inventory.find((i) => i.id === 'arr').qty, '1');
+  assert.equal((await dm('POST', '/api/encounter/attacks', shot)).status, 201);
+  s = await sheet();
+  assert.equal(
+    s.data.inventory.some((i) => i.id === 'arr'),
+    false,
+  );
+  assert.equal(s.data.hotSlots[0], '');
+  await dm('POST', '/api/encounter/actions', { characterId: id, op: 'free', index: 0 });
+  assert.equal((await dm('POST', '/api/encounter/attacks', shot)).body.code, 'no_ammo');
+  await dm('POST', '/api/encounter', { action: 'end' });
 });

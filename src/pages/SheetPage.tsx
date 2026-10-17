@@ -5,7 +5,15 @@ import { useAuth } from '../lib/auth';
 import { setIn, type SheetData } from '../lib/sheet';
 import { derive, loadSheet } from '../lib/rules';
 import { SheetCtx, type Path } from '../components/fields';
-import { AbilitiesTab, CompanionsTab, CoreTab, GearTab, InventoryTab, SkillsTab } from '../components/SheetTabs';
+import {
+  AbilitiesTab,
+  CompanionsTab,
+  CoreTab,
+  EquipmentTab,
+  GearTab,
+  InventoryTab,
+  SkillsTab,
+} from '../components/SheetTabs';
 import { LockIcon, UnlockIcon } from '../components/icons';
 import { useI18n, type MsgKey } from '../lib/i18n';
 import { useLive } from '../lib/live';
@@ -17,6 +25,7 @@ const TABS = [
   { id: 'core', label: 'tab.core', el: CoreTab },
   { id: 'gear', label: 'tab.gear', el: GearTab },
   { id: 'skills', label: 'tab.skills', el: SkillsTab },
+  { id: 'equipment', label: 'tab.equipment', el: EquipmentTab },
   { id: 'inventory', label: 'tab.inventory', el: InventoryTab },
   { id: 'companions', label: 'tab.companions', el: CompanionsTab },
   { id: 'abilities', label: 'tab.abilities', el: AbilitiesTab },

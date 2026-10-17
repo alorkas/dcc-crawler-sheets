@@ -18,6 +18,7 @@ export const PLAY_PATHS = [
   ['inventory'], // items are used, picked up and swapped during play (equipping included)
   ['hotlist'],
   ['hotSlots'],
+  ['slotCounts'], // GM only (the server keeps a player's change out), and allowed on locked sheets
   ['effects'], // status effects come and go during play
 ];
 

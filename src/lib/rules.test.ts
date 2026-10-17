@@ -21,7 +21,7 @@ import {
   slotsLost,
   statModFromScore,
 } from './rules';
-import { emptyItem, emptySheet } from './sheet';
+import { emptyItem, emptySheet, type Item } from './sheet';
 import { classifySkill, defaultCheckType } from './skillTypes';
 
 const withStats = (vals: Partial<Record<'str' | 'int' | 'con' | 'dex' | 'cha', string>>) => {
@@ -351,12 +351,13 @@ describe('items (schema 6)', () => {
       inventory: [{ item: 'Torch', qty: '2', notes: '' }],
     });
     const worn = s.inventory.filter((i) => i.slot);
-    expect(worn.map((i) => [i.item, i.slot])).toEqual([
-      ['Hard hat', 'head'],
-      ['Tire Iron', 'hands'],
-      ['Shield', 'hands'],
-      ['Ring', 'accessory'],
-      ['Amulet', 'accessory'],
+    // (v8 then turns the old slots into body slots)
+    expect(worn.map((i) => [i.item, i.slot, i.type])).toEqual([
+      ['Hard hat', 'eq.head.1', 'equipment'],
+      ['Tire Iron', 'eq.mainHand.1', 'equipment'],
+      ['Shield', 'eq.offHand.1', 'equipment'],
+      ['Ring', 'acc.finger.1', 'accessory'],
+      ['Amulet', 'acc.finger.2', 'accessory'],
     ]);
     expect(s.inventory.find((i) => i.item === 'Torch')?.qty).toBe('2');
     expect(new Set(s.inventory.map((i) => i.id)).size).toBe(s.inventory.length);
@@ -368,7 +369,10 @@ describe('items (schema 6)', () => {
     const armor = { ...emptyItem(), item: 'Plate', bonus: { ...emptyItem().bonus, dr: '3', evade: '-1' } };
     const carried = derive({ ...s, inventory: [armor] });
     expect(carried.drTotal).toBe(1);
-    const worn = derive({ ...s, inventory: [{ ...armor, slot: 'torso' }] });
+    const worn = derive({
+      ...s,
+      inventory: [{ ...armor, type: 'equipment' as const, fits: 'chest' as const, slot: 'eq.chest.1' }],
+    });
     expect(worn.drTotal).toBe(4);
     expect(worn.gearDr.from).toEqual([{ name: 'Plate', value: 3 }]);
   });
@@ -396,16 +400,18 @@ describe('shared item helpers', async () => {
       {
         ...emptyItem(),
         item: 'Sword +2',
-        type: 'weapon' as const,
-        slot: 'hands' as const,
+        type: 'equipment' as const,
+        fits: 'held' as const,
+        slot: 'eq.mainHand.1',
         skill: 'Swords',
         bonus: { ...emptyItem().bonus, damage: '+2' },
       },
       {
         ...emptyItem(),
         item: 'Brass knuckles',
-        type: 'weapon' as const,
-        slot: 'hands' as const,
+        type: 'equipment' as const,
+        fits: 'held' as const,
+        slot: 'eq.offHand.1',
         bonus: { ...emptyItem().bonus, damage: '1' },
       },
     ];
@@ -488,7 +494,15 @@ describe('Hotlist slots', () => {
 
 describe('Stat bonuses from gear', () => {
   it('equipped items add to the Enhanced score and its Mod', () => {
-    const ring = { ...emptyItem(), id: 'r', item: 'Silver Ring', qty: '1', slot: 'accessory' as const };
+    const ring = {
+      ...emptyItem(),
+      id: 'r',
+      item: 'Silver Ring',
+      qty: '1',
+      type: 'accessory' as const,
+      fits: 'finger' as const,
+      slot: 'acc.finger.4',
+    };
     ring.bonus = { ...ring.bonus, dex: '2' };
     const carried = { ...emptyItem(), id: 'c', item: 'Spare Ring', qty: '1' };
     carried.bonus = { ...carried.bonus, dex: '5' };
@@ -499,5 +513,99 @@ describe('Stat bonuses from gear', () => {
     expect(der.modAuto.dex).toBe(
       derive(loadSheet({ stats: { dex: { enhanced: '6', unenhanced: '6', mod: '' } } })).modAuto.dex,
     );
+  });
+});
+
+describe('item categories and body slots (schema 8)', async () => {
+  const items = await import('../../shared/items.js');
+  const mk = (o: Partial<Item>): Item => ({ ...emptyItem(), qty: '1', ...o });
+
+  it('v7 → v8: old types and slots become categories and body slots', () => {
+    const d = loadSheet({
+      schema: 7,
+      name: 'Old',
+      inventory: [
+        mk({ id: 'a', item: 'Longbow', type: 'weapon' as Item['type'], slot: 'hands' as string, skill: 'Bows' }),
+        mk({ id: 'b', item: 'Leather jacket', type: 'armor' as Item['type'], slot: 'torso' }),
+        mk({ id: 'c', item: 'Gloves', type: 'armor' as Item['type'], slot: 'hands' }),
+        mk({ id: 'd', item: 'Gold', type: 'misc' as Item['type'] }),
+        mk({ id: 'e', item: 'Goblin ear', type: 'material' as Item['type'] }),
+        mk({ id: 'f', item: 'Key', type: 'quest' as Item['type'] }),
+        mk({ id: 'g', item: 'Ring', type: 'accessory', slot: 'accessory' }),
+      ],
+    });
+    const by = (id: string) => d.inventory.find((x) => x.id === id)!;
+    expect(d.schema).toBe(SCHEMA_VERSION);
+    expect([by('a').type, by('a').fits, by('a').slot, by('a').ranged, by('a').ammo]).toEqual([
+      'equipment',
+      'held',
+      'eq.mainHand.1',
+      true,
+      'Arrow',
+    ]);
+    expect([by('b').type, by('b').slot]).toEqual(['equipment', 'eq.chest.1']);
+    expect([by('c').fits, by('c').slot]).toEqual(['hands', 'eq.hands.1']);
+    expect([by('d').type, by('e').type, by('f').type]).toEqual(['other', 'crafting', 'special']);
+    expect([by('g').fits, by('g').slot]).toEqual(['finger', 'acc.finger.1']);
+    expect(d.slotCounts['acc.finger']).toBe('');
+  });
+
+  it('31 slots by default; GM counts add and take away', () => {
+    expect(items.slotList(undefined)).toHaveLength(31);
+    const more = items.slotList({ 'eq.head': '2', 'acc.finger': '0' });
+    expect(more.filter((s) => s.key === 'eq.head').map((s) => s.id)).toEqual(['eq.head.1', 'eq.head.2']);
+    expect(more.some((s) => s.part === 'finger')).toBe(false);
+  });
+
+  it('only fitting items stay equipped; a two-handed weapon frees the off hand', () => {
+    const inv = [
+      mk({ id: 'h', item: 'Hat', type: 'equipment', fits: 'head', slot: 'eq.head.1' }),
+      mk({ id: 'x', item: 'Hat on a finger', type: 'equipment', fits: 'head', slot: 'acc.finger.1' }),
+      mk({ id: 'r', item: 'Ring', type: 'accessory', fits: 'finger', slot: 'acc.finger.11' }),
+      mk({ id: 's', item: 'Shield', type: 'equipment', fits: 'held', slot: 'eq.offHand.1' }),
+    ];
+    const clean = items.sanitizeEquipped(inv, undefined);
+    expect(clean.map((x) => x.slot)).toEqual(['eq.head.1', '', '', 'eq.offHand.1']);
+    const bow = mk({ id: 'b', item: 'Greatbow', type: 'equipment', fits: 'held', twoHanded: true });
+    const after = items.equipItem([...clean, bow], 'b', 'eq.mainHand.1');
+    expect(after.find((x) => x.id === 's')!.slot).toBe('');
+    expect(after.find((x) => x.id === 'b')!.slot).toBe('eq.mainHand.1');
+    // equipping the shield again takes the two-handed bow off
+    const back = items.equipItem(after, 's', 'eq.offHand.1');
+    expect(back.find((x) => x.id === 'b')!.slot).toBe('');
+    expect(items.fitsSlot(bow, 'eq.offHand.2')).toBe(true);
+    expect(items.fitsSlot(bow, 'eq.head.1')).toBe(false);
+  });
+
+  it('what goes on the Hotlist', () => {
+    expect(items.hotlistable(mk({ type: 'consumable' }))).toBe(true);
+    expect(items.hotlistable(mk({ type: 'ammunition' }))).toBe(true);
+    expect(items.hotlistable(mk({ type: 'special' }))).toBe(true);
+    expect(items.hotlistable(mk({ type: 'equipment' }))).toBe(false);
+    expect(items.hotlistable(mk({ type: 'equipment', ability: 'Glow' }))).toBe(true);
+    expect(items.hotlistable(mk({ type: 'crafting' }))).toBe(false);
+  });
+
+  it('spending charges and items', () => {
+    const wand = mk({ id: 'w', item: 'Wand', type: 'consumable', qty: '2', maxCharges: '3' });
+    let r = items.spendOne([wand], ['w'], 'w')!;
+    expect([r.left, r.charges, r.inventory[0].charges]).toEqual([2, 2, '2']);
+    r = items.spendOne(r.inventory, r.hotSlots, 'w')!;
+    r = items.spendOne(r.inventory, r.hotSlots, 'w')!; // last charge: one wand used up, the next is full
+    expect([r.inventory[0].qty, r.inventory[0].charges]).toEqual(['1', '3']);
+    const arrow = mk({ id: 'a', item: 'Arrows', type: 'ammunition', qty: '1' });
+    const gone = items.spendOne([arrow], ['a', ''], 'a')!;
+    expect([gone.inventory.length, gone.hotSlots[0]]).toEqual([0, '']);
+  });
+
+  it('a ranged weapon finds its Ammunition on the Hotlist', () => {
+    const bow = mk({ id: 'b', item: 'Longbow', type: 'equipment', fits: 'held', slot: 'eq.mainHand.1' });
+    Object.assign(bow, { skill: 'Bows', ranged: true, ammo: 'Arrow' });
+    const arrows = mk({ id: 'a', item: 'Arrows', type: 'ammunition', ammoType: 'Arrows', qty: '12' });
+    const bolts = mk({ id: 'c', item: 'Bolts', type: 'ammunition', ammoType: 'Bolt', qty: '5' });
+    const loose = mk({ id: 'l', item: 'More arrows', type: 'ammunition', ammoType: 'Arrow', qty: '5' });
+    const inv = [bow, arrows, bolts, loose];
+    expect(items.weaponFor(inv, 'Bows')?.id).toBe('b');
+    expect(items.ammoFor(inv, ['a', 'c', '', '', '', '', '', '', '', ''], bow).map((x) => x.id)).toEqual(['a']);
   });
 });

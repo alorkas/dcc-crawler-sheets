@@ -5,7 +5,16 @@ import { lookup } from './catalog/index.js';
 import { HOMEBREW_ITEMS } from './catalog/homebrew.js';
 
 const HOMEBREW = new Map(HOMEBREW_ITEMS.map((h) => [h.name.toLowerCase(), h]));
-import { addItems, BONUS_KEYS, emptyItem, ensureIds, ITEM_TYPES, RARITIES } from '../shared/items.js';
+import {
+  ACCESSORY_FITS,
+  addItems,
+  BONUS_KEYS,
+  emptyItem,
+  ensureIds,
+  EQUIP_FITS,
+  ITEM_TYPES,
+  RARITIES,
+} from '../shared/items.js';
 
 /** Loot box tiers (Core Rulebook "Loot Boxes") and the usual kinds of box. */
 export const BOX_TIERS = ['bronze', 'silver', 'gold', 'platinum', 'legendary', 'celestial'];
@@ -28,6 +37,14 @@ function cleanItem(raw) {
     special: !!it.special,
     skill: clip(it.skill, 80),
     upgrades: clip(it.upgrades, 500),
+    fits: pick(it.fits, [...EQUIP_FITS, ...ACCESSORY_FITS]),
+    twoHanded: !!it.twoHanded,
+    ranged: !!it.ranged,
+    ammo: clip(it.ammo, 40),
+    ammoType: clip(it.ammoType, 40),
+    charges: clip(it.charges, 4),
+    maxCharges: clip(it.maxCharges, 4),
+    ability: clip(it.ability, 500),
     bonus: Object.fromEntries(BONUS_KEYS.map((k) => [k, clip(bonus[k], 8)])),
     slot: base.slot,
     hot: false,
@@ -50,6 +67,39 @@ export function cleanReward(raw) {
 
 const hasReward = (r) => !!(r && (r.boxes?.length || r.note));
 
+/** Book gear slots → our body parts; a few book accessories are worn somewhere specific. */
+const BOOK_PART = {
+  Head: 'head',
+  Torso: 'chest',
+  Arms: 'bracers',
+  Legs: 'pants',
+  Feet: 'feet',
+  'Hands/Holding': 'held',
+};
+const BOOK_ACCESSORY = [
+  [/plume|hat/i, 'head'],
+  [/bracelet/i, 'bracers'],
+  [/tattoo/i, 'chest'],
+  [/cloak|cape/i, 'back'],
+  [/ring\b/i, 'finger'],
+  [/necklace|amulet|pendant|collar/i, 'neck'],
+];
+/** Category (and where it's worn) of a book item. */
+function bookKind(e) {
+  const ty = String(e.type || '').toLowerCase();
+  if (ty === 'consumable' || ty === 'explosive') return { type: 'consumable' };
+  if (ty === 'map') return { type: 'special' };
+  if (e.slot === 'Accessory') {
+    const fit = BOOK_ACCESSORY.find(([re]) => re.test(e.name))?.[1];
+    return fit ? { type: 'accessory', fits: fit } : { type: 'special' };
+  }
+  if (e.slot) {
+    const fit = /grips|gloves|gauntlet/i.test(e.name) ? 'hands' : BOOK_PART[e.slot] || '';
+    return { type: 'equipment', fits: fit };
+  }
+  return { type: 'other' };
+}
+
 /** Fill an item's description and type from the book catalog when the GM left them empty. */
 function fromBook(it) {
   const brew = HOMEBREW.get(it.item.trim().toLowerCase());
@@ -57,6 +107,8 @@ function fromBook(it) {
     const out = { ...it };
     if (!out.notes.trim()) out.notes = brew.notes;
     if (!out.type) out.type = brew.type;
+    if (!out.fits && brew.fits) out.fits = brew.fits;
+    if (brew.ranged && !out.ranged) Object.assign(out, { ranged: true, ammo: out.ammo || brew.ammo || '' });
     if (!out.rarity) out.rarity = brew.rarity;
     if (BONUS_KEYS.every((k) => !String(out.bonus?.[k] ?? '').trim())) out.bonus = { ...brew.bonus };
     return out;
@@ -69,17 +121,7 @@ function fromBook(it) {
     out.notes = [e.slot && `[${e.slot}]`, e.effect, e.cooldown && `Cooldown ${e.cooldown}`, e.page && `p. ${e.page}`]
       .filter(Boolean)
       .join(' · ');
-  if (!out.type) {
-    const ty = String(e.type || '').toLowerCase();
-    out.type =
-      ty === 'consumable' || ty === 'explosive'
-        ? 'consumable'
-        : e.slot === 'Accessory'
-          ? 'accessory'
-          : e.slot
-            ? 'armor'
-            : 'misc';
-  }
+  if (!out.type) Object.assign(out, bookKind(e));
   return out;
 }
 

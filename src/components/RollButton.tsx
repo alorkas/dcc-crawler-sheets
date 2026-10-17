@@ -13,6 +13,7 @@ export function RollButton({
   text,
   className = '',
   stat = false,
+  beforeRoll,
 }: {
   expr: string;
   label: string;
@@ -20,6 +21,8 @@ export function RollButton({
   className?: string;
   /** A Stat Check (Intervene can't help those). */
   stat?: boolean;
+  /** Checked first (e.g. a ranged weapon needs Ammunition): false stops the roll. */
+  beforeRoll?: () => boolean;
 }) {
   const { t } = useI18n();
   const live = useLiveOptional();
@@ -30,6 +33,7 @@ export function RollButton({
   const shown = text ?? expr;
   if (!live) return <output className={`roll-total ${className}`}>{shown}</output>;
   const roll = async () => {
+    if (beforeRoll && !beforeRoll()) return;
     try {
       const m = await live.send({ roll: { expr, label, ...(stat ? { stat } : {}) }, characterId: charId ?? null });
       const r = m.roll;

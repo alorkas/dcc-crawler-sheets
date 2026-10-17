@@ -8,7 +8,7 @@ import { useSearchParams } from 'react-router-dom';
 import { CastButton } from './SkillsTab';
 import { RollButton } from './RollButton';
 import { damageBonusFor } from '../../shared/items.js';
-import { EquippedSlots, HotlistSlots } from './Inventory';
+import { HotlistSlots } from './Inventory';
 import { AttackRollButton, CombatTargetBar, TargetProvider } from './CombatAttack';
 import { AssignStatPoints } from './AssignStatPoints';
 import { useI18n, type MsgKey } from '../lib/i18n';
@@ -288,6 +288,7 @@ function PinnedRow({ i, der, onEdit }: { i: number; der: ReturnType<typeof useSh
             name={s.name || t('skills.phSkill')}
             damage={dmgExpr}
             manaCost={spell ? num(s.manaCost) : null}
+            spell={spell}
             className="pin-roll"
           />
         )}
@@ -353,10 +354,6 @@ export function GearTab() {
         <div className="dim tiny">{t('gear.hotlistHint')}</div>
         <HotlistSlots />
       </Section>
-      <Section title={t('gear.title')} className="span-gear">
-        <EquippedSlots />
-        <p className="dim tiny">{t('gear.equipHint')}</p>
-      </Section>
       <div className="side-notes">
         <Section title={t('gear.popularity')}>
           <Area path={['popularity']} rows={2} />
@@ -383,6 +380,7 @@ export { SkillsTab } from './SkillsTab';
 
 /* ---------------- Page 4: Inventory (see Inventory.tsx) ---------------- */
 export { InventoryTab } from './Inventory';
+export { EquipmentTab } from './Equipment';
 
 /* ---------------- Page 5: Companions & the rest ---------------- */
 export function CompanionsTab() {
