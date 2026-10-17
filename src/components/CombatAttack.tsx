@@ -1,6 +1,9 @@
 import { createContext, useContext, useState, type ReactNode } from 'react';
 import { api, type CrawlerAttack, type Opponent } from '../lib/api';
-import { useI18n } from '../lib/i18n';
+import { useI18n, type MsgKey } from '../lib/i18n';
+import { spendMana } from '../lib/rules';
+import type { Effect } from '../lib/sheet';
+import { DegreeBadge } from './Status';
 import { useLiveOptional } from '../lib/live';
 import { RollButton } from './RollButton';
 import { useSheet } from './fields';
@@ -8,8 +11,41 @@ import { useSheet } from './fields';
 /* In combat, a crawler's pinned attacks can target an opponent: the server rolls against the Mob's Evade
    (hidden from players), uses one of their Actions, and on a hit they roll damage for the GM to apply. */
 
-type TargetState = { target: number | null; setTarget: (id: number | null) => void };
-const TargetCtx = createContext<TargetState>({ target: null, setTarget: () => {} });
+type RollMode = 'auto' | 'normal' | 'adv' | 'dis';
+type TargetState = {
+  target: number | null;
+  setTarget: (id: number | null) => void;
+  /** Area Attack: several targets for one roll. */
+  area: number[] | null;
+  setArea: (ids: number[] | null) => void;
+  mode: RollMode;
+  setMode: (m: RollMode) => void;
+};
+const TargetCtx = createContext<TargetState>({
+  target: null,
+  setTarget: () => {},
+  area: null,
+  setArea: () => {},
+  mode: 'auto',
+  setMode: () => {},
+});
+
+/**
+ * Advantage/Disadvantage for an attack: from the crawler's status effects (an Advantage earned against this Mob,
+ * or a general one). Both at once cancel out (Core Rulebook "Advantage & Disadvantage").
+ */
+function autoMode(effects: Effect[], targets: number[]): { mode: 'normal' | 'adv' | 'dis'; why: string[] } {
+  const adv = effects.filter(
+    (e) => e.kind === 'advantage' && (e.vsOpponent === undefined || targets.includes(e.vsOpponent)),
+  );
+  const dis = effects.filter((e) => e.kind === 'disadvantage');
+  const why = [...adv, ...dis].map((e) => e.name);
+  if (adv.length && dis.length) return { mode: 'normal', why };
+  return { mode: adv.length ? 'adv' : dis.length ? 'dis' : 'normal', why };
+}
+/** "d20+5" → "2d20kh1+5" (Advantage) / "2d20kl1+5" (Disadvantage). */
+export const withMode = (expr: string, mode: 'normal' | 'adv' | 'dis') =>
+  mode === 'normal' ? expr : expr.replace(/^1?d20/i, mode === 'adv' ? '2d20kh1' : '2d20kl1');
 
 /** The fight as this sheet's crawler sees it: null when not in combat or not in the party. */
 function useFight() {
@@ -23,17 +59,34 @@ function useFight() {
 
 export function TargetProvider({ children }: { children: ReactNode }) {
   const [target, setTarget] = useState<number | null>(null);
-  return <TargetCtx.Provider value={{ target, setTarget }}>{children}</TargetCtx.Provider>;
+  const [area, setArea] = useState<number[] | null>(null);
+  const [mode, setMode] = useState<RollMode>('auto');
+  return (
+    <TargetCtx.Provider value={{ target, setTarget, area, setArea, mode, setMode }}>{children}</TargetCtx.Provider>
+  );
+}
+
+/** The targets and roll mode an attack button would use right now. */
+function useAim() {
+  const fight = useFight();
+  const { data } = useSheet();
+  const { target, area, mode } = useContext(TargetCtx);
+  if (!fight) return null;
+  const ids = area ? area.filter((id) => fight.targets.some((o) => o.id === id)) : target !== null ? [target] : [];
+  const opps = fight.targets.filter((o) => ids.includes(o.id));
+  const auto = autoMode(data.effects, ids);
+  return { fight, opps, ids, mode: mode === 'auto' ? auto.mode : mode, auto };
 }
 
 /** Above the pinned attacks during combat: pick a target, see Actions left and this round's attacks. */
 export function CombatTargetBar() {
   const { t } = useI18n();
   const fight = useFight();
-  const { target, setTarget } = useContext(TargetCtx);
-  if (!fight) return null;
+  const aim = useAim();
+  const { target, setTarget, area, setArea, mode, setMode } = useContext(TargetCtx);
+  if (!fight || !aim) return null;
   const { enc, charId, targets } = fight;
-  const current = targets.find((o) => o.id === target) ?? null;
+  const current = area ? (aim.opps[0] ?? null) : (targets.find((o) => o.id === target) ?? null);
   const acts = enc.actions?.[charId] ?? { used: [], extra: false, max: 2 };
   const left = Math.max(0, acts.max - acts.used.length);
   const attackStep = enc.round === 0 || enc.phase === 4;
@@ -43,21 +96,58 @@ export function CombatTargetBar() {
       <div className="target-row">
         <label className="gm-check">
           🎯 {t('atkt.target')}
-          <select
-            className="in sel"
-            value={current?.id ?? ''}
-            onChange={(e) => setTarget(e.target.value ? Number(e.target.value) : null)}
-          >
-            <option value="">{t('atkt.none')}</option>
-            {targets.map((o) => (
-              <option key={o.id} value={o.id}>
-                {o.name} · {o.pct}%
-              </option>
-            ))}
+          {!area && (
+            <select
+              className="in sel"
+              value={current?.id ?? ''}
+              onChange={(e) => setTarget(e.target.value ? Number(e.target.value) : null)}
+            >
+              <option value="">{t('atkt.none')}</option>
+              {targets.map((o) => (
+                <option key={o.id} value={o.id}>
+                  {o.name} · {o.pct}%
+                </option>
+              ))}
+            </select>
+          )}
+        </label>
+        <label className="gm-check" title={t('atkt.areaHint')}>
+          <input
+            type="checkbox"
+            checked={!!area}
+            onChange={(e) => setArea(e.target.checked ? (target !== null ? [target] : []) : null)}
+          />
+          {t('atkt.area')}
+        </label>
+        <label className="gm-check" title={t('atkt.modeHint')}>
+          <select className="in sel" value={mode} onChange={(e) => setMode(e.target.value as RollMode)}>
+            <option value="auto">{t('atkt.mode.auto', { m: t(`atkt.mode.${aim.auto.mode}` as MsgKey) })}</option>
+            <option value="normal">{t('atkt.mode.normal')}</option>
+            <option value="adv">{t('atkt.mode.adv')}</option>
+            <option value="dis">{t('atkt.mode.dis')}</option>
           </select>
         </label>
         <span className={`dim tiny ${left === 0 ? 'bad-pill' : ''}`}>{t('actions.left', { n: left })}</span>
       </div>
+      {area && (
+        <div className="area-picks">
+          {targets.map((o) => (
+            <label key={o.id} className="gm-check">
+              <input
+                type="checkbox"
+                checked={area.includes(o.id)}
+                onChange={(e) => setArea(e.target.checked ? [...area, o.id] : area.filter((x) => x !== o.id))}
+              />
+              {o.name}
+            </label>
+          ))}
+        </div>
+      )}
+      {mode === 'auto' && aim.auto.why.length > 0 && (
+        <p className="dim tiny">
+          {aim.auto.mode === 'adv' ? '▲' : aim.auto.mode === 'dis' ? '▼' : '='} {aim.auto.why.join(', ')}
+        </p>
+      )}
       <p className="dim tiny">{current ? t(attackStep ? 'atkt.ready' : 'atkt.notYet') : t('atkt.hint')}</p>
       {mine.length > 0 && (
         <ul className="atk-results">
@@ -88,10 +178,13 @@ function AttackResult({ a }: { a: CrawlerAttack }) {
         <strong>{a.label}</strong> → {a.opponentName}
       </span>
       <HitResult a={a} />
+      <DegreeBadge degree={a.degree} />
       {a.hit !== false &&
         (a.damage ? (
           <span>
             🎲 <strong>{a.damage.total}</strong>
+            {a.damage.crit && <span className="degree deg-crit">{t('deg.critDice')}</span>}
+            {!!a.damage.amazing && <span className="degree deg-amazing">+{a.damage.amazing}</span>}
             {a.applied ? (
               <span className="dim tiny"> · {t('atkt.applied', { n: a.applied.slots })}</span>
             ) : (
@@ -130,6 +223,7 @@ export function AttackRollButton({
   label,
   name,
   damage,
+  manaCost = null,
   className,
 }: {
   expr: string;
@@ -138,24 +232,32 @@ export function AttackRollButton({
   /** Attack name for the log ("Long Sword → Bad Llama 2"). */
   name: string;
   damage: string | null;
+  /** Attack spells: their Mana cost is spent when cast at a target. */
+  manaCost?: number | null;
   className?: string;
 }) {
   const { t, err } = useI18n();
-  const fight = useFight();
-  const { target } = useContext(TargetCtx);
+  const { data, update } = useSheet();
+  const aim = useAim();
   const [flash, setFlash] = useState<string | null>(null);
-  const opp: Opponent | undefined = fight?.targets.find((o) => o.id === target);
-  if (!fight || !opp) return <RollButton expr={expr} text={text} label={label} className={className} />;
+  if (!aim || !aim.opps.length) return <RollButton expr={expr} text={text} label={label} className={className} />;
+  const { fight, opps, mode } = aim;
   const attack = async () => {
+    if (manaCost && !spendMana(data, manaCost)) {
+      setFlash(t('mana.notEnough'));
+      setTimeout(() => setFlash(null), 2500);
+      return;
+    }
     try {
       const enc = await api.crawlerAttack({
         characterId: fight.charId,
-        opponentId: opp.id,
-        expr,
+        ...(opps.length > 1 ? { opponentIds: opps.map((o) => o.id) } : { opponentId: opps[0].id }),
+        expr: withMode(expr, mode),
         damage,
         label: name,
       });
       fight.live.setEncounter(enc);
+      if (manaCost) update((d) => spendMana(d, manaCost) ?? d, undefined, { mana: t('src.cast', { name }) });
       const mine = enc.attacks.filter((a) => a.characterId === fight.charId);
       const last = mine[mine.length - 1];
       setFlash(last ? `${last.hit ? '✓' : last.hit === false ? '✗' : '?'} ${last.total}` : null);
@@ -164,14 +266,21 @@ export function AttackRollButton({
     }
     setTimeout(() => setFlash(null), 2500);
   };
+  const names = opps.map((o: Opponent) => o.name).join(', ');
   return (
     <button
       type="button"
       className={`roll-total roll-btn target-roll ${flash ? 'rolled' : ''} ${className ?? ''}`}
       onClick={attack}
-      title={t('atkt.attackHint', { name: opp.name })}
+      title={[
+        t('atkt.attackHint', { name: names }),
+        mode !== 'normal' && t(`atkt.mode.${mode}` as MsgKey),
+        manaCost && t('skill.sumMana', { n: manaCost }),
+      ]
+        .filter(Boolean)
+        .join(' · ')}
     >
-      {flash ?? `🎯 ${text}`}
+      {flash ?? `${opps.length > 1 ? '💥' : '🎯'} ${mode === 'adv' ? '▲ ' : mode === 'dis' ? '▼ ' : ''}${text}`}
     </button>
   );
 }

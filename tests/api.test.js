@@ -549,10 +549,12 @@ test('crawler Actions, AI Favor rerolls, numbering and live stat block attacks',
   await pl('POST', `/api/encounter/declarations/${d1.id}/evade`, { characterId: c.body.id, expr: 'd20' });
   enc = (await pl('POST', `/api/encounter/declarations/${d2.id}/evade`, { characterId: c.body.id, expr: 'd20' })).body;
   assert.deepEqual(enc.actions[c.body.id].used, ['evade']);
-  assert.equal(enc.declarations[0].targets[0].evade.success, false);
+  // (a Natural 20 is a Critical Hit: it always succeeds)
+  const first = enc.declarations[0].targets[0].evade;
+  assert.equal(first.success, first.natural === 20);
 
   // AI Favor reroll: once, spends the sheet's AI Favor even though the sheet is locked
-  const nat1 = enc.declarations[0].targets[0].evade.natural === 1;
+  const nat1 = first.natural === 1 || first.natural === 20;
   const rr = await pl('POST', `/api/encounter/declarations/${d1.id}/evade`, {
     characterId: c.body.id,
     expr: 'd20',
@@ -569,8 +571,8 @@ test('crawler Actions, AI Favor rerolls, numbering and live stat block attacks',
       reroll: true,
     });
     // (a Natural 1 on that second Evade can't be rerolled at all)
-    const nat1b = rr.body.declarations[1].targets[0].evade.natural === 1;
-    assert.equal(again.body.code, nat1b ? 'no_reroll' : 'no_ai_favor');
+    const e2 = rr.body.declarations[1].targets[0].evade;
+    assert.equal(again.body.code, e2.natural === 1 || e2.success ? 'no_reroll' : 'no_ai_favor');
     const log = (await pl('GET', '/api/messages')).body;
     assert.ok(log.some((m) => m.event?.type === 'favor' && m.event.use === 'reroll'));
   }
@@ -690,7 +692,10 @@ test('crawler attacks: hit/miss against the hidden Mob Evade, Actions, damage an
   if (a1.hit) {
     enc = (await pl('POST', `/api/encounter/attacks/${a1.id}/damage`, {})).body;
     const dmg = enc.attacks[0].damage.total;
-    assert.ok(dmg >= 3 && dmg <= 6);
+    // 1d4+2, dice doubled on a Natural 20, + Floor (1) on an Amazing Success
+    const lo = a1.degree === 'crit' ? 4 : a1.degree === 'amazing' ? 4 : 3;
+    const hi = a1.degree === 'crit' ? 10 : a1.degree === 'amazing' ? 7 : 6;
+    assert.ok(dmg >= lo && dmg <= hi, `${dmg} (${a1.degree})`);
     assert.equal((await pl('POST', `/api/encounter/attacks/${a1.id}/apply`, {})).status, 403);
     enc = (await dm('POST', `/api/encounter/attacks/${a1.id}/apply`, {})).body;
     assert.equal(enc.opponents[0].lost, dmg);
@@ -771,4 +776,567 @@ test('GM "view as player": read-only, sees what that player sees', async () => {
   assert.equal((await dm('GET', '/api/npcs')).status, 403);
   const back = await dm('POST', '/api/auth/view-as', { userId: null });
   assert.equal(back.body.isAdmin, true);
+});
+
+test('Phase 1: portraits for party members, GM undo, AI Favor reroll of any Check, backups', async () => {
+  const dm = client();
+  const pl = client();
+  const other = client();
+  await dm('POST', '/api/auth/login', { username: 'dm', password: 'adminpass123' });
+  await pl('POST', '/api/auth/register', { username: 'p1quick', password: 'password1' });
+  await other('POST', '/api/auth/register', { username: 'p1other', password: 'password1' });
+  const png =
+    'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==';
+  const c = await pl('POST', '/api/characters', {
+    data: { schema: 5, name: 'Pic', portrait: png, dr: { armor: '', buffs: '', aiFavor: '1', size: '' } },
+  });
+  // portrait: owner yes, other player only once the crawler is in the party
+  assert.equal((await fetch(`${base}/api/characters/${c.body.id}/portrait`)).status, 401);
+  const getPic = (who) => who('GET', `/api/characters/${c.body.id}/portrait`);
+  assert.equal((await getPic(other)).status, 404);
+  await dm('PATCH', `/api/characters/${c.body.id}/party`, { inParty: true });
+  const party = (await other('GET', '/api/party')).body.find((m) => m.id === c.body.id);
+  assert.match(party.view.portraitTag, /^[0-9a-f]{12}$/);
+  assert.equal(party.view.portrait, undefined, 'the image itself is not in the party view');
+  assert.equal((await getPic(other)).status, 200);
+  assert.equal((await getPic(pl)).status, 200);
+
+  // GM undo: all declarations of one attacker, and a crawler attack (gives the Action back)
+  await dm('POST', '/api/encounter', { action: 'start', floor: 1 });
+  let enc = (await dm('POST', '/api/encounter/opponents', { name: 'Dummy', slots: 5, slotValue: 1, evade: '0+F' }))
+    .body;
+  const o = enc.opponents[0];
+  for (let i = 0; i < 2; i++)
+    await dm('POST', '/api/encounter/declarations', {
+      opponentId: o.id,
+      attack: { name: 'Poke', toHit: '10' },
+      targets: [c.body.id],
+    });
+  enc = (await dm('DELETE', `/api/encounter/opponents/${o.id}/declarations`)).body;
+  assert.equal(enc.declarations.length, 0);
+  for (let i = 0; i < 3; i++) await dm('POST', '/api/encounter', { action: 'next' });
+  enc = (
+    await pl('POST', '/api/encounter/attacks', {
+      characterId: c.body.id,
+      opponentId: o.id,
+      expr: 'd20+1',
+      label: 'Jab',
+    })
+  ).body;
+  const atk = enc.attacks[0];
+  assert.equal((await pl('DELETE', `/api/encounter/attacks/${atk.id}`)).status, 403);
+
+  // reroll the attack roll with AI Favor (unless it was a Natural 1)
+  const msg = (await pl('GET', '/api/messages')).body.filter((m) => m.roll?.vs?.kind === 'attack').pop();
+  const rr = await pl('POST', `/api/messages/${msg.id}/reroll`, {});
+  if (msg.roll.natural === 1) assert.equal(rr.body.code, 'no_reroll');
+  else {
+    assert.equal(rr.status, 200);
+    assert.equal(rr.body.roll.rerollOf, msg.id);
+    const orig = (await pl('GET', '/api/messages')).body.find((m) => m.id === msg.id);
+    assert.equal(orig.roll.rerolled, true);
+    assert.equal((await pl('POST', `/api/messages/${msg.id}/reroll`, {})).body.code, 'no_reroll', 'once per Check');
+    assert.equal((await pl('GET', `/api/characters/${c.body.id}`)).body.data.dr.aiFavor, '0');
+    enc = (await pl('GET', '/api/encounter')).body;
+    assert.equal(enc.attacks[0].total, rr.body.roll.total);
+  }
+  // a plain stat check by someone else's character can't be rerolled by another player
+  const chk = await pl('POST', '/api/messages', {
+    roll: { expr: 'd20+2', label: 'Str check' },
+    characterId: c.body.id,
+  });
+  assert.equal((await other('POST', `/api/messages/${chk.body.id}/reroll`, {})).status, 404);
+
+  enc = (await dm('DELETE', `/api/encounter/attacks/${atk.id}`)).body;
+  assert.equal(enc.attacks.length, 0);
+  assert.deepEqual(enc.actions[c.body.id].used, []);
+  await dm('POST', '/api/encounter', { action: 'end' });
+  await dm('PATCH', `/api/characters/${c.body.id}/party`, { inParty: false });
+
+  // backups are off in the test app, and GM-only
+  assert.equal((await pl('GET', '/api/admin/backups')).status, 403);
+  assert.equal((await dm('GET', '/api/admin/backups')).body.enabled, false);
+});
+
+test('backups: VACUUM INTO copy and retention', async () => {
+  const { openDb } = await import('../server/db.js');
+  const { backupNow, listBackups } = await import('../server/backup.js');
+  const fs = await import('node:fs');
+  const os = await import('node:os');
+  const path = await import('node:path');
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'dcc-bk-'));
+  const db = openDb(path.join(dir, 'x.db'));
+  const out = path.join(dir, 'b');
+  for (let i = 0; i < 3; i++) {
+    backupNow(db, out, 2);
+    await new Promise((r) => setTimeout(r, 1100));
+  }
+  const list = listBackups(out);
+  assert.equal(list.length, 2);
+  assert.ok(list[0].size > 0);
+  fs.rmSync(dir, { recursive: true, force: true });
+});
+
+test('inventory: editable on locked sheets, equipped gear in the party view', async () => {
+  const dm = client();
+  const pl = client();
+  await dm('POST', '/api/auth/login', { username: 'dm', password: 'adminpass123' });
+  await pl('POST', '/api/auth/register', { username: 'invplayer', password: 'password1' });
+  const jacket = {
+    id: 'a1',
+    item: 'Leather jacket',
+    qty: '1',
+    notes: '',
+    type: 'armor',
+    rarity: 'silver',
+    unique: false,
+    slot: 'torso',
+    hot: false,
+    skill: '',
+    upgrades: '',
+    bonus: { damage: '', dr: '2', evade: '' },
+  };
+  const c = await pl('POST', '/api/characters', {
+    data: { schema: 6, name: 'Inv', inventory: [jacket], dr: { armor: '1', buffs: '', aiFavor: '', size: '' } },
+  });
+  await pl('POST', `/api/characters/${c.body.id}/lock`, { locked: true });
+  const rope = { ...jacket, id: 'a2', item: 'Rope', type: 'misc', rarity: '', slot: '', bonus: {} };
+  const { version } = (await pl('GET', `/api/characters/${c.body.id}`)).body;
+  const put = await pl('PUT', `/api/characters/${c.body.id}`, {
+    version,
+    data: { schema: 6, name: 'Renamed', inventory: [jacket, rope], dr: { armor: '1' } },
+  });
+  assert.equal(put.status, 200);
+  const saved = (await pl('GET', `/api/characters/${c.body.id}`)).body.data;
+  assert.equal(saved.name, 'Inv', 'the build stays locked');
+  assert.deepEqual(
+    saved.inventory.map((i) => i.item),
+    ['Leather jacket', 'Rope'],
+    'items can be picked up on a locked sheet',
+  );
+  await dm('PATCH', `/api/characters/${c.body.id}/party`, { inParty: true });
+  const view = (await pl('GET', '/api/party')).body.find((m) => m.id === c.body.id).view;
+  assert.equal(view.dr.armor, '1');
+  assert.deepEqual(
+    view.inventory.map((i) => [i.item, i.slot, i.bonus.dr]),
+    [['Leather jacket', 'torso', '2']],
+    'only equipped or quick-access items are shared',
+  );
+});
+
+test('achievements: GM awards, contents hidden until claimed, claim once, GM lock, items stack', async () => {
+  const dm = client();
+  const pl = client();
+  const other = client();
+  await dm('POST', '/api/auth/login', { username: 'dm', password: 'adminpass123' });
+  await pl('POST', '/api/auth/register', { username: 'achplayer', password: 'password1' });
+  await other('POST', '/api/auth/register', { username: 'achother', password: 'password1' });
+  const potion = { id: 'p1', item: 'Healing Potion', qty: '2', type: 'consumable', bonus: {} };
+  const a = await pl('POST', '/api/characters', { data: { schema: 6, name: 'Winner', inventory: [potion] } });
+  const b = await other('POST', '/api/characters', { data: { schema: 6, name: 'Second' } });
+  await pl('POST', `/api/characters/${a.body.id}/lock`, { locked: true });
+
+  const reward = {
+    boxes: [
+      {
+        tier: 'gold',
+        kind: 'adventurer',
+        items: [
+          { item: 'Healing Potion', qty: '3', type: 'consumable' },
+          { item: 'Crown of the Gutter Queen', rarity: 'legendary', unique: true, special: true, notes: 'Shiny' },
+        ],
+      },
+    ],
+    note: '+1 to a skill of your choice',
+  };
+  assert.equal((await pl('POST', '/api/achievements', { title: 'x' })).status, 403);
+  const ach = await dm('POST', '/api/achievements', {
+    title: 'First Blood',
+    description: 'Kill a Mob.',
+    reward,
+    characterIds: [a.body.id, b.body.id],
+  });
+  assert.equal(ach.status, 201);
+  assert.deepEqual(
+    ach.body.awards.map((w) => w.name),
+    ['Winner', 'Second'],
+  );
+
+  // the player sees the box (tier, kind) but not what's inside
+  const mine = (await pl('GET', `/api/characters/${a.body.id}/awards`)).body;
+  assert.equal(mine.claimLocked, false);
+  const w = mine.awards[0];
+  assert.equal(w.title, 'First Blood');
+  assert.equal(w.hasReward, true);
+  assert.deepEqual(w.reward.boxes[0].items, []);
+  assert.equal(w.reward.boxes[0].tier, 'gold');
+  assert.equal(w.reward.note, '');
+  assert.equal((await other('GET', `/api/characters/${a.body.id}/awards`)).status, 404);
+  assert.equal((await other('POST', `/api/awards/${w.id}/claim`)).status, 404);
+
+  // GM lock
+  await dm('PUT', '/api/rewards/settings', { claimLocked: true });
+  const lockedTry = await pl('POST', `/api/awards/${w.id}/claim`);
+  assert.equal(lockedTry.status, 423);
+  assert.equal(lockedTry.body.code, 'claim_locked');
+  assert.equal((await pl('GET', `/api/characters/${a.body.id}/awards`)).body.claimLocked, true);
+  await dm('PUT', '/api/rewards/settings', { claimLocked: false });
+
+  // claim: works on a locked sheet, items stack or get their own row, contents revealed
+  const claim = await pl('POST', `/api/awards/${w.id}/claim`);
+  assert.equal(claim.status, 200);
+  assert.equal(claim.body.opened.boxes[0].items.length, 2);
+  assert.match(claim.body.opened.boxes[0].items[0].notes, /Heals 5 HB slots/, 'description filled from the book');
+  assert.equal((await pl('POST', `/api/awards/${w.id}/claim`)).status, 409, 'only once');
+  const inv = (await pl('GET', `/api/characters/${a.body.id}`)).body.data.inventory;
+  assert.equal(inv.find((i) => i.item === 'Healing Potion').qty, '5');
+  const crown = inv.find((i) => i.item.startsWith('Crown'));
+  assert.equal(crown.rarity, 'legendary');
+  assert.equal(crown.unique, true);
+  assert.equal(crown.special, undefined);
+  const after = (await pl('GET', `/api/characters/${a.body.id}/awards`)).body.awards[0];
+  assert.ok(after.claimedAt);
+  assert.equal(after.reward.note, '+1 to a skill of your choice');
+
+  // GM edits: unclaimed awards get the new reward, claimed ones keep theirs
+  await dm('PUT', `/api/achievements/${ach.body.id}`, {
+    title: 'First Blood',
+    reward: { boxes: [{ tier: 'silver', kind: 'boss', items: [{ item: 'Torch', qty: '1' }] }] },
+  });
+  const bw = (await other('GET', `/api/characters/${b.body.id}/awards`)).body.awards[0];
+  assert.equal(bw.reward.boxes[0].tier, 'silver');
+  assert.equal((await pl('GET', `/api/characters/${a.body.id}/awards`)).body.awards[0].reward.boxes[0].tier, 'gold');
+  // revoke
+  assert.equal((await dm('DELETE', `/api/awards/${bw.id}`)).status, 200);
+  assert.equal((await other('GET', `/api/characters/${b.body.id}/awards`)).body.awards.length, 0);
+  // the log shows the achievement and the opened box
+  const log = (await dm('GET', '/api/messages')).body.filter((m) => m.event?.type === 'reward');
+  assert.equal(log.at(-1).event.boxes[0].tier, 'gold');
+});
+
+test('Phase 4: effects tick down, Evade degrees, Advantage, Intervene, Taunt, Catcher, links, items, area attacks', async () => {
+  const dm = client();
+  const p1 = client();
+  const p2 = client();
+  await dm('POST', '/api/auth/login', { username: 'dm', password: 'adminpass123' });
+  await p1('POST', '/api/auth/register', { username: 'ph4one', password: 'password1' });
+  await p2('POST', '/api/auth/register', { username: 'ph4two', password: 'password1' });
+  const effects = [
+    { id: 'e1', kind: 'buff', name: 'Hasted', effect: '+2 Evade', duration: 'rounds', rounds: 1 },
+    { id: 'e2', kind: 'disadvantage', name: 'Blinded', effect: '', duration: 'combat', rounds: 0 },
+    { id: 'e3', kind: 'buff', name: 'Blessed', effect: '', duration: 'rest', rounds: 0 },
+  ];
+  const potion = { id: 'hp1', item: 'Healing Potion', qty: '2', notes: '', type: 'consumable', hot: true, bonus: {} };
+  const a = await p1('POST', '/api/characters', {
+    data: {
+      schema: 6,
+      name: 'Ana',
+      hbLost: 6,
+      effects,
+      inventory: [potion],
+      debuffList: [{ id: 'enraged', stacks: 1, note: '', rounds: 2 }],
+    },
+  });
+  const b = await p2('POST', '/api/characters', {
+    data: {
+      schema: 6,
+      name: 'Bo',
+      hbLost: 3,
+      skills: [
+        { name: 'Catcher', rank: '2' },
+        { name: 'Taunt', rank: '3' },
+      ],
+    },
+  });
+  const A = a.body.id;
+  const B = b.body.id;
+  for (const id of [A, B]) await dm('PATCH', `/api/characters/${id}/party`, { inParty: true });
+  const sheet = async (who, id) => (await who('GET', `/api/characters/${id}`)).body.data;
+
+  // party view: effects are public, Interrupt info only for the owner/GM
+  const party = (await p2('GET', '/api/party')).body;
+  assert.equal(party.find((m) => m.id === A).view.effects.length, 3);
+  assert.equal(party.find((m) => m.id === A).view.interrupts, undefined);
+  assert.deepEqual(party.find((m) => m.id === B).view.interrupts, { catcher: true, tauntRank: 3 });
+
+  await dm('POST', '/api/encounter', { action: 'start', floor: 2 });
+  let enc = (
+    await dm('POST', '/api/encounter/opponents', { name: 'Gnoll', slots: 20, slotValue: 1, evade: '0+F', count: 2 })
+  ).body;
+  const [g1, g2] = enc.opponents.slice(-2).map((o) => o.id);
+
+  // links: grab, cleared when the opponent is defeated
+  enc = (
+    await dm('POST', '/api/encounter/links', {
+      kind: 'grab',
+      a: { type: 'opponent', id: g1 },
+      b: { type: 'crawler', id: A },
+    })
+  ).body;
+  assert.equal(enc.links.length, 1);
+  const seen = (await p1('GET', '/api/encounter')).body.links[0];
+  assert.equal(seen.a.name, 'Gnoll 1');
+  assert.equal(seen.b.name, 'Ana');
+
+  // declarations: one on Ana (Bo will Taunt it), one on Ana for Bo to catch
+  const decl = async () =>
+    (
+      await dm('POST', '/api/encounter/declarations', {
+        opponentId: g2,
+        attack: { name: 'Bite', toHit: '10+F', damage: '1d6' },
+        targets: [A],
+      })
+    ).body.declarations.at(-1).id;
+  const d1 = await decl();
+  const d2 = await decl();
+  await dm('POST', '/api/encounter', { action: 'next' }); // Crawler Reaction
+  const taunt = await p2('POST', `/api/encounter/declarations/${d1}/taunt`, { characterId: B, expr: 'd20+80' });
+  assert.equal(taunt.status, 200);
+  let dd = taunt.body.declarations.find((d) => d.id === d1);
+  assert.deepEqual(
+    dd.targets.map((x) => x.name),
+    ['Bo'],
+    'the Mob attacks the taunter now',
+  );
+  assert.ok(taunt.body.links.some((l) => l.kind === 'taunt'));
+  assert.equal(
+    (await p1('POST', `/api/encounter/declarations/${d2}/catch`, { characterId: A, allyId: A })).status,
+    409,
+  );
+  const caught = await p2('POST', `/api/encounter/declarations/${d2}/catch`, { characterId: B, allyId: A });
+  assert.equal(caught.status, 200);
+  dd = caught.body.declarations.find((d) => d.id === d2);
+  assert.equal(dd.targets[0].name, 'Bo');
+  assert.equal(dd.targets[0].caughtFor, 'Ana');
+  assert.deepEqual(caught.body.actions[B].used, ['interrupt', 'interrupt']);
+
+  // Evade degrees: a huge bonus succeeds by 10+ (Amazing) unless it's a Natural 1 or 20
+  enc = (
+    await dm('POST', '/api/encounter/declarations', {
+      opponentId: g1,
+      attack: { name: 'Claw', toHit: '10+F', damage: '1d4' },
+      targets: [A],
+    })
+  ).body;
+  const d3 = enc.declarations.at(-1).id;
+  const ev = (await p1('POST', `/api/encounter/declarations/${d3}/evade`, { characterId: A, expr: 'd20+60' })).body;
+  const e = ev.declarations.find((d) => d.id === d3).targets[0].evade;
+  assert.ok(['amazing', 'crit', 'critFail'].includes(e.degree));
+  const adv = (await sheet(p1, A)).effects.find((x) => x.kind === 'advantage');
+  if (e.degree === 'critFail') {
+    assert.equal(e.double, true);
+    assert.equal(adv, undefined);
+  } else assert.equal(adv.vsOpponent, g1, 'Advantage against that Mob');
+
+  // Items: a Healing Potion heals 5 slots (here as an Interrupt), one fewer left
+  const used = await p1('POST', `/api/characters/${A}/use-item`, { itemId: 'hp1' });
+  assert.equal(used.status, 200);
+  assert.equal(used.body.left, 1);
+  assert.deepEqual(used.body.applied, { type: 'heal', slots: 5 });
+  let sa = await sheet(p1, A);
+  assert.equal(sa.hbLost, 1);
+  assert.equal(sa.inventory.find((i) => i.id === 'hp1').qty, '1');
+  // …on an ally, too (the last one: the row goes)
+  await dm('POST', '/api/encounter', { action: 'next' });
+  await dm('POST', '/api/encounter', { action: 'next' }); // step 4
+  assert.equal((await p1('POST', `/api/characters/${A}/use-item`, { itemId: 'hp1' })).body.code, 'no_actions_left');
+  await dm('POST', '/api/encounter/actions', { characterId: A, op: 'free', index: 1 });
+  const used2 = await p1('POST', `/api/characters/${A}/use-item`, { itemId: 'hp1', targetId: B });
+  assert.equal(used2.status, 200);
+  assert.equal((await sheet(p2, B)).hbLost, 0);
+  assert.equal(
+    (await sheet(p1, A)).inventory.some((i) => i.id === 'hp1'),
+    false,
+  );
+  const encNow = (await p1('GET', '/api/encounter')).body;
+  assert.equal(encNow.actions[A].used.length, 2, 'Evade and the potion use Ana’s Actions');
+
+  // Area attack: one roll, one Action, a result per opponent (Bo still has… no Actions: free one first)
+  await dm('POST', '/api/encounter/actions', { characterId: B, op: 'free', index: 0 });
+  const area = await p2('POST', '/api/encounter/attacks', {
+    characterId: B,
+    opponentIds: [g1, g2],
+    expr: '2d20kh1+40',
+    damage: '1d4',
+    label: 'Fireball',
+  });
+  assert.equal(area.status, 201);
+  const recs = area.body.attacks.filter((x) => x.label === 'Fireball');
+  assert.equal(recs.length, 2);
+  assert.equal(recs[0].group, recs[1].group);
+  assert.equal(recs[0].total, recs[1].total);
+  assert.equal(area.body.actions[B].used.filter((k) => k === 'attack').length, 1);
+  if (recs[0].hit) {
+    const dmg = (await p2('POST', `/api/encounter/attacks/${recs[0].id}/damage`, {})).body.attacks.filter(
+      (x) => x.label === 'Fireball',
+    );
+    assert.ok(
+      dmg.every((x) => x.damage),
+      'one damage roll for the whole area',
+    );
+  }
+
+  // Intervene: Bo has no Actions left now; GM frees one, then Bo adds 1d6 to Ana's Evade
+  await dm('POST', '/api/encounter/actions', { characterId: B, op: 'free', index: 0 });
+  const msg = (await p1('GET', '/api/messages')).body.filter((m) => m.roll?.vs?.kind === 'evade').at(-1);
+  assert.equal(
+    (await p1('POST', `/api/messages/${msg.id}/intervene`, { characterId: A })).status,
+    409,
+    'not on your own roll',
+  );
+  const help = await p2('POST', `/api/messages/${msg.id}/intervene`, { characterId: B });
+  assert.equal(help.status, 200);
+  const boosted = (await p1('GET', '/api/messages')).body.find((m) => m.id === msg.id).roll;
+  assert.equal(boosted.intervene[0].name, 'Bo');
+  assert.equal(boosted.total, msg.roll.total + boosted.intervene[0].value);
+  assert.equal((await p2('POST', `/api/messages/${msg.id}/intervene`, { characterId: B })).status, 409, 'once');
+
+  // Clean Up → next round: "Hasted" (1 round) ends, Enraged goes from 2 to 1; grab link stays, taunt link goes
+  await dm('POST', '/api/encounter', { action: 'next' });
+  enc = (await dm('POST', '/api/encounter', { action: 'next' })).body;
+  sa = await sheet(p1, A);
+  assert.deepEqual(
+    sa.effects.filter((x) => x.kind !== 'advantage').map((x) => x.name),
+    ['Blinded', 'Blessed'],
+  );
+  assert.equal(sa.debuffList[0].rounds, 1);
+  assert.deepEqual(
+    enc.links.map((l) => l.kind),
+    ['grab'],
+  );
+  // defeating the grabber clears the link
+  enc = (await dm('PATCH', `/api/encounter/opponents/${g1}`, { lost: 20 })).body;
+  assert.equal(enc.links.length, 0);
+  // end of combat: combat effects and timed debuffs end; a crit-failed Evade leaves a Major Injury
+  await dm('POST', '/api/encounter', { action: 'end' });
+  sa = await sheet(p1, A);
+  assert.deepEqual(
+    sa.effects.map((x) => x.name),
+    ['Blessed'],
+  );
+  assert.equal(
+    sa.debuffList.some((x) => x.id === 'enraged'),
+    false,
+  );
+  if (e.degree === 'critFail') assert.ok(sa.debuffList.some((x) => x.id === 'majorInjury'));
+  const log = (await dm('GET', '/api/messages')).body;
+  assert.ok(log.some((m) => m.event?.type === 'expired' && m.event.names.includes('Hasted')));
+  assert.ok(log.some((m) => m.event?.type === 'item' && m.event.target === 'Bo'));
+  for (const id of [A, B]) await dm('PATCH', `/api/characters/${id}/party`, { inParty: false });
+});
+
+test('maps: fog of war, players only get the fogged image and visible POIs', async () => {
+  const dm = client();
+  const pl = client();
+  await dm('POST', '/api/auth/login', { username: 'dm', password: 'adminpass123' });
+  await pl('POST', '/api/auth/register', { username: 'mapper', password: 'password1' });
+  const png =
+    'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==';
+  const fogged =
+    'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNkYPhfDwAChwGA60e6kgAAAABJRU5ErkJggg==';
+  assert.equal((await pl('POST', '/api/maps', { name: 'x' })).status, 403);
+  assert.equal((await dm('POST', '/api/maps', { name: 'x', image: 'data:text/html;base64,AAAA' })).status, 400);
+  const m = await dm('POST', '/api/maps', { name: 'Floor 1 West', floor: 1, image: png, cols: 4, rows: 3 });
+  assert.equal(m.status, 201);
+  const id = m.body.id;
+  assert.equal((await pl('GET', '/api/maps')).body.length, 0, 'not shared yet');
+  assert.equal((await pl('GET', `/api/maps/${id}`)).status, 404);
+  const upd = await dm('PATCH', `/api/maps/${id}`, {
+    shared: true,
+    revealed: ['0,0', '1,0', '9,9'],
+    pois: [
+      { id: 'a', x: 0.1, y: 0.1, name: 'Saferoom', kind: 'saferoom' },
+      { id: 'b', x: 0.9, y: 0.9, name: 'Boss lair', kind: 'boss', hidden: true },
+    ],
+    party: { x: 0.2, y: 0.1 },
+    playerImage: fogged,
+  });
+  assert.deepEqual(upd.body.revealed, ['0,0', '1,0'], 'cells outside the grid are dropped');
+  const seen = (await pl('GET', `/api/maps/${id}`)).body;
+  assert.deepEqual(
+    seen.pois.map((p) => p.name),
+    ['Saferoom'],
+  );
+  assert.equal(seen.pois[0].hidden, undefined);
+  assert.deepEqual(seen.party, { x: 0.2, y: 0.1 });
+  // the image: players get the fogged copy, the GM the original
+  const fetchAs = async (login, url) => {
+    const res = await fetch(base + '/api/auth/login', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify(login),
+    });
+    const cookie = res.headers.getSetCookie()[0].split(';')[0];
+    const r = await fetch(base + url, { headers: { cookie } });
+    return Buffer.from(await r.arrayBuffer()).toString('base64');
+  };
+  const playerBytes = await fetchAs({ username: 'mapper', password: 'password1' }, `/api/maps/${id}/image`);
+  const gmBytes = await fetchAs({ username: 'dm', password: 'adminpass123' }, `/api/maps/${id}/image`);
+  assert.equal(playerBytes, fogged.split(',')[1]);
+  assert.equal(gmBytes, png.split(',')[1]);
+  // a new map image resets the fogged copy until the GM's browser renders it again
+  await dm('PATCH', `/api/maps/${id}`, { image: fogged });
+  assert.equal((await pl('GET', `/api/maps/${id}`)).body.hasImage, false);
+  assert.equal((await dm('DELETE', `/api/maps/${id}`)).status, 200);
+  assert.equal((await pl('GET', '/api/maps')).body.length, 0);
+});
+
+test('"2 hours passed" runs the Level Collapse clock when the GM ties it; pre-gens are listed', async () => {
+  const dm = client();
+  const pl = client();
+  await dm('POST', '/api/auth/login', { username: 'dm', password: 'adminpass123' });
+  await pl('POST', '/api/auth/register', { username: 'clockie', password: 'password1' });
+  const before = (await dm('PATCH', '/api/world', { collapseHours: 100, autoClock: false })).body;
+  assert.equal(before.autoClock, false);
+  await dm('POST', '/api/party/two-hours', { advance: false });
+  assert.equal((await pl('GET', '/api/world')).body.collapseHours, 100, 'not tied: unchanged');
+  await dm('PATCH', '/api/world', { autoClock: true });
+  await dm('POST', '/api/party/two-hours', { advance: false });
+  assert.equal((await pl('GET', '/api/world')).body.collapseHours, 98);
+  await dm('PATCH', '/api/world', { autoClock: false });
+  const pregens = (await pl('GET', '/api/pregens')).body;
+  assert.equal(pregens.length, 12);
+  assert.match(pregens[0].keySkills, /\w+ \d/);
+});
+
+test('book stat blocks carry Spanish rules notes', async () => {
+  const dm = client();
+  await dm('POST', '/api/auth/login', { username: 'dm', password: 'adminpass123' });
+  await dm('POST', '/api/npcs/import-book', {});
+  const list = (await dm('GET', '/api/npcs')).body;
+  const withEs = list.filter((n) => n.data.source && n.data.notesEs);
+  assert.ok(withEs.length >= 300);
+  assert.ok(withEs.every((n) => /Texto completo|Habilidades clave/.test(n.data.notesEs)));
+});
+
+test('campaign loot: valid items, GM-only list, claimed items bring their bonuses and description', async () => {
+  const { HOMEBREW_ITEMS } = await import('../server/catalog/homebrew.js');
+  const { ITEM_TYPES, RARITIES, BONUS_KEYS, GEAR_SLOTS } = await import('../shared/items.js');
+  assert.ok(HOMEBREW_ITEMS.length >= 40);
+  assert.equal(new Set(HOMEBREW_ITEMS.map((h) => h.name)).size, HOMEBREW_ITEMS.length, 'unique names');
+  for (const h of HOMEBREW_ITEMS) {
+    assert.ok(ITEM_TYPES.includes(h.type) && RARITIES.includes(h.rarity), h.name);
+    assert.deepEqual(Object.keys(h.bonus).sort(), [...BONUS_KEYS].sort(), h.name);
+    assert.ok(!h.wear || GEAR_SLOTS.includes(h.wear), h.name);
+    assert.ok(h.notes.includes('IA: «'), h.name);
+  }
+  const dm = client();
+  const pl = client();
+  await dm('POST', '/api/auth/login', { username: 'dm', password: 'adminpass123' });
+  await pl('POST', '/api/auth/register', { username: 'looter', password: 'password1' });
+  assert.equal((await dm('GET', '/api/catalog/all')).body.homebrew.length, HOMEBREW_ITEMS.length);
+  assert.equal((await pl('GET', '/api/catalog/all')).status, 403);
+  const c = await pl('POST', '/api/characters', { data: { schema: 7, name: 'Looter' } });
+  const ach = await dm('POST', '/api/achievements', {
+    title: 'Ring bearer',
+    reward: { boxes: [{ tier: 'silver', kind: 'adventurer', items: [{ item: 'Silver Ring of Grace', qty: '1' }] }] },
+    characterIds: [c.body.id],
+  });
+  await pl('POST', `/api/awards/${ach.body.awards[0].id}/claim`);
+  const ring = (await pl('GET', `/api/characters/${c.body.id}`)).body.data.inventory.find(
+    (i) => i.item === 'Silver Ring of Grace',
+  );
+  assert.equal(ring.bonus.dex, '2');
+  assert.equal(ring.rarity, 'silver');
+  assert.match(ring.notes, /\+2 DES/);
 });

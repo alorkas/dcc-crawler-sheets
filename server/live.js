@@ -1,8 +1,17 @@
 // Party dashboard, shared roll log / chat, and the Server-Sent Events stream that keeps them live.
+import crypto from 'node:crypto';
 import { rollDice } from './dice.js';
 
 const MAX_TEXT = 1000;
 const KEEP_MESSAGES = 2000;
+
+const skillRank = (d, re) =>
+  Math.max(
+    0,
+    ...(Array.isArray(d.skills) ? d.skills : [])
+      .filter((s) => re.test(String(s?.name ?? '').trim()))
+      .map((s) => parseInt(String(s.rank ?? ''), 10) || 0),
+  );
 
 /** The part of a sheet the party panel needs. Mana is only shared with the owner and the GM. */
 export function partyView(data, withMana) {
@@ -21,7 +30,11 @@ export function partyView(data, withMana) {
     hbLost: d.hbLost ?? 0,
     dyingRounds: d.dyingRounds ?? '',
     debuffList: Array.isArray(d.debuffList) ? d.debuffList : [],
+    // status chips (buffs, debuffs, Advantage/Disadvantage with their durations) are public, like debuffs
+    effects: Array.isArray(d.effects) ? d.effects.slice(0, 30) : [],
     stats,
+    // the portrait itself is served by /api/characters/:id/portrait; this tag changes when it does
+    portraitTag: portraitTag(d.portrait),
   };
   // mana and Evade (for the Evade roll against a declared attack) only for the owner and the GM
   if (withMana)
@@ -29,12 +42,50 @@ export function partyView(data, withMana) {
       manaMax: d.manaMax ?? '',
       manaCurrent: d.manaCurrent ?? '',
       evade: { dexMod: d.evade?.dexMod ?? '', buffs: d.evade?.buffs ?? '' },
-      dr: { aiFavor: d.dr?.aiFavor ?? '' },
+      dr: { armor: d.dr?.armor ?? '', buffs: d.dr?.buffs ?? '', aiFavor: d.dr?.aiFavor ?? '' },
+      // Interrupts this crawler can use for an ally: Catcher needs Ranks; Taunt is a Taunt (Int) Check
+      interrupts: {
+        catcher: skillRank(d, /catcher/i) > 0,
+        tauntRank: skillRank(d, /^taunt/i),
+      },
+      // equipped gear (its DR/Evade bonuses count in the totals) and quick-access items
+      inventory: (Array.isArray(d.inventory) ? d.inventory : [])
+        .filter((it) => it && (it.slot || it.hot) && String(it.item ?? '').trim())
+        .map((it) => ({
+          id: it.id,
+          item: it.item,
+          qty: it.qty ?? '',
+          type: it.type ?? '',
+          slot: it.slot ?? '',
+          hot: !!it.hot,
+          bonus: it.bonus ?? {},
+          notes: it.hot ? String(it.notes ?? '').slice(0, 200) : '',
+        })),
     });
   return view;
 }
 
+/** Short fingerprint of a portrait data URL ('' when there is none). */
+export function portraitTag(portrait) {
+  if (typeof portrait !== 'string' || !portrait.startsWith('data:image/')) return '';
+  return crypto.createHash('sha1').update(portrait).digest('hex').slice(0, 12);
+}
+
 export function mountLive(app, { db, auth, adminOnly, loadChar }) {
+  /* ---------------- portraits (party sidebar, combat cards) ---------------- */
+  // party members' portraits are visible to everyone; others only to the owner and the GM
+  app.get('/api/characters/:id/portrait', auth, (req, res) => {
+    const row = db
+      .prepare('SELECT owner_id, party_since, data FROM characters WHERE id = ?')
+      .get(Number(req.params.id));
+    if (!row || (!row.party_since && row.owner_id !== req.user.id && !req.user.is_admin)) return res.status(404).end();
+    const portrait = JSON.parse(row.data || '{}').portrait;
+    const m = typeof portrait === 'string' && portrait.match(/^data:(image\/[\w.+-]+);base64,(.+)$/s);
+    if (!m) return res.status(404).end();
+    res.set({ 'Content-Type': m[1], 'Cache-Control': 'private, max-age=86400', ETag: `"${portraitTag(portrait)}"` });
+    res.send(Buffer.from(m[2], 'base64'));
+  });
+
   /* ---------------- event stream ---------------- */
   const clients = new Set(); // { res, user }
 
@@ -207,6 +258,14 @@ export function mountLive(app, { db, auth, adminOnly, loadChar }) {
     return message;
   }
 
+  const rawMessage = (id) => msgById.get(Number(id));
+  /** Change a posted roll (e.g. mark it as rerolled with AI Favor) and tell the clients that can see it. */
+  function updateRoll(id, roll) {
+    db.prepare('UPDATE messages SET roll = ? WHERE id = ?').run(JSON.stringify(roll), Number(id));
+    const row = msgById.get(Number(id));
+    if (row) send('message-update', toMessage(row), (u) => visible(u, row));
+  }
+
   app.get('/api/messages', auth, (req, res) => {
     const limit = Math.min(Math.max(Number(req.query.limit) || 200, 1), 500);
     const rows = db
@@ -262,7 +321,7 @@ export function mountLive(app, { db, auth, adminOnly, loadChar }) {
       const r = rollDice(expr);
       if (!r) return res.status(400).json({ error: 'Invalid dice expression', code: 'bad_dice' });
       kind = 'roll';
-      roll = { ...r, label };
+      roll = { ...r, label, ...(body.roll?.stat ? { stat: true } : {}) }; // Stat Checks can't be Intervened
     } else if (!text) {
       return res.status(400).json({ error: 'Empty message', code: 'empty_message' });
     }
@@ -285,5 +344,5 @@ export function mountLive(app, { db, auth, adminOnly, loadChar }) {
     res.json({ ok: true });
   });
 
-  return { characterChanged, postEvent, postRoll, send };
+  return { characterChanged, postEvent, postRoll, send, rawMessage, updateRoll };
 }

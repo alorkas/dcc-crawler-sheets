@@ -1,19 +1,24 @@
 // Game rules from "Rules for Survival" and "Crawlers & Customization" (DCC RPG, Tutorial Floors).
 // Everything here is pure data → data so it can be unit tested and reused by the UI.
+import { clearRestEffects } from '../../shared/combat.js';
+import { ensureIds, gearBonus, HOT_SLOTS, isBlankItem, syncHot, type BonusFrom } from '../../shared/items.js';
 import {
   emptyAttack,
+  emptyItem,
   emptySheet,
   emptySkill,
   normalize,
   sumNumbers,
   type ActiveDebuff,
+  type GearSlot,
+  type Item,
   type SheetData,
   type StatKey,
   type StatSel,
 } from './sheet';
 import { classifySkill } from './skillTypes';
 
-export const SCHEMA_VERSION = 5;
+export const SCHEMA_VERSION = 7;
 /** Default Move and Step in feet (Character Creation Step 7). */
 export const BASE_MOVE = 20;
 export const BASE_STEP = 10;
@@ -139,6 +144,12 @@ export type Derived = {
   dexMod: number | null;
   evadeTotal: number | null;
   drTotal: number | null;
+  /** DR and Evade bonuses from equipped gear (already included in the totals), with the items they come from. */
+  gearDr: BonusFrom;
+  gearEvade: BonusFrom;
+  /** Enhanced Stat scores with equipped gear included, and the gear bonuses per Stat. */
+  score: Record<StatKey, number | null>;
+  gearStats: Record<StatKey, BonusFrom>;
   penalty: number;
   /** Move in feet: the stored value, or automatic (20, +5 with Running at Rank 5+). */
   move: number | null;
@@ -158,26 +169,39 @@ const STAT_KEYS: StatKey[] = ['str', 'int', 'con', 'dex', 'cha'];
 export function derive(d: SheetData): Derived {
   const modAuto = {} as Record<StatKey, number | null>;
   const mods = {} as Record<StatKey, number | null>;
+  // equipped gear adds to the Enhanced score (and so to the Mod, Max Mana, lifting…)
+  const gearStats = {} as Record<StatKey, BonusFrom>;
+  const score = {} as Record<StatKey, number | null>;
   for (const k of STAT_KEYS) {
-    modAuto[k] = statModFromScore(num(d.stats[k].enhanced));
+    gearStats[k] = gearBonus(d.inventory, k);
+    const base = num(d.stats[k].enhanced);
+    score[k] = base === null ? null : base + gearStats[k].total;
+    modAuto[k] = statModFromScore(score[k]);
     mods[k] = d.stats[k].mod.trim() ? num(d.stats[k].mod) : modAuto[k];
   }
-  const manaMaxAuto = num(d.stats.int.enhanced);
+  const manaMaxAuto = score.int;
   const manaMax = d.manaMax.trim() ? num(d.manaMax) : manaMaxAuto;
   const dexMod = d.evade.dexMod.trim() ? num(d.evade.dexMod) : mods.dex;
   const penalty = checkPenalty(d.debuffList);
-  const evadeBase = sumNumbers(dexMod === null ? '' : String(dexMod), d.evade.buffs);
+  const gearDr = gearBonus(d.inventory, 'dr');
+  const gearEvade = gearBonus(d.inventory, 'evade');
+  const evadeSum = sumNumbers(dexMod === null ? '' : String(dexMod), d.evade.buffs);
+  const evadeBase = evadeSum === null ? null : evadeSum + gearEvade.total;
+  const drSum = sumNumbers(d.dr.armor, d.dr.buffs);
+  const drTotal = drSum === null && !gearDr.total ? null : (drSum ?? 0) + gearDr.total;
   const running = d.skills.find((s) => s.name.trim().toLowerCase() === 'running');
   const moveAuto = BASE_MOVE + ((num(running?.rank ?? '') ?? 0) >= 5 ? 5 : 0);
   const move = d.evade.move.trim() ? num(d.evade.move) : moveAuto;
   const stepAuto = BASE_STEP;
   const step = d.evade.step.trim() ? num(d.evade.step) : stepAuto;
   const halve = d.debuffList.some((x) => debuffDef(x.id)?.halveMove);
-  const str = num(d.stats.str.enhanced);
+  const str = score.str;
   const hbLost = clamp(d.hbLost, 0, HB_SLOTS);
   return {
     mods,
     modAuto,
+    score,
+    gearStats,
     manaMax,
     manaMaxAuto,
     manaCurrent: num(d.manaCurrent),
@@ -186,7 +210,9 @@ export function derive(d: SheetData): Derived {
     hbPercent: (HB_SLOTS - hbLost) * 10,
     dexMod,
     evadeTotal: evadeBase === null ? null : evadeBase + penalty,
-    drTotal: sumNumbers(d.dr.armor, d.dr.buffs),
+    drTotal,
+    gearDr,
+    gearEvade,
     penalty,
     move,
     moveAuto,
@@ -277,6 +303,7 @@ export function rest(d: SheetData, kind: RestKind): SheetData {
   const max = der.manaMax;
   const cur = der.manaCurrent ?? max ?? 0;
   let out: SheetData = { ...d, debuffList: d.debuffList.filter((x) => !CLEARS[kind].includes(x.id)) };
+  if (kind !== 'mend') out = clearRestEffects(out);
   if (kind === 'mend') {
     out = heal(out, 1);
     out = setMana(out, cur + 5, max);
@@ -421,6 +448,8 @@ export function migrate(d: SheetData): SheetData {
   if (out.schema < 3) out = migrateV2(out);
   if (out.schema < 4) out = migrateV3(out);
   if (out.schema < 5) out = migrateV4(out);
+  if (out.schema < 6) out = migrateV5(out);
+  if (out.schema < 7) out = migrateV6(out);
   out.schema = SCHEMA_VERSION;
   return out;
 }
@@ -443,6 +472,63 @@ function migrateV1(d: SheetData): SheetData {
   if (num(out.manaMax) === der.manaMaxAuto) out.manaMax = '';
   if (num(out.evade.dexMod) === derive(out).mods.dex) out.evade.dexMod = '';
   return out;
+}
+
+/**
+ * v6 → v7: the Hotlist slots hold inventory items. Items marked for quick access go into the slot whose text names
+ * them (that text is then replaced by the item), otherwise into the first empty slot.
+ */
+function migrateV6(d: SheetData): SheetData {
+  let hotlist = [...d.hotlist];
+  let slots: string[] = Array(HOT_SLOTS).fill('');
+  for (const it of d.inventory.filter((x) => x.hot && !isBlankItem(x))) {
+    const name = it.item.trim().toLowerCase();
+    let i = hotlist.findIndex((txt, j) => !slots[j] && txt.trim().toLowerCase().startsWith(name));
+    if (i >= 0) hotlist = hotlist.map((txt, j) => (j === i ? '' : txt));
+    else i = slots.findIndex((id, j) => !id && !hotlist[j]?.trim());
+    if (i >= 0) slots = slots.map((id, j) => (j === i ? it.id : id));
+  }
+  const synced = syncHot(d.inventory, slots);
+  return { ...d, hotlist, hotSlots: synced.hotSlots, inventory: synced.inventory };
+}
+
+/**
+ * v5 → v6: items got structure (type, rarity, bonuses, equipped slot…). Each line of the old free-text gear
+ * slots becomes an inventory item equipped in that slot, so nothing written there is lost.
+ */
+function migrateV5(d: SheetData): SheetData {
+  const slotOf: Record<keyof SheetData['gear'], GearSlot> = {
+    head: 'head',
+    torso: 'torso',
+    arms: 'arms',
+    hands: 'hands',
+    legs: 'legs',
+    feet: 'feet',
+    accessories: 'accessory',
+  };
+  const worn: Item[] = [];
+  for (const [key, slot] of Object.entries(slotOf) as [keyof SheetData['gear'], GearSlot][]) {
+    for (const line of (d.gear[key] || '')
+      .split('\n')
+      .map((l) => l.trim())
+      .filter(Boolean)) {
+      worn.push({
+        ...emptyItem(),
+        item: line,
+        qty: '1',
+        slot,
+        type: slot === 'hands' ? 'weapon' : slot === 'accessory' ? 'accessory' : 'armor',
+      });
+    }
+  }
+  const kept = d.inventory.filter((it) => !isBlankItem(it));
+  const blanks = d.inventory.length - kept.length;
+  const inventory = ensureIds([...worn, ...kept, ...Array.from({ length: Math.max(2, blanks) }, emptyItem)]);
+  return {
+    ...d,
+    inventory,
+    gear: { head: '', torso: '', arms: '', hands: '', legs: '', feet: '', accessories: '' },
+  };
 }
 
 /** v4 → v5: Move and Step became automatic; the old written defaults (20 / 10, or empty) turn into "automatic". */
@@ -588,7 +674,14 @@ function mapStats(d: SheetData, fn: (s: SheetData['stats'][StatKey]) => SheetDat
 export function loadSheet(stored: unknown): SheetData {
   const isEmpty = !stored || (typeof stored === 'object' && Object.keys(stored as object).length === 0);
   if (isEmpty) return newSheet();
-  const d = migrate(normalize(stored));
+  const m = migrate(normalize(stored));
+  const ids = ensureIds(m.inventory);
+  // Hotlist slots only point at items that still exist; items know whether they're on the Hotlist
+  const hot = syncHot(ids, m.hotSlots);
+  const d =
+    hot.inventory === m.inventory && hot.hotSlots === m.hotSlots
+      ? m
+      : { ...m, inventory: hot.inventory, hotSlots: hot.hotSlots };
   // tidy-up on every load: drop completely empty rows that were never given a type
   const skills = d.skills.filter((sk) => sk.category || !isBlankSkill(sk));
   return skills.length === d.skills.length ? d : { ...d, skills };

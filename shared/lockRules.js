@@ -15,6 +15,10 @@ export const PLAY_PATHS = [
   ['mount', 'hbLost'],
   ['skills', '*', 'done'], // skill advancement marks
   ['dr', 'aiFavor'], // AI Favor is spent at the table (rerolls, extra Actions)
+  ['inventory'], // items are used, picked up and swapped during play (equipping included)
+  ['hotlist'],
+  ['hotSlots'],
+  ['effects'], // status effects come and go during play
 ];
 
 /** True when `path` is (inside) one of the play paths. */

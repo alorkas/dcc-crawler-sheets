@@ -523,6 +523,24 @@ export function DebuffPanel() {
                 <div className="debuff-head">
                   <strong>{def ? t(`debuff.${d.id}` as MsgKey) : d.id}</strong>
                   {d.stacks > 1 && <span className="pill">×{d.stacks}</span>}
+                  <label className="rounds-in" title={t('fx.roundsHintDebuff')}>
+                    ⏱
+                    <input
+                      className="in center"
+                      inputMode="numeric"
+                      value={d.rounds || ''}
+                      placeholder="–"
+                      readOnly={locked}
+                      aria-label={t('fx.rounds')}
+                      onChange={(e) => {
+                        const rounds = Math.max(0, parseInt(e.target.value, 10) || 0);
+                        update((x) => ({
+                          ...x,
+                          debuffList: x.debuffList.map((y) => (y.id === d.id ? { ...y, rounds } : y)),
+                        }));
+                      }}
+                    />
+                  </label>
                   {!locked && (
                     <button
                       type="button"

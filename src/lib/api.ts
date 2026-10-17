@@ -1,4 +1,5 @@
-import type { LevelEntry, SheetData } from './sheet';
+import type { Item, LevelEntry, SheetData } from './sheet';
+import type { Degree } from '../../shared/combat.js';
 
 export type User = {
   id: number;
@@ -58,10 +59,27 @@ export type FullCatalog = {
   utility: CatalogEntry[];
   spells: CatalogEntry[];
   items: CatalogEntry[];
+  /** The campaign's own loot (server/catalog/homebrew.js). */
+  homebrew: HomebrewItem[];
+};
+export type HomebrewItem = {
+  name: string;
+  type: Item['type'];
+  rarity: Item['rarity'];
+  floor: number;
+  wear?: string;
+  bonus: Item['bonus'];
+  notes: string;
 };
 
 /** What the party panel gets for each member (a small slice of the sheet; mana only for owner and GM). */
-export type PartyMember = { id: number; ownerId: number; ownerName: string; mine: boolean; view: Partial<SheetData> };
+export type PartyMember = {
+  id: number;
+  ownerId: number;
+  ownerName: string;
+  mine: boolean;
+  view: Partial<SheetData> & { portraitTag?: string };
+};
 
 export type RollPart = {
   sign: number;
@@ -77,8 +95,21 @@ export type RollResult = {
   parts: RollPart[];
   natural: number | null;
   label: string;
-  /** An Evade roll against a declared attack: its difficulty and whether it succeeded. */
-  vs?: { dc: number | null; success: boolean | null; area?: boolean; kind?: 'attack' };
+  /** An Evade roll against a declared attack (or an attack/Taunt): its difficulty and whether it succeeded. */
+  vs?: {
+    dc: number | null;
+    success: boolean | null;
+    area?: boolean;
+    kind?: 'attack' | 'evade' | 'taunt';
+    degree?: Degree | null;
+  };
+  /** Intervene: 1d6 added by other crawlers. */
+  intervene?: { id: number; name: string; value: number }[];
+  /** A Stat Check (can't be Intervened). */
+  stat?: boolean;
+  /** Rerolled with AI Favor (this roll no longer counts) / this roll is the reroll of message `rerollOf`. */
+  rerolled?: boolean;
+  rerollOf?: number;
 };
 export type Message = {
   id: number;
@@ -114,6 +145,18 @@ export type LogEvent =
   | { type: 'combat'; action: 'start' | 'round' | 'end'; round: number }
   | { type: 'opponent'; name: string; from: number; to: number; defeated: boolean; source: string }
   | { type: 'favor'; use: 'reroll' | 'action'; from: number; to: number }
+  | { type: 'achievement'; title: string }
+  | { type: 'expired'; names: string[] }
+  | { type: 'injury'; debuff: string; source: string }
+  | {
+      type: 'item';
+      item: string;
+      target: string;
+      left: number;
+      applied: { type: 'heal'; slots: number } | { type: 'mana'; amount?: number } | null;
+    }
+  | { type: 'interrupt'; kind: 'catch'; ally: string; attack: string }
+  | { type: 'reward'; title: string; boxes: Pick<LootBox, 'tier' | 'kind' | 'label'>[] }
   | { type: 'world'; action: 'floor'; from: number; to: number; name: string; nameEs: string }
   | {
       type: 'declare';
@@ -143,6 +186,8 @@ export type World = {
   /** The GM has changed this Floor's name or texts. */
   customized: boolean;
   maxFloor: number;
+  /** "2 hours passed" also takes 2 hours off the Level Collapse clock. */
+  autoClock: boolean;
 };
 export type WorldPatch = Partial<{
   floor: number;
@@ -150,6 +195,7 @@ export type WorldPatch = Partial<{
   crawlersAlive: number | string | null;
   collapseHours: number;
   addHours: number;
+  autoClock: boolean;
   name: string;
   nameEs: string;
   ambience: string;
@@ -176,6 +222,7 @@ export type Opponent = {
   attacks?: NpcAttack[];
   /** From its stat block (GM only): rules notes and the System AI description. */
   npcNotes?: string;
+  npcNotesEs?: string;
   npcDescription?: string;
   npcDescriptionEs?: string;
   mods?: Partial<Record<'str' | 'int' | 'con' | 'dex' | 'cha', string>>;
@@ -204,11 +251,26 @@ export type Declaration = {
       /** Rerolled with AI Favor (once per check); `first` is the original total. */
       rerolled?: boolean;
       first?: number;
+      degree?: Degree | null;
+      /** Major Fail: + Floor damage. Critical Fail: double damage. */
+      extra?: number;
+      double?: boolean;
+      messageId?: number | null;
     } | null;
     applied: { damage: number; slots: number } | null;
+    /** Catcher: took the hit for this ally (and can't Evade it). */
+    caughtFor?: string;
+    noEvade?: boolean;
   }[];
   damage: { total: number; expr: string } | null;
+  /** Taunt (Interrupt) against this attack: who tried, and whether it worked. */
+  taunt?: { id: number; name: string; won: boolean; total?: number; mob?: number } | null;
+  tauntedFrom?: string[];
 };
+export type LinkKind = 'grab' | 'taunt' | 'protect' | 'custom';
+export type LinkSide = { type: 'crawler' | 'opponent'; id: number; name: string };
+/** "Grabbing: Alvaro" / "Grabbed by: Bad Llama 2": cleared when either side leaves the fight. */
+export type Link = { id: number; kind: LinkKind; label: string; a: LinkSide; b: LinkSide };
 export type Encounter = {
   active: boolean;
   round: number;
@@ -220,6 +282,7 @@ export type Encounter = {
   actions: Record<string, CrawlerActions>;
   /** Crawler attacks this round (step 4 / surprise round). */
   attacks: CrawlerAttack[];
+  links: Link[];
 };
 /** A crawler's attack on an opponent: hit or miss against the Mob's Evade (`dc`, GM only). */
 export type CrawlerAttack = {
@@ -235,8 +298,12 @@ export type CrawlerAttack = {
   dc?: number | null;
   /** null when the Mob has no Evade on file: the GM calls it. */
   hit: boolean | null;
+  degree?: Degree | null;
+  /** Area Attack: the records of one roll share a group. */
+  group?: number | null;
   damageExpr: string | null;
-  damage: { total: number; expr: string } | null;
+  /** `crit`: Natural 20, the damage dice were doubled; `amazing`: + Floor for an Amazing Success. */
+  damage: { total: number; expr: string; crit?: boolean; amazing?: number } | null;
   applied: { slots: number; damage: number } | null;
 };
 /** 'evade' / 'interrupt' are Crawler Reaction Interrupts, 'action' is a Crawler Action (step 4). */
@@ -260,6 +327,8 @@ export type NpcData = {
   /** Flavor text in the System AI's voice (and its Spanish version). */
   description: string;
   descriptionEs: string;
+  /** Spanish version of the rules notes. */
+  notesEs: string;
   /** Locked stat blocks can't be edited by accident (the default for book entries). */
   locked: boolean;
   /** Where a book stat block came from ("Core Rulebook p. 333") and its chapter/Floor. */
@@ -279,7 +348,7 @@ export type ProgressAction =
 export type HpManaSources = { hp?: string[]; mana?: string[] };
 export type NewMessage = {
   text?: string;
-  roll?: { expr: string; label?: string };
+  roll?: { expr: string; label?: string; stat?: boolean };
   characterId?: number | null;
   gmOnly?: boolean;
 };
@@ -310,6 +379,90 @@ async function request<T>(method: string, url: string, body?: unknown): Promise<
   return json as T;
 }
 
+/* ---------- achievements and rewards ---------- */
+export type BoxTier = 'bronze' | 'silver' | 'gold' | 'platinum' | 'legendary' | 'celestial';
+export type BoxKind = 'adventurer' | 'boss' | 'crafter' | 'assassin' | 'fan' | 'benefactor' | 'achievement' | 'custom';
+export const BOX_TIERS: BoxTier[] = ['bronze', 'silver', 'gold', 'platinum', 'legendary', 'celestial'];
+export const BOX_KINDS: BoxKind[] = [
+  'adventurer',
+  'boss',
+  'crafter',
+  'assassin',
+  'fan',
+  'benefactor',
+  'achievement',
+  'custom',
+];
+/** An item inside a loot box (`special` gets the spotlight when it's opened). */
+export type RewardItem = Pick<Item, 'item' | 'qty' | 'notes' | 'type' | 'rarity' | 'unique' | 'skill' | 'upgrades'> & {
+  bonus: Item['bonus'];
+  special: boolean;
+};
+export type LootBox = { tier: BoxTier; kind: BoxKind; label: string; items: RewardItem[] };
+export type Reward = { boxes: LootBox[]; note: string };
+export type Achievement = {
+  id: number;
+  title: string;
+  description: string;
+  reward: Reward;
+  createdAt: string;
+  awards: {
+    id: number;
+    characterId: number;
+    name: string;
+    awardedAt: string;
+    claimedAt: string | null;
+    reward: Reward;
+  }[];
+};
+export type Award = {
+  id: number;
+  achievementId: number;
+  title: string;
+  description: string;
+  awardedAt: string;
+  claimedAt: string | null;
+  hasReward: boolean;
+  /** For players, the boxes' items are empty until claimed. */
+  reward: Reward;
+  opened: Reward | null;
+};
+/* ---------- maps (fog of war) ---------- */
+export type PoiKind = 'poi' | 'stairs' | 'saferoom' | 'boss' | 'danger' | 'loot' | 'npc' | 'note';
+export const POI_KINDS: PoiKind[] = ['poi', 'stairs', 'saferoom', 'boss', 'danger', 'loot', 'npc', 'note'];
+export type Poi = { id: string; x: number; y: number; name: string; note: string; kind: PoiKind; hidden?: boolean };
+export type GameMap = {
+  id: number;
+  name: string;
+  floor: number;
+  cols: number;
+  rows: number;
+  /** Revealed grid cells, "col,row". */
+  revealed: string[];
+  pois: Poi[];
+  /** Party token (fractions of the image size), or null. */
+  party: { x: number; y: number } | null;
+  shared: boolean;
+  showGrid: boolean;
+  updatedAt: string;
+  /** Changes when the image the viewer gets changes (cache buster). */
+  imageTag: string;
+  hasImage: boolean;
+  /** GM only: tag of the fogged copy players get. */
+  playerTag?: string;
+};
+export type MapPatch = Partial<
+  Pick<GameMap, 'name' | 'floor' | 'cols' | 'rows' | 'revealed' | 'pois' | 'shared' | 'showGrid'>
+> & {
+  party?: { x: number; y: number } | null;
+  image?: string;
+  playerImage?: string;
+};
+export const mapImageUrl = (m: Pick<GameMap, 'id' | 'imageTag'>, asPlayer = false) =>
+  `/api/maps/${m.id}/image?v=${m.imageTag}${asPlayer ? '&as=player' : ''}`;
+
+export type AchievementInput = { title: string; description: string; reward: Reward; characterIds?: number[] };
+
 export const api = {
   config: () => request<{ allowRegistration: boolean }>('GET', '/api/config'),
   me: () => request<User>('GET', '/api/auth/me'),
@@ -338,6 +491,7 @@ export const api = {
   messages: () => request<Message[]>('GET', '/api/messages'),
   postMessage: (m: NewMessage) => request<Message>('POST', '/api/messages', m),
   clearMessages: () => request('DELETE', '/api/messages'),
+  rerollMessage: (id: number) => request<Message>('POST', `/api/messages/${id}/reroll`, {}),
 
   encounter: () => request<Encounter>('GET', '/api/encounter'),
   encounterAction: (action: 'start' | 'next' | 'prev' | 'end' | 'floor', extra: Record<string, unknown> = {}) =>
@@ -354,6 +508,9 @@ export const api = {
     splash?: number[];
   }) => request<Encounter>('POST', '/api/encounter/declarations', d),
   removeDeclaration: (id: number) => request<Encounter>('DELETE', `/api/encounter/declarations/${id}`),
+  clearDeclarations: (opponentId: number) =>
+    request<Encounter>('DELETE', `/api/encounter/opponents/${opponentId}/declarations`),
+  removeAttack: (id: number) => request<Encounter>('DELETE', `/api/encounter/attacks/${id}`),
   rollEvade: (id: number, characterId: number, expr: string, reroll = false) =>
     request<Encounter>('POST', `/api/encounter/declarations/${id}/evade`, { characterId, expr, reroll }),
   crawlerAction: (
@@ -369,11 +526,28 @@ export const api = {
   ) => request<Encounter>('PATCH', `/api/encounter/declarations/${id}/targets/${characterId}`, patch),
   crawlerAttack: (a: {
     characterId: number;
-    opponentId: number;
+    opponentId?: number;
+    /** Area Attack: one roll against several opponents. */
+    opponentIds?: number[];
     expr: string;
     damage?: string | null;
     label: string;
   }) => request<Encounter>('POST', '/api/encounter/attacks', a),
+  intervene: (messageId: number, characterId: number) =>
+    request<Encounter>('POST', `/api/messages/${messageId}/intervene`, { characterId }),
+  taunt: (declId: number, characterId: number, expr: string) =>
+    request<Encounter>('POST', `/api/encounter/declarations/${declId}/taunt`, { characterId, expr }),
+  catchAttack: (declId: number, characterId: number, allyId: number) =>
+    request<Encounter>('POST', `/api/encounter/declarations/${declId}/catch`, { characterId, allyId }),
+  addLink: (l: { kind: LinkKind; a: Omit<LinkSide, 'name'>; b: Omit<LinkSide, 'name'>; label?: string }) =>
+    request<Encounter>('POST', '/api/encounter/links', l),
+  removeLink: (id: number) => request<Encounter>('DELETE', `/api/encounter/links/${id}`),
+  useItem: (characterId: number, itemId: string, targetId?: number, manaMax?: number | null) =>
+    request<{ left: number; applied: unknown; version: number }>('POST', `/api/characters/${characterId}/use-item`, {
+      itemId,
+      targetId,
+      manaMax,
+    }),
   attackDamage: (id: number, expr?: string) =>
     request<Encounter>('POST', `/api/encounter/attacks/${id}/damage`, expr ? { expr } : {}),
   applyAttack: (id: number, body: { hit?: boolean } = {}) =>
@@ -401,7 +575,33 @@ export const api = {
     }>('POST', `/api/characters/${id}/advance`, { mode }),
   partyTwoHours: () => request<{ members: { id: number }[] }>('POST', '/api/party/two-hours', {}),
 
+  pregens: () => request<import('./creation').Pregen[]>('GET', '/api/pregens'),
+  maps: () => request<GameMap[]>('GET', '/api/maps'),
+  map: (id: number) => request<GameMap>('GET', `/api/maps/${id}`),
+  createMap: (m: MapPatch) => request<GameMap>('POST', '/api/maps', m),
+  updateMap: (id: number, m: MapPatch) => request<GameMap>('PATCH', `/api/maps/${id}`, m),
+  deleteMap: (id: number) => request('DELETE', `/api/maps/${id}`),
+  rewardSettings: () => request<{ claimLocked: boolean }>('GET', '/api/rewards/settings'),
+  setClaimLocked: (claimLocked: boolean) =>
+    request<{ claimLocked: boolean }>('PUT', '/api/rewards/settings', { claimLocked }),
+  achievements: () => request<Achievement[]>('GET', '/api/achievements'),
+  createAchievement: (a: AchievementInput) => request<Achievement>('POST', '/api/achievements', a),
+  updateAchievement: (id: number, a: AchievementInput) => request<Achievement>('PUT', `/api/achievements/${id}`, a),
+  deleteAchievement: (id: number) => request('DELETE', `/api/achievements/${id}`),
+  giveAchievement: (id: number, characterIds: number[]) =>
+    request<Achievement>('POST', `/api/achievements/${id}/awards`, { characterIds }),
+  revokeAward: (id: number) => request('DELETE', `/api/awards/${id}`),
+  setAwardReward: (id: number, reward: Reward) => request('PUT', `/api/awards/${id}/reward`, { reward }),
+  awards: (characterId: number) =>
+    request<{ claimLocked: boolean; awards: Award[] }>('GET', `/api/characters/${characterId}/awards`),
+  claimAward: (id: number) => request<{ id: number; opened: Reward }>('POST', `/api/awards/${id}/claim`, {}),
   listUsers: () => request<AdminUser[]>('GET', '/api/users'),
+  backups: () =>
+    request<{ enabled: boolean; dir: string | null; keep: number; files: { name: string; size: number }[] }>(
+      'GET',
+      '/api/admin/backups',
+    ),
+  backupNow: () => request<{ name: string; files: { name: string; size: number }[] }>('POST', '/api/admin/backups', {}),
   updateUser: (id: number, patch: { isAdmin?: boolean; password?: string }) =>
     request<User>('PATCH', `/api/users/${id}`, patch),
   deleteUser: (id: number) => request('DELETE', `/api/users/${id}`),

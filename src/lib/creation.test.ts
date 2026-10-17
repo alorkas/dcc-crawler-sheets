@@ -4,6 +4,12 @@ import {
   ANIMAL_TABLES,
   buildSheet,
   emptyChoices,
+  emptyThird,
+  buildFromPregen,
+  pregenSkills,
+  type Pregen,
+  rollBoosts,
+  rollFavor,
   namesToLookUp,
   randomCrawlerNumber,
   rollStat,
@@ -124,7 +130,9 @@ describe('buildSheet', () => {
     expect(names).toContain('Heal');
     // 1 unarmed + weapon + 8 background skills + heal
     expect(s.skills).toHaveLength(11);
-    expect(s.gear.hands).toBe('Tire Iron (Club)');
+    const hands = s.inventory.find((i) => i.slot === 'hands');
+    expect(hands?.item).toBe('Tire Iron (Club)');
+    expect(hands?.type).toBe('weapon');
     expect(s.inventory.map((i) => i.item)).toEqual(expect.arrayContaining(['Lighter', 'A googly eye']));
     const career = s.skills.find((k) => k.name === human().backgrounds.career.picks[0])!;
     expect(career.rank).toBe('3');
@@ -137,7 +145,10 @@ describe('buildSheet', () => {
     const s = buildSheet(c, { 'Fire Fingers': { kind: 'spell', entry: { name: 'Fire Fingers', manaCost: '2' } } });
     const spell = s.skills.find((k) => k.name === 'Fire Fingers')!;
     expect(spell).toMatchObject({ category: 'spell', subtype: 'attack', pinned: true, manaCost: '2' });
-    expect(s.hotlist.join(' ')).toContain('Mana Potion');
+    // the Mana Potions are an inventory item sitting in Hotlist slot 3
+    const potion = s.inventory.find((i) => i.item === 'Standard Mana Potion')!;
+    expect(s.hotSlots[2]).toBe(potion.id);
+    expect(s.hotlist[1]).toContain('Fire Fingers');
   });
   it('animals get Slice Attack and a size', () => {
     const c = human();
@@ -154,5 +165,97 @@ describe('buildSheet', () => {
     expect(s.skills[0].name).toBe('Slice Attack');
     expect(s.dr.size).toBe('Small (2)');
     expect(namesToLookUp(c)[0]).toBe('Slice Attack');
+  });
+});
+
+describe('Third Floor crawler', () => {
+  it('needs its 27 points, the skill roll and the loot row', () => {
+    const c = human();
+    c.third = emptyThird();
+    expect(validate(c)).toContain('third');
+    c.third.points = { str: 10, int: 5, con: 5, dex: 5, cha: 2 };
+    c.third.boosts = rollBoosts(c);
+    c.third.lootRow = 3;
+    expect(validate(c)).toEqual([]);
+  });
+  it('builds a Level 10 sheet with the extra Ranks, Stats, AI Favor, Popularity and loot', () => {
+    const c = human();
+    c.third = {
+      ...emptyThird(),
+      points: { str: 10, int: 5, con: 5, dex: 5, cha: 2 },
+      boosts: { 'Tire Iron (Club)': 8, 'Unarmed Combat': 2 },
+      favor: 3,
+      lootRow: 2,
+      spells: { weapon: false, armor: false, item: true },
+      race: 'Half-Orc',
+      cls: 'Brawler',
+      experiences: [{ table: 3, text: 'Punched a goose' }, ...emptyThird().experiences.slice(1)],
+    };
+    const s = buildSheet(c, {});
+    expect(s.level).toBe('10');
+    expect(s.floor).toBe('3');
+    expect(s.race).toBe('Half-Orc');
+    expect(s.class).toBe('Brawler');
+    expect(s.stats.str.enhanced).toBe('16');
+    expect(s.stats.str.unenhanced).toBe('16');
+    expect(s.dr.aiFavor).toBe('3');
+    expect(s.skills.find((x) => x.name === 'Tire Iron (Club)')!.rank).toBe('10'); // capped
+    expect(s.skills.find((x) => x.name === 'Unarmed Combat')!.rank).toBe('5');
+    const armor = s.inventory.find((i) => i.item.startsWith('Starting armor'))!;
+    expect(armor.rarity).toBe('platinum');
+    expect(armor.bonus.dr).toBe('4');
+    expect(s.inventory.some((i) => i.item === 'Spells (gold)')).toBe(true);
+    expect(s.notes).toContain('[Table 31] Punched a goose');
+  });
+  it('rolls in range', () => {
+    for (let i = 0; i < 100; i++) {
+      const f = rollFavor(2);
+      expect(f).toBeGreaterThanOrEqual(3);
+      expect(f).toBeLessThanOrEqual(6);
+      const b = rollBoosts(human());
+      expect(b['Tire Iron (Club)']).toBeGreaterThanOrEqual(2);
+      expect(b['Tire Iron (Club)']).toBeLessThanOrEqual(7); // 3 + 2d4 capped at 10
+    }
+  });
+});
+
+describe('pre-generated crawlers', () => {
+  const p: Pregen = {
+    id: 1,
+    name: 'Princess Donut (Floor 2)',
+    level: '9',
+    floor: 2,
+    tags: 'Cat',
+    size: 'Small (2)',
+    slotValue: '3',
+    move: '30',
+    stats: {
+      str: { score: '2', mod: '+1' },
+      int: { score: '9', mod: '+4' },
+      con: { score: '4', mod: '+2' },
+      dex: { score: '8', mod: '+3' },
+      cha: { score: '12', mod: '+5' },
+    },
+    attacks: [{ name: 'Slice Attack', toHit: '', damage: '', range: '', effect: '' }],
+    keySkills: 'Magic Missile Spell 5, Slice Attack 4, Dodge 4',
+    description: 'A cat.',
+    descriptionEs: '',
+    source: 'Par for the Course pre-gens',
+  };
+  it('reads the key skills', () => {
+    expect(pregenSkills(p)).toEqual([
+      { name: 'Magic Missile', rank: 5 },
+      { name: 'Slice Attack', rank: 4 },
+      { name: 'Dodge', rank: 4 },
+    ]);
+  });
+  it('builds a sheet', () => {
+    const s = buildFromPregen(p, {});
+    expect(s.name).toBe('Princess Donut');
+    expect([s.level, s.floor, s.race]).toEqual(['9', '2', 'Cat']);
+    expect(s.stats.cha.enhanced).toBe('12');
+    expect(s.skills.find((x) => x.name === 'Slice Attack')!.pinned).toBe(true);
+    expect(s.skills.find((x) => x.name === 'Dodge')!.pinned).toBe(false);
+    expect(s.skills.some((x) => x.name === 'Heal')).toBe(true);
   });
 });

@@ -33,6 +33,10 @@ type LiveState = {
   setWorld: (w: World) => void;
   /** Subscribe to "this sheet has a newer version on the server" notices. Returns an unsubscribe function. */
   onCharacter: (fn: (e: { id: number; version: number; by: number | null }) => void) => () => void;
+  /** Goes up whenever achievements, awards or the claim lock change (refetch on change). */
+  awardsTick: number;
+  /** Goes up whenever a map changes. */
+  mapsTick: number;
 };
 
 const LiveCtx = createContext<LiveState | null>(null);
@@ -48,6 +52,8 @@ export function LiveProvider({ children }: { children: ReactNode }) {
   const logVisible = useRef(false);
   const [encounter, setEncounter] = useState<Encounter | null>(null);
   const [world, setWorld] = useState<World | null>(null);
+  const [awardsTick, setAwardsTick] = useState(0);
+  const [mapsTick, setMapsTick] = useState(0);
   const loadWorld = useCallback(() => {
     api
       .world()
@@ -109,6 +115,8 @@ export function LiveProvider({ children }: { children: ReactNode }) {
         loadMessages();
         loadEncounter();
         loadWorld();
+        setAwardsTick((n) => n + 1);
+        setMapsTick((n) => n + 1);
       }
       wasConnected = true;
     };
@@ -124,8 +132,14 @@ export function LiveProvider({ children }: { children: ReactNode }) {
       partyTimer = setTimeout(loadParty, 300);
     });
     es.addEventListener('clear', () => setMessages([]));
+    es.addEventListener('message-update', (e) => {
+      const m = JSON.parse((e as MessageEvent).data) as Message;
+      setMessages((list) => list.map((x) => (x.id === m.id ? m : x)));
+    });
     es.addEventListener('encounter', loadEncounter);
     es.addEventListener('world', loadWorld);
+    es.addEventListener('awards', () => setAwardsTick((n) => n + 1));
+    es.addEventListener('maps', () => setMapsTick((n) => n + 1));
     es.addEventListener('character', (e) => {
       const ev = JSON.parse((e as MessageEvent).data);
       charListeners.current.forEach((fn) => fn(ev));
@@ -183,6 +197,8 @@ export function LiveProvider({ children }: { children: ReactNode }) {
       world,
       setWorld,
       onCharacter,
+      awardsTick,
+      mapsTick,
     }),
     [
       connected,
@@ -198,6 +214,8 @@ export function LiveProvider({ children }: { children: ReactNode }) {
       encounter,
       world,
       onCharacter,
+      awardsTick,
+      mapsTick,
     ],
   );
   return <LiveCtx.Provider value={value}>{children}</LiveCtx.Provider>;

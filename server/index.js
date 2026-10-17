@@ -4,6 +4,7 @@ import crypto from 'node:crypto';
 import { fileURLToPath } from 'node:url';
 import { openDb, ensureAdmin } from './db.js';
 import { createApp } from './app.js';
+import { scheduleBackups } from './backup.js';
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const dataDir = process.env.DATA_DIR || path.join(root, 'data');
@@ -22,8 +23,15 @@ if (!jwtSecret) {
 const db = openDb(path.join(dataDir, 'crawlers.db'));
 ensureAdmin(db, process.env.ADMIN_USERNAME, process.env.ADMIN_PASSWORD);
 
+// nightly database backups (BACKUP_DIR, default <data>/backups; BACKUP_KEEP newest files, 0 = off)
+const backupDir = process.env.BACKUP_DIR || path.join(dataDir, 'backups');
+const backupKeep = Number(process.env.BACKUP_KEEP ?? 14);
+if (backupKeep > 0) scheduleBackups(db, backupDir, { keep: backupKeep });
+
 const app = createApp({
   db,
+  backupDir,
+  backupKeep,
   jwtSecret,
   allowRegistration: process.env.ALLOW_REGISTRATION !== 'false',
   cookieSecure: process.env.COOKIE_SECURE === 'true',

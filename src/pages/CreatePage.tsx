@@ -14,7 +14,20 @@ import {
   STARTER_WEAPONS,
   STAT_KEYS,
   buildSheet,
+  buildFromPregen,
+  pregenSkills,
+  type Pregen,
   emptyChoices,
+  emptyThird,
+  LOOT_ROWS,
+  LOOT_SLOTS,
+  LOOT_TEXT,
+  rollBoosts,
+  rollFavor,
+  startingSkills,
+  THIRD_STAT_POINTS,
+  thirdPointsUsed,
+  type ThirdFloor,
   namesToLookUp,
   pickedSkills,
   randomCrawlerNumber,
@@ -27,8 +40,10 @@ import {
 } from '../lib/creation';
 import type { CatalogHit } from '../lib/api';
 
-const STEPS = ['basics', 'backgrounds', 'combat', 'stats', 'gear', 'review'] as const;
-type Step = (typeof STEPS)[number];
+const ALL_STEPS = ['basics', 'backgrounds', 'combat', 'stats', 'gear', 'third', 'review'] as const;
+type Step = (typeof ALL_STEPS)[number];
+/** The "Tutorial Floors" step only for crawlers who start on the Third Floor. */
+const stepsFor = (c: Choices): Step[] => ALL_STEPS.filter((s) => s !== 'third' || !!c.third);
 
 const STEP_ISSUES: Record<Step, StepIssue[]> = {
   basics: ['basics'],
@@ -36,6 +51,7 @@ const STEP_ISSUES: Record<Step, StepIssue[]> = {
   combat: ['combat', 'combatDuplicate'],
   stats: ['stats', 'spellInt'],
   gear: [],
+  third: ['third'],
   review: [],
 };
 
@@ -46,7 +62,9 @@ export default function CreatePage() {
   const [step, setStep] = useState<Step>('basics');
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
+  const [pregens, setPregens] = useState(false);
   const issues = useMemo(() => validate(c), [c]);
+  const STEPS = stepsFor(c);
   const stepIndex = STEPS.indexOf(step);
   const blocked = STEP_ISSUES[step].some((i) => issues.includes(i));
   const firstBlocked = STEPS.findIndex((s) => STEP_ISSUES[s].some((i) => issues.includes(i)));
@@ -86,6 +104,9 @@ export default function CreatePage() {
           <p className="dim">{t('wiz.sub')}</p>
         </div>
         <div className="page-actions">
+          <button type="button" className="btn ghost" onClick={() => setPregens(true)}>
+            {t('pregen.button')}
+          </button>
           <button type="button" className="btn ghost" onClick={blank}>
             {t('wiz.blank')}
           </button>
@@ -118,11 +139,13 @@ export default function CreatePage() {
           {step === 'combat' && <CombatStep c={c} patch={patch} issues={issues} />}
           {step === 'stats' && <StatsStep c={c} patch={patch} issues={issues} />}
           {step === 'gear' && <GearStep c={c} patch={patch} />}
+          {step === 'third' && c.third && <ThirdStep c={c} patch={patch} />}
           {step === 'review' && <ReviewStep c={c} />}
         </div>
       </div>
 
       {error && <p className="error">{error}</p>}
+      {pregens && <PregenPicker onClose={() => setPregens(false)} />}
       <div className="wiz-nav">
         <button
           type="button"
@@ -234,6 +257,17 @@ function BasicsStep({ c, patch }: StepProps) {
           </Field>
         </>
       )}
+      <div className="field span-2">
+        <label className="gm-check third-toggle">
+          <input
+            type="checkbox"
+            checked={!!c.third}
+            onChange={(e) => patch({ third: e.target.checked ? emptyThird() : null })}
+          />
+          <strong>{t('wiz.thirdToggle')}</strong>
+        </label>
+        <span className="dim small">{t('wiz.thirdHint')}</span>
+      </div>
     </div>
   );
 }
@@ -616,8 +650,10 @@ function ReviewStep({ c }: { c: Choices }) {
           c.animal ? c.species : t('wiz.human'),
           c.gender,
           c.crawlerNumber && `#${c.crawlerNumber}`,
-          t('dash.lvl', { n: 1 }),
-          t('dash.floor', { n: 1 }),
+          c.third?.race,
+          c.third?.cls,
+          t('dash.lvl', { n: c.third ? 10 : 1 }),
+          t('dash.floor', { n: c.third ? 3 : 1 }),
         ]
           .filter(Boolean)
           .join(' · ')}
@@ -628,7 +664,8 @@ function ReviewStep({ c }: { c: Choices }) {
           <ul className="plain">
             {STAT_KEYS.map((k) => (
               <li key={k}>
-                {t(`stat.${k}` as MsgKey)}: <strong>{c.stats[k]}</strong> ({signed(statModFromScore(c.stats[k]))})
+                {t(`stat.${k}` as MsgKey)}: <strong>{(c.stats[k] ?? 0) + (c.third?.points[k] ?? 0)}</strong> (
+                {signed(statModFromScore((c.stats[k] ?? 0) + (c.third?.points[k] ?? 0)))})
               </li>
             ))}
           </ul>
@@ -677,6 +714,266 @@ function ReviewStep({ c }: { c: Choices }) {
         </div>
       </div>
       <p className="dim small">{t('wiz.reviewHint')}</p>
+    </div>
+  );
+}
+
+/* ---------------- Third Floor crawler (Core Rulebook p. 115–118) ---------------- */
+function ThirdStep({ c, patch }: StepProps) {
+  const { t } = useI18n();
+  const th = c.third!;
+  const set = (p: Partial<ThirdFloor>) => patch({ third: { ...th, ...p } });
+  const used = thirdPointsUsed(th);
+  const left = THIRD_STAT_POINTS - used;
+  const skills = startingSkills(c);
+  const chaMod = statModFromScore((c.stats.cha ?? 0) + th.points.cha);
+  const row = th.lootRow ? LOOT_ROWS[th.lootRow - 1] : null;
+  return (
+    <div className="third">
+      <p className="dim">{t('wiz.third.intro')}</p>
+
+      <section>
+        <h3>{t('wiz.third.raceClass')}</h3>
+        <div className="wiz-grid">
+          <Field label={t('core.race')}>
+            <input className="in" value={th.race} onChange={(e) => set({ race: e.target.value })} />
+          </Field>
+          <Field label={t('core.class')}>
+            <input className="in" value={th.cls} onChange={(e) => set({ cls: e.target.value })} />
+          </Field>
+        </div>
+        <p className="dim tiny">{t('wiz.third.raceHint')}</p>
+      </section>
+
+      <section>
+        <h3>
+          {t('wiz.third.stats')}{' '}
+          <span className={`pill ${left === 0 ? 'ok-pill' : left < 0 ? 'bad-pill' : ''}`}>
+            {t('wiz.third.pointsLeft', { n: left })}
+          </span>
+        </h3>
+        <div className="third-stats">
+          {STAT_KEYS.map((k) => {
+            const base = c.stats[k] ?? 0;
+            const val = base + th.points[k];
+            return (
+              <div key={k} className="third-stat">
+                <span className="lbl">{t(`stat.${k}` as MsgKey)}</span>
+                <div className="row-gap">
+                  <button
+                    type="button"
+                    className="btn small ghost"
+                    disabled={th.points[k] <= 0}
+                    onClick={() => set({ points: { ...th.points, [k]: th.points[k] - 1 } })}
+                  >
+                    −
+                  </button>
+                  <strong>{val}</strong>
+                  <button
+                    type="button"
+                    className="btn small ghost"
+                    disabled={left <= 0}
+                    onClick={() => set({ points: { ...th.points, [k]: th.points[k] + 1 } })}
+                  >
+                    +
+                  </button>
+                </div>
+                <span className="dim tiny">
+                  {base} + {th.points[k]} · {t('core.statMod', { stat: '' })} {signed(statModFromScore(val))}
+                </span>
+              </div>
+            );
+          })}
+        </div>
+      </section>
+
+      <section>
+        <h3>{t('wiz.third.skills')}</h3>
+        <button type="button" className="btn small" onClick={() => set({ boosts: rollBoosts(c) })}>
+          🎲 {th.boosts ? t('wiz.third.reroll') : t('wiz.third.rollSkills')}
+        </button>
+        <ul className="plain third-skills">
+          {skills.map((sk) => {
+            const add = th.boosts?.[sk.name];
+            return (
+              <li key={sk.name}>
+                {sk.name} · {t('wiz.rankN', { n: sk.rank })}
+                {add !== undefined && (
+                  <strong>
+                    {' '}
+                    → {Math.min(10, sk.rank + add)} <span className="dim tiny">(+{add})</span>
+                  </strong>
+                )}
+                {sk.main && <span className="dim tiny"> · {t('wiz.third.main')}</span>}
+              </li>
+            );
+          })}
+        </ul>
+      </section>
+
+      <section>
+        <h3>{t('wiz.third.favor')}</h3>
+        <div className="row-gap">
+          <select
+            className="in sel"
+            value={th.favorRating}
+            onChange={(e) => set({ favorRating: Number(e.target.value) as 0 | 1 | 2, favor: null })}
+          >
+            {[0, 1, 2].map((n) => (
+              <option key={n} value={n}>
+                {t('wiz.third.favorRating', { n })}
+              </option>
+            ))}
+          </select>
+          <button type="button" className="btn small" onClick={() => set({ favor: rollFavor(th.favorRating) })}>
+            🎲 {t('wiz.third.rollFavor', { n: th.favorRating + 1 })}
+          </button>
+          {th.favor !== null && <strong>{t('wiz.third.favorIs', { n: th.favor })}</strong>}
+        </div>
+        <p className="dim tiny">
+          {t('wiz.third.popularity', { n: chaMod === null ? '—' : chaMod * 2 })} · {t('wiz.third.level')}
+        </p>
+      </section>
+
+      <section>
+        <h3>{t('wiz.third.loot')}</h3>
+        <div className="row-gap">
+          {[1, 2, 3, 4].map((n) => (
+            <button
+              key={n}
+              type="button"
+              className={`btn small ${th.lootRow === n ? 'primary' : 'ghost'}`}
+              onClick={() => set({ lootRow: n })}
+            >
+              {n}
+            </button>
+          ))}
+          <button type="button" className="btn small" onClick={() => set({ lootRow: roll(4) })}>
+            🎲 d4
+          </button>
+        </div>
+        {row && (
+          <ul className="third-loot">
+            {LOOT_SLOTS.map((slot) => {
+              const tier = row[slot];
+              const canSpell = slot !== 'consumable';
+              const asSpells = canSpell && th.spells[slot as 'weapon' | 'armor' | 'item'];
+              return (
+                <li key={slot} className={`rar-${tier}`}>
+                  <div className="row-gap">
+                    <span className={`pill rar-pill rar-${tier}`}>{t(`rarity.${tier}` as MsgKey)}</span>
+                    <strong>{t(`wiz.third.slot.${slot}` as MsgKey)}</strong>
+                    {canSpell && (
+                      <label className="gm-check">
+                        <input
+                          type="checkbox"
+                          checked={asSpells}
+                          onChange={(e) => set({ spells: { ...th.spells, [slot]: e.target.checked } })}
+                        />
+                        {t('wiz.third.asSpells')}
+                      </label>
+                    )}
+                  </div>
+                  <span className="dim small">{asSpells ? LOOT_TEXT.spells[tier] : LOOT_TEXT[slot][tier]}</span>
+                </li>
+              );
+            })}
+          </ul>
+        )}
+        <p className="dim tiny">{t('wiz.third.lootHint')}</p>
+      </section>
+
+      <section>
+        <h3>{t('wiz.third.exp')}</h3>
+        <p className="dim tiny">{t('wiz.third.expHint')}</p>
+        <ol className="third-exp">
+          {th.experiences.map((e, i) => (
+            <li key={i}>
+              <button
+                type="button"
+                className="btn small ghost"
+                onClick={() =>
+                  set({ experiences: th.experiences.map((x, j) => (j === i ? { ...x, table: roll(6) } : x)) })
+                }
+              >
+                🎲 d6
+              </button>
+              {e.table && <span className="pill">{t(`wiz.third.table.${e.table}` as MsgKey)}</span>}
+              <input
+                className="in"
+                value={e.text}
+                placeholder={t('wiz.third.expPh')}
+                onChange={(ev) =>
+                  set({
+                    experiences: th.experiences.map((x, j) => (j === i ? { ...x, text: ev.target.value } : x)),
+                  })
+                }
+              />
+            </li>
+          ))}
+        </ol>
+      </section>
+    </div>
+  );
+}
+
+/* ---------------- start from a pre-generated crawler ---------------- */
+function PregenPicker({ onClose }: { onClose: () => void }) {
+  const { t, err, lang } = useI18n();
+  const navigate = useNavigate();
+  const [list, setList] = useState<Pregen[] | null>(null);
+  const [busy, setBusy] = useState<number | null>(null);
+  const [error, setError] = useState('');
+  useEffect(() => {
+    api
+      .pregens()
+      .then(setList)
+      .catch((e) => setError(err(e)));
+  }, [err]);
+  const use = async (p: Pregen) => {
+    setBusy(p.id);
+    setError('');
+    try {
+      const names = pregenSkills(p).map((x) => x.name);
+      const hits: Record<string, CatalogHit | null> = {};
+      await Promise.all(names.map(async (n) => (hits[n] = await lookup(n).catch(() => null))));
+      const ch = await api.createCharacter(buildFromPregen(p, hits));
+      navigate(`/sheet/${ch.id}`);
+    } catch (e) {
+      setError(err(e, 'err.createFailed'));
+      setBusy(null);
+    }
+  };
+  return (
+    <div className="modal-back" onClick={onClose}>
+      <div className="modal pregen-modal" onClick={(e) => e.stopPropagation()}>
+        <div className="item-modal-head">
+          <h2>{t('pregen.title')}</h2>
+          <button type="button" className="icon-btn small" onClick={onClose} aria-label={t('common.close')}>
+            ×
+          </button>
+        </div>
+        <p className="dim small">{t('pregen.hint')}</p>
+        {error && <p className="error">{error}</p>}
+        {!list && !error && <p className="dim">{t('common.loading')}</p>}
+        <div className="pregen-list">
+          {list?.map((p) => (
+            <article key={p.id} className="pregen">
+              <div className="pregen-head">
+                <strong>{p.name}</strong>
+                <span className="dim tiny">
+                  {[p.tags, t('dash.lvl', { n: p.level }), t('dash.floor', { n: p.floor })].join(' · ')}
+                </span>
+              </div>
+              <p className="small">{lang === 'es' && p.descriptionEs ? p.descriptionEs : p.description}</p>
+              <p className="dim tiny">{p.keySkills}</p>
+              <button type="button" className="btn small primary" disabled={busy !== null} onClick={() => use(p)}>
+                {busy === p.id ? '…' : t('pregen.use')}
+              </button>
+            </article>
+          ))}
+        </div>
+      </div>
     </div>
   );
 }

@@ -43,6 +43,21 @@ export function openDb(file) {
       created_at TEXT NOT NULL DEFAULT (datetime('now')),
       updated_at TEXT NOT NULL DEFAULT (datetime('now'))
     );
+    CREATE TABLE IF NOT EXISTS achievements (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      data TEXT NOT NULL DEFAULT '{}',
+      created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))
+    );
+    CREATE TABLE IF NOT EXISTS awards (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      achievement_id INTEGER NOT NULL REFERENCES achievements(id) ON DELETE CASCADE,
+      character_id INTEGER NOT NULL REFERENCES characters(id) ON DELETE CASCADE,
+      reward TEXT NOT NULL DEFAULT '{}',
+      opened TEXT,
+      created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now')),
+      claimed_at TEXT
+    );
+    CREATE INDEX IF NOT EXISTS idx_awards_character ON awards(character_id);
     CREATE TABLE IF NOT EXISTS kv (
       key TEXT PRIMARY KEY,
       value TEXT NOT NULL

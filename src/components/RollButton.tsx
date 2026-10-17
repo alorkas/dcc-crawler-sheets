@@ -12,11 +12,14 @@ export function RollButton({
   label,
   text,
   className = '',
+  stat = false,
 }: {
   expr: string;
   label: string;
   text?: string;
   className?: string;
+  /** A Stat Check (Intervene can't help those). */
+  stat?: boolean;
 }) {
   const { t } = useI18n();
   const live = useLiveOptional();
@@ -28,7 +31,7 @@ export function RollButton({
   if (!live) return <output className={`roll-total ${className}`}>{shown}</output>;
   const roll = async () => {
     try {
-      const m = await live.send({ roll: { expr, label }, characterId: charId ?? null });
+      const m = await live.send({ roll: { expr, label, ...(stat ? { stat } : {}) }, characterId: charId ?? null });
       const r = m.roll;
       setResult(r ? `= ${r.total}${r.natural === 20 ? ' ★' : ''}` : null);
     } catch {

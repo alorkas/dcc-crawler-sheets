@@ -309,10 +309,10 @@ export default function NpcPage() {
           )}
 
           {locked ? (
-            data.notes && (
+            (data.notes || data.notesEs) && (
               <div className="field">
                 <span className="lbl">{t('npc.notes')}</span>
-                <div className="npc-notes-view">{data.notes}</div>
+                <div className="npc-notes-view">{(lang === 'es' && data.notesEs) || data.notes || data.notesEs}</div>
               </div>
             )
           ) : (
@@ -345,6 +345,16 @@ export default function NpcPage() {
                   value={data.notes}
                   placeholder={t('npc.notesPh')}
                   onChange={(e) => patch({ notes: e.target.value })}
+                />
+              </label>
+              <label className="field">
+                <span className="lbl">{t('npc.notesEs')}</span>
+                <textarea
+                  className="in"
+                  rows={Math.min(16, Math.max(3, data.notesEs.split('\n').length + 2))}
+                  value={data.notesEs}
+                  placeholder={t('npc.notesEsPh')}
+                  onChange={(e) => patch({ notesEs: e.target.value })}
                 />
               </label>
             </>

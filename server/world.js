@@ -48,6 +48,124 @@ export const FLOORS = {
     ambienceEs:
       '¡Aire fresco! ¡Hierba! ¡Un horizonte de verdad! No os emocionéis. El piso está dividido en burbujas selladas, cada una partida en cuatro reinos: tierra, mar, aire y las cuevas de debajo, y cada reino tiene un castillo con un trono que alguien tiene que conquistar. Las olas esconden dientes, las islas flotantes esconden caídas muy largas y los túneles esconden cosas peores. Y ahora lo divertido: nadie sale hasta que caigan todos los castillos de la burbuja. Ojalá a vuestros vecinos se les den bien los trabajos en grupo.',
   },
+  // Floors 6+: the books' Floor names and timers are left for the GM (rename them on this page); original texts
+  6: {
+    name: 'Floor 6',
+    nameEs: 'Piso 6',
+    days: 0,
+    ambience:
+      "Welcome to the deep end, crawlers. Whatever you thought the dungeon was, it was being polite until now. The Floor is bigger than your sense of scale, the rules on the walls change when you're not looking, and the audience numbers have never been higher. That last part should worry you.",
+    ambienceEs:
+      'Bienvenidos a la parte honda, crawlers. Lo que pensabais que era la mazmorra solo estaba siendo educada hasta ahora. El Piso es más grande que vuestro sentido de la escala, las reglas de las paredes cambian cuando no miráis y la audiencia nunca había sido tan alta. Eso último debería preocuparos.',
+  },
+  7: {
+    name: 'Floor 7',
+    nameEs: 'Piso 7',
+    days: 0,
+    ambience:
+      'Somebody in programming got a budget increase and spent all of it on you. Every corner of this Floor is staged like a premiere: lights, music cues, a trap where the hero shot should be. Smile for the cameras. They are definitely smiling at you.',
+    ambienceEs:
+      'Alguien en programación consiguió más presupuesto y se lo ha gastado entero en vosotros. Cada rincón de este Piso está montado como un estreno: luces, música, una trampa justo donde debería ir el plano del héroe. Sonreíd a las cámaras. Ellas os sonríen a vosotros, seguro.',
+  },
+  8: {
+    name: 'Floor 8',
+    nameEs: 'Piso 8',
+    days: 0,
+    ambience:
+      'The air down here hums like a transformer about to blow. Things that were Bosses upstairs are wildlife here, and the wildlife has opinions about you. Saferooms are fewer, farther, and the bartenders have started asking how long you plan to live.',
+    ambienceEs:
+      'El aire aquí abajo zumba como un transformador a punto de reventar. Lo que arriba eran Jefes aquí es fauna, y la fauna tiene opiniones sobre vosotros. Las salas seguras están más lejos y escasean, y los camareros han empezado a preguntar cuánto pensáis vivir.',
+  },
+  9: {
+    name: 'Floor 9',
+    nameEs: 'Piso 9',
+    days: 0,
+    ambience:
+      "Halfway to nowhere. The dungeon has stopped testing whether you can survive and started testing whether you'll make good television while you try. Alliances form, alliances rot. Keep your friends close and your loot boxes closer.",
+    ambienceEs:
+      'A mitad de camino hacia ninguna parte. La mazmorra ha dejado de comprobar si podéis sobrevivir y ahora comprueba si dais buena televisión mientras lo intentáis. Las alianzas nacen y se pudren. Mantened cerca a vuestros amigos, y más cerca aún vuestras cajas de botín.',
+  },
+  10: {
+    name: 'Floor 10',
+    nameEs: 'Piso 10',
+    days: 0,
+    ambience:
+      "Double digits, baby. The sponsors are circling like vultures with credit lines. Every fight down here is somebody's highlight reel, and every mistake is somebody else's blooper compilation. You're a brand now. Try not to get discontinued.",
+    ambienceEs:
+      'Dobles dígitos, cariño. Los patrocinadores vuelan en círculos como buitres con líneas de crédito. Cada pelea aquí abajo es el vídeo de mejores momentos de alguien, y cada error, el vídeo de tomas falsas de otro. Ahora sois una marca. Intentad que no os descataloguen.',
+  },
+  11: {
+    name: 'Floor 11',
+    nameEs: 'Piso 11',
+    days: 0,
+    ambience:
+      'This Floor feels old. Older than the dungeon, older than the show, older than whatever you used to call home. Things sleep in the walls here, and they really, really hate being woken up by idiots with torches.',
+    ambienceEs:
+      'Este Piso parece viejo. Más que la mazmorra, más que el programa, más que lo que antes llamabais hogar. Aquí duermen cosas dentro de las paredes, y odian de verdad que las despierte un idiota con una antorcha.',
+  },
+  12: {
+    name: 'Floor 12',
+    nameEs: 'Piso 12',
+    days: 0,
+    ambience:
+      "The rules are thinner here, like paper held up to a fire. The System AI is watching you more closely than it should, and it's laughing at jokes nobody told. If something offers you a deal, read the fine print. Then read it again. Then run.",
+    ambienceEs:
+      'Aquí las reglas son más finas, como papel acercado al fuego. La IA del Sistema os observa más de cerca de lo que debería y se ríe de chistes que nadie ha contado. Si algo os ofrece un trato, leed la letra pequeña. Luego leedla otra vez. Luego corred.',
+  },
+  13: {
+    name: 'Floor 13',
+    nameEs: 'Piso 13',
+    days: 0,
+    ambience:
+      "Deeper than most crawlers ever get, and the dungeon knows it. Every step down here is a ratings event, every breath is borrowed, and the things that live on this Floor have heard of you. Make it entertaining. You won't get many more chances.",
+    ambienceEs:
+      'Más hondo de lo que llegan casi todos los crawlers, y la mazmorra lo sabe. Cada paso aquí abajo es un acontecimiento de audiencia, cada respiración es prestada y las cosas que viven en este Piso han oído hablar de vosotros. Haced que sea entretenido. No tendréis muchas más oportunidades.',
+  },
+  14: {
+    name: 'Floor 14',
+    nameEs: 'Piso 14',
+    days: 0,
+    ambience:
+      "Deeper than most crawlers ever get, and the dungeon knows it. Every step down here is a ratings event, every breath is borrowed, and the things that live on this Floor have heard of you. Make it entertaining. You won't get many more chances.",
+    ambienceEs:
+      'Más hondo de lo que llegan casi todos los crawlers, y la mazmorra lo sabe. Cada paso aquí abajo es un acontecimiento de audiencia, cada respiración es prestada y las cosas que viven en este Piso han oído hablar de vosotros. Haced que sea entretenido. No tendréis muchas más oportunidades.',
+  },
+  15: {
+    name: 'Floor 15',
+    nameEs: 'Piso 15',
+    days: 0,
+    ambience:
+      "Deeper than most crawlers ever get, and the dungeon knows it. Every step down here is a ratings event, every breath is borrowed, and the things that live on this Floor have heard of you. Make it entertaining. You won't get many more chances.",
+    ambienceEs:
+      'Más hondo de lo que llegan casi todos los crawlers, y la mazmorra lo sabe. Cada paso aquí abajo es un acontecimiento de audiencia, cada respiración es prestada y las cosas que viven en este Piso han oído hablar de vosotros. Haced que sea entretenido. No tendréis muchas más oportunidades.',
+  },
+  16: {
+    name: 'Floor 16',
+    nameEs: 'Piso 16',
+    days: 0,
+    ambience:
+      "Deeper than most crawlers ever get, and the dungeon knows it. Every step down here is a ratings event, every breath is borrowed, and the things that live on this Floor have heard of you. Make it entertaining. You won't get many more chances.",
+    ambienceEs:
+      'Más hondo de lo que llegan casi todos los crawlers, y la mazmorra lo sabe. Cada paso aquí abajo es un acontecimiento de audiencia, cada respiración es prestada y las cosas que viven en este Piso han oído hablar de vosotros. Haced que sea entretenido. No tendréis muchas más oportunidades.',
+  },
+  17: {
+    name: 'Floor 17',
+    nameEs: 'Piso 17',
+    days: 0,
+    ambience:
+      "Deeper than most crawlers ever get, and the dungeon knows it. Every step down here is a ratings event, every breath is borrowed, and the things that live on this Floor have heard of you. Make it entertaining. You won't get many more chances.",
+    ambienceEs:
+      'Más hondo de lo que llegan casi todos los crawlers, y la mazmorra lo sabe. Cada paso aquí abajo es un acontecimiento de audiencia, cada respiración es prestada y las cosas que viven en este Piso han oído hablar de vosotros. Haced que sea entretenido. No tendréis muchas más oportunidades.',
+  },
+  18: {
+    name: 'Floor 18',
+    nameEs: 'Piso 18',
+    days: 0,
+    ambience:
+      "Deeper than most crawlers ever get, and the dungeon knows it. Every step down here is a ratings event, every breath is borrowed, and the things that live on this Floor have heard of you. Make it entertaining. You won't get many more chances.",
+    ambienceEs:
+      'Más hondo de lo que llegan casi todos los crawlers, y la mazmorra lo sabe. Cada paso aquí abajo es un acontecimiento de audiencia, cada respiración es prestada y las cosas que viven en este Piso han oído hablar de vosotros. Haced que sea entretenido. No tendréis muchas más oportunidades.',
+  },
 };
 const MAX_FLOOR = 18;
 
@@ -92,6 +210,7 @@ export function mountWorld(app, { db, auth, adminOnly, live, onFloor }) {
       ambienceEs: c.ambienceEs ?? d.ambienceEs,
       customized: Object.keys(c).length > 0,
       maxFloor: MAX_FLOOR,
+      autoClock: !!w.autoClock,
     };
   };
 
@@ -116,6 +235,8 @@ export function mountWorld(app, { db, auth, adminOnly, live, onFloor }) {
       w.crawlersAlive = b.crawlersAlive === null || b.crawlersAlive === '' ? null : Math.max(0, int(b.crawlersAlive));
     if (b.collapseHours !== undefined) w.collapseHours = Math.max(0, int(b.collapseHours));
     if (b.addHours !== undefined) w.collapseHours = Math.max(0, w.collapseHours + int(b.addHours));
+    // "2 hours passed" also runs the Level Collapse clock
+    if (b.autoClock !== undefined) w.autoClock = !!b.autoClock;
     // per-Floor text overrides; { reset: true } goes back to the defaults
     if (b.reset) {
       delete w.custom[w.floor];
@@ -140,5 +261,14 @@ export function mountWorld(app, { db, auth, adminOnly, live, onFloor }) {
     res.json(view(w));
   });
 
-  return { getFloor: () => getWorld().floor };
+  return {
+    getFloor: () => getWorld().floor,
+    /** Time passed in the dungeon (the party's "2 hours passed"), when the GM ties the clock to it. */
+    timePassed(hours) {
+      const w = getWorld();
+      if (!w.autoClock) return;
+      w.collapseHours = Math.max(0, w.collapseHours - hours);
+      putWorld(w);
+    },
+  };
 }

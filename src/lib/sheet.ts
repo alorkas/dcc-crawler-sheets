@@ -1,11 +1,14 @@
 // Data model mirroring the official DCC RPG character sheet (all 6 pages).
+import type { Effect } from '../../shared/combat.js';
 
 export type HealthBox = { a: string; b: string; hit: boolean };
 export type Stat = { enhanced: string; unenhanced: string; mod: string };
 export type StatKey = 'str' | 'int' | 'con' | 'dex' | 'cha';
 /** Stat used by a skill/attack: '' = not chosen (legacy free text), 'none' = no stat (passive). */
 export type StatSel = StatKey | 'none' | '';
-export type ActiveDebuff = { id: string; stacks: number; note: string };
+/** A Table 8 debuff; `rounds` (optional) counts down in Clean Up and ends it at 0. */
+export type ActiveDebuff = { id: string; stacks: number; note: string; rounds?: number };
+export type { Effect, EffectKind, Duration } from '../../shared/combat.js';
 
 export type Attack = {
   name: string;
@@ -43,7 +46,8 @@ export type Skill = {
   effect: string;
   baseDamage: string;
 };
-export type Item = { item: string; qty: string; notes: string };
+import { emptyItem as newItem, type Item } from '../../shared/items.js';
+export type { Item, GearSlot, ItemType, Rarity } from '../../shared/items.js';
 export type LevelEntry = {
   at: string;
   floor: string;
@@ -78,10 +82,15 @@ export type SheetData = {
   manaCurrent: string;
   debuffs: string; // free-text debuff notes
   debuffList: ActiveDebuff[];
+  /** Buffs, debuffs and Advantage/Disadvantage with a duration (status chips). */
+  effects: Effect[];
   externalBuffs: string[];
   attacks: Attack[];
   // page 2
   hotlist: string[];
+  /** Inventory item ids in the 10 Hotlist slots ('' = no item; the slot's text in `hotlist` is used instead). */
+  hotSlots: string[];
+  /** Legacy (≤ v5) free-text gear slots; since v6 gear is equipped inventory items (Item.slot). */
   gear: { head: string; torso: string; arms: string; hands: string; legs: string; feet: string; accessories: string };
   popularity: string;
   pastTrauma: string;
@@ -178,7 +187,7 @@ export const emptySkill = (): Skill => ({
   effect: '',
   baseDamage: '',
 });
-export const emptyItem = (): Item => ({ item: '', qty: '', notes: '' });
+export const emptyItem = (): Item => newItem();
 
 export function emptySheet(): SheetData {
   return {
@@ -201,9 +210,11 @@ export function emptySheet(): SheetData {
     manaCurrent: '',
     debuffs: '',
     debuffList: [],
+    effects: [],
     externalBuffs: ['', '', ''],
     attacks: Array.from({ length: 5 }, emptyAttack),
     hotlist: Array(10).fill(''),
+    hotSlots: Array(10).fill(''),
     gear: { head: '', torso: '', arms: '', hands: '', legs: '', feet: '', accessories: '' },
     popularity: '',
     pastTrauma: '',

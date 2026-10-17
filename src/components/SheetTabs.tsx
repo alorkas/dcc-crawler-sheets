@@ -1,18 +1,18 @@
 import { Area, Input, Section, useSheet } from './fields';
 import { ListRows, Portrait } from './widgets';
+import { EffectsPanel } from './Status';
+import { SheetQuickItems } from './QuickItems';
 import { AutoNumber, DebuffPanel, HealthBar, HealthTools, ManaTools, useStatMod } from './rulesWidgets';
-import { MAX_ACCESSORIES, annotateDamage, damageExpr, num, pinnedAttacks, statModFromScore } from '../lib/rules';
+import { annotateDamage, damageExpr, num, pinnedAttacks, statModFromScore } from '../lib/rules';
 import { useSearchParams } from 'react-router-dom';
-import { useEffect, useState } from 'react';
-import { fillItem, lookup } from '../lib/catalog';
-import { api } from '../lib/api';
-import { useAuth } from '../lib/auth';
 import { CastButton } from './SkillsTab';
 import { RollButton } from './RollButton';
+import { damageBonusFor } from '../../shared/items.js';
+import { EquippedSlots, HotlistSlots } from './Inventory';
 import { AttackRollButton, CombatTargetBar, TargetProvider } from './CombatAttack';
 import { AssignStatPoints } from './AssignStatPoints';
 import { useI18n, type MsgKey } from '../lib/i18n';
-import { STATS, emptyItem, signed, type Item, type SheetData, type StatKey } from '../lib/sheet';
+import { STATS, signed, type StatKey } from '../lib/sheet';
 
 const statLabel = (k: StatKey) => `stat.${k}` as MsgKey;
 const statShort = (k: StatKey) => `stat.${k}.short` as MsgKey;
@@ -53,6 +53,17 @@ export function CoreTab() {
                 <span className="slash">/</span>
                 <Input path={['stats', s.key, 'unenhanced']} label={t('core.unenhanced')} center numeric />
               </div>
+              {der.gearStats[s.key].total !== 0 && (
+                <div
+                  className="dim tiny gear-stat"
+                  title={der.gearStats[s.key].from.map((f) => `${f.name} ${signed(f.value)}`).join(', ')}
+                >
+                  {t('gear.statWith', {
+                    n: der.score[s.key] ?? '—',
+                    list: der.gearStats[s.key].from.map((f) => `${f.name} ${signed(f.value)}`).join(', '),
+                  })}
+                </div>
+              )}
               <AutoNumber
                 path={['stats', s.key, 'mod']}
                 auto={der.modAuto[s.key]}
@@ -60,6 +71,15 @@ export function CoreTab() {
                 format={(n) => signed(n)}
                 className="stat-mod"
               />
+              {der.mods[s.key] !== null && (
+                <RollButton
+                  expr={`d20${signed((der.mods[s.key] ?? 0) + der.penalty)}`}
+                  text={t('core.statCheck')}
+                  stat
+                  label={t('core.statCheckOf', { stat: t(statLabel(s.key)) })}
+                  className="stat-check"
+                />
+              )}
               {s.key === 'str' && der.liftKg !== null && (
                 <div className="dim tiny">{t('core.lift', { n: der.liftKg })}</div>
               )}
@@ -97,6 +117,7 @@ export function CoreTab() {
               )}
             </div>
           </div>
+          <GearBreakdown from={der.gearEvade.from} />
           <div className="formula-extra">
             <div className="field">
               <span className="lbl">{t('core.move')}</span>
@@ -140,6 +161,7 @@ export function CoreTab() {
               <output className="total-val">{der.drTotal === null ? '—' : der.drTotal}</output>
             </div>
           </div>
+          <GearBreakdown from={der.gearDr.from} />
           <div className="formula-extra">
             <Input path={['dr', 'aiFavor']} label={t('core.aiFavor')} center />
             <Input path={['dr', 'size']} label={t('core.size')} center />
@@ -165,6 +187,7 @@ export function CoreTab() {
             <ManaTools />
           </div>
           <DebuffPanel />
+          <EffectsPanel />
         </div>
         <div className="sub-lbl">{t('core.extBuffs')}</div>
         <ol className="numbered">
@@ -178,6 +201,7 @@ export function CoreTab() {
 
       <Section title={t('core.attacks')} className="span-attacks">
         <PinnedAttacks />
+        <SheetQuickItems />
       </Section>
     </div>
   );
@@ -236,7 +260,9 @@ function PinnedRow({ i, der, onEdit }: { i: number; der: ReturnType<typeof useSh
   const toHit = rank === null && mod === null ? null : (rank ?? 0) + (mod ?? 0) + der.penalty;
   const statLbl = s.stat && s.stat !== 'none' ? t(`stat.${s.stat}.short` as MsgKey) : '';
   const spell = s.category === 'spell';
-  const dmgExpr = s.baseDamage ? damageExpr(s.baseDamage, der, data.floor) : null;
+  const gearDmg = damageBonusFor(data.inventory, s.name, spell);
+  const baseExpr = s.baseDamage ? damageExpr(s.baseDamage, der, data.floor) : null;
+  const dmgExpr = baseExpr && gearDmg.total ? `${baseExpr}${signed(gearDmg.total)}` : baseExpr;
   const typeLbl = s.subtype
     ? t(`skillsub.${s.category}.${s.subtype}` as MsgKey)
     : t(`skillcat.${s.category}` as MsgKey);
@@ -261,6 +287,7 @@ function PinnedRow({ i, der, onEdit }: { i: number; der: ReturnType<typeof useSh
             label={t('roll.toHit', { name: s.name || t('skills.phSkill') })}
             name={s.name || t('skills.phSkill')}
             damage={dmgExpr}
+            manaCost={spell ? num(s.manaCost) : null}
             className="pin-roll"
           />
         )}
@@ -272,6 +299,15 @@ function PinnedRow({ i, der, onEdit }: { i: number; der: ReturnType<typeof useSh
       </div>
       <div className="pin-dmg">
         {s.baseDamage ? annotateDamage(s.baseDamage, der) : '—'}
+        {gearDmg.total !== 0 && (
+          <span
+            className="dim tiny gear-dmg"
+            title={gearDmg.from.map((f) => `${f.name} ${signed(f.value)}`).join(', ')}
+          >
+            {' '}
+            {t('gear.dmgBonus', { n: signed(gearDmg.total), list: gearDmg.from.map((f) => f.name).join(', ') })}
+          </span>
+        )}
         {dmgExpr && (
           <RollButton
             expr={dmgExpr}
@@ -296,54 +332,30 @@ function PinnedRow({ i, der, onEdit }: { i: number; der: ReturnType<typeof useSh
   );
 }
 
+/** "incl. gear: Plate +3, Ring +1" under a total that includes equipped item bonuses. */
+function GearBreakdown({ from }: { from: { name: string; value: number }[] }) {
+  const { t } = useI18n();
+  if (!from.length) return null;
+  return (
+    <div className="dim tiny gear-breakdown">
+      {t('gear.includes', { list: from.map((f) => `${f.name} ${signed(f.value)}`).join(', ') })}
+    </div>
+  );
+}
+
 /* ---------------- Page 2: Gear & Hotlist ---------------- */
-const GEAR: [keyof SheetData['gear'], MsgKey, number][] = [
-  ['head', 'gear.head', 1],
-  ['torso', 'gear.torso', 1],
-  ['arms', 'gear.arms', 1],
-  ['hands', 'gear.hands', 2],
-  ['legs', 'gear.legs', 1],
-  ['feet', 'gear.feet', 1],
-  ['accessories', 'gear.accessories', 6],
-];
 
 export function GearTab() {
   const { t } = useI18n();
-  const { data } = useSheet();
-  const accCount = data.gear.accessories.split('\n').filter((l) => l.trim()).length;
   return (
     <div className="gear-grid">
       <Section title={t('gear.hotlist')} tone="red" className="span-full">
         <div className="dim tiny">{t('gear.hotlistHint')}</div>
-        <div className="hotlist">
-          {Array.from({ length: 10 }, (_, i) => (
-            <Area key={i} path={['hotlist', i]} rows={3} placeholder={t('gear.slot', { n: i + 1 })} />
-          ))}
-        </div>
+        <HotlistSlots />
       </Section>
       <Section title={t('gear.title')} className="span-gear">
-        <div className="gear">
-          {GEAR.map(([key, label, rows]) => (
-            <Area
-              key={key}
-              path={['gear', key]}
-              label={
-                key === 'accessories' ? (
-                  <>
-                    {t(label)}{' '}
-                    <span className={accCount > MAX_ACCESSORIES ? 'count warn' : 'count'}>
-                      {accCount}/{MAX_ACCESSORIES}
-                    </span>
-                  </>
-                ) : (
-                  t(label)
-                )
-              }
-              rows={rows}
-              placeholder={key === 'accessories' ? t('gear.oneLine') : undefined}
-            />
-          ))}
-        </div>
+        <EquippedSlots />
+        <p className="dim tiny">{t('gear.equipHint')}</p>
       </Section>
       <div className="side-notes">
         <Section title={t('gear.popularity')}>
@@ -369,90 +381,8 @@ export function GearTab() {
 /* ---------------- Page 3: Skills (see SkillsTab.tsx) ---------------- */
 export { SkillsTab } from './SkillsTab';
 
-/* ---------------- Page 4: Inventory ---------------- */
-export function InventoryTab() {
-  const { t } = useI18n();
-  return (
-    <Section title={t('inv.title')}>
-      <ItemNameList />
-      <ListRows<Item>
-        path={['inventory']}
-        make={emptyItem}
-        addLabel={t('inv.add')}
-        className="inventory"
-        header={
-          <div className="list-head inv-cols">
-            <span>{t('inv.item')}</span>
-            <span className="center">{t('inv.qty')}</span>
-            <span>{t('inv.notes')}</span>
-            <span />
-          </div>
-        }
-      >
-        {(i) => <InventoryRow i={i} />}
-      </ListRows>
-    </Section>
-  );
-}
-
-function InventoryRow({ i }: { i: number }) {
-  const { data, locked, update } = useSheet();
-  const { t } = useI18n();
-  const [msg, setMsg] = useState('');
-  const it = data.inventory[i];
-  const fill = async () => {
-    setMsg('');
-    try {
-      const hit = await lookup(it.item, 'item');
-      if (!hit) return setMsg(t('fill.notFound'));
-      const changes = fillItem(it, hit);
-      if (!changes.notes) return setMsg(t('fill.nothing'));
-      update((d) => ({
-        ...d,
-        inventory: d.inventory.map((x, j) => (j === i ? { ...x, ...fillItem(x, hit) } : x)),
-      }));
-    } catch {
-      setMsg(t('err.generic'));
-    }
-  };
-  return (
-    <div className="inv-cols">
-      <Input path={['inventory', i, 'item']} ariaLabel={t('inv.item')} placeholder={t('inv.item')} list="item-names" />
-      <Input path={['inventory', i, 'qty']} ariaLabel={t('inv.quantity')} placeholder={t('inv.qty')} center numeric />
-      <div>
-        <Input path={['inventory', i, 'notes']} ariaLabel={t('inv.notes')} placeholder={t('inv.notes')} />
-        {msg && <span className="dim tiny">{msg}</span>}
-      </div>
-      {!locked && it.item.trim() ? (
-        <button type="button" className="btn small ghost book-btn" onClick={fill} title={t('fill.hintItem')}>
-          {t('fill.short')}
-        </button>
-      ) : (
-        <span />
-      )}
-    </div>
-  );
-}
-
-/** Item suggestions for the GM only (players shouldn't see every item in the books). */
-function ItemNameList() {
-  const { user } = useAuth();
-  const [names, setNames] = useState<string[]>([]);
-  useEffect(() => {
-    if (!user?.isAdmin) return;
-    api
-      .fullCatalog()
-      .then((c) => setNames(c.items.map((e) => e.name).sort()))
-      .catch(() => {});
-  }, [user?.isAdmin]);
-  return (
-    <datalist id="item-names">
-      {names.map((n) => (
-        <option key={n} value={n} />
-      ))}
-    </datalist>
-  );
-}
+/* ---------------- Page 4: Inventory (see Inventory.tsx) ---------------- */
+export { InventoryTab } from './Inventory';
 
 /* ---------------- Page 5: Companions & the rest ---------------- */
 export function CompanionsTab() {

@@ -11,6 +11,7 @@ import { useI18n, type MsgKey } from '../lib/i18n';
 import { useLive } from '../lib/live';
 import { isPlayPath, onlyPlayChanges } from '../../shared/lockRules.js';
 import { PartyToggle } from '../components/LivePanels';
+import { AchievementsTab, useAwards } from '../components/Achievements';
 
 const TABS = [
   { id: 'core', label: 'tab.core', el: CoreTab },
@@ -19,6 +20,7 @@ const TABS = [
   { id: 'inventory', label: 'tab.inventory', el: InventoryTab },
   { id: 'companions', label: 'tab.companions', el: CompanionsTab },
   { id: 'abilities', label: 'tab.abilities', el: AbilitiesTab },
+  { id: 'achievements', label: 'tab.achievements', el: AchievementsTab },
 ] as const;
 
 type SaveState = 'idle' | 'dirty' | 'saving' | 'saved' | 'error';
@@ -197,6 +199,9 @@ export default function SheetPage() {
   );
 
   const der = useMemo(() => (data ? derive(data) : null), [data]);
+  // unclaimed rewards: a badge on the Achievements tab
+  const { state: awardsState } = useAwards(Number.isFinite(charId) ? charId : undefined);
+  const unclaimed = awardsState?.awards.filter((w) => w.hasReward && !w.claimedAt).length ?? 0;
   const ctx = useMemo(
     () =>
       data && der
@@ -404,6 +409,7 @@ export default function SheetPage() {
               onClick={() => setParams(x.id === 'core' ? {} : { tab: x.id }, { replace: true })}
             >
               {t(x.label)}
+              {x.id === 'achievements' && unclaimed > 0 && <span className="tab-badge">{unclaimed}</span>}
             </button>
           ))}
         </nav>

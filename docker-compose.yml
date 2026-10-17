@@ -13,8 +13,14 @@ services:
       - ALLOW_REGISTRATION=${DCC_ALLOW_REGISTRATION:-true}
       # true when served over HTTPS (e.g. behind a reverse proxy with TLS)
       - COOKIE_SECURE=${DCC_COOKIE_SECURE:-false}
+      # nightly database backups at 03:00 into /data/backups (or the folder mounted at /backups below);
+      # how many to keep, 0 turns them off
+      - BACKUP_KEEP=${DCC_BACKUP_KEEP:-14}
+      - BACKUP_DIR=${DCC_BACKUP_DIR_IN_CONTAINER:-/data/backups}
     volumes:
       - crawler-data:/data
+      # optional: keep the backups in a host folder too (then set DCC_BACKUP_DIR_IN_CONTAINER=/backups in .env)
+      # - ./backups:/backups
     healthcheck:
       test:
         [

@@ -1,3 +1,4 @@
+import { MiniMap } from '../components/MapView';
 import { useEffect, useState } from 'react';
 import { api, type World, type WorldPatch } from '../lib/api';
 import { useAuth } from '../lib/auth';
@@ -61,6 +62,10 @@ export default function WorldPage() {
           <div className="ai-says-lbl">{t('world.ambience')}</div>
           <p>{ambience || <span className="dim">{t('world.noAmbience')}</span>}</p>
         </div>
+      </div>
+
+      <div className="world-map">
+        <MiniMap />
       </div>
 
       {user?.isAdmin && <WorldControls w={w} />}
@@ -132,11 +137,29 @@ function WorldControls({ w }: { w: World }) {
         </div>
         <p className="dim tiny">{t('world.floorHint')}</p>
 
+        <label className="gm-check">
+          <input type="checkbox" checked={w.autoClock} onChange={(e) => save({ autoClock: e.target.checked })} />
+          {t('world.autoClock')}
+        </label>
         <div className="world-row">
           <span className="lbl">{t('world.collapse')}</span>
-          {[-1, -2, -8, -24].map((h) => (
-            <button key={h} type="button" className="btn small ghost" onClick={() => save({ addHours: h })}>
-              {h} h
+          {(
+            [
+              [-1, 'world.rest.mend'],
+              [-2, 'world.rest.short'],
+              [-8, 'world.rest.long'],
+              [-24, ''],
+              [-30, 'world.rest.fullDay'],
+            ] as const
+          ).map(([h, k]) => (
+            <button
+              key={h}
+              type="button"
+              className="btn small ghost"
+              title={k ? t(k) : undefined}
+              onClick={() => save({ addHours: h })}
+            >
+              {h} h{k && <span className="dim tiny"> · {t(k)}</span>}
             </button>
           ))}
           <button type="button" className="btn small ghost" onClick={() => save({ addHours: 1 })}>

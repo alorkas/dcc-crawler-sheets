@@ -2,6 +2,7 @@ import { WEAPONS } from './weapons.js';
 import { SPELLS } from './spells.js';
 import { UTILITY } from './utility.js';
 import { ITEMS } from './items.js';
+import { HOMEBREW_ITEMS } from './homebrew.js';
 
 /** Normalise a name for matching: case, curly quotes and extra spaces don't matter. */
 export const norm = (s) =>
@@ -22,6 +23,8 @@ WEAPONS.forEach((e) => put('weapon', e));
 UTILITY.forEach((e) => put('utility', e));
 SPELLS.forEach((e) => put('spell', e));
 ITEMS.forEach((e) => put('item', e));
+// the campaign's own loot: looked up like book items (book names win)
+HOMEBREW_ITEMS.forEach((e) => put('item', { name: e.name, type: e.type, effect: e.notes, homebrew: true }));
 
 /**
  * Find a skill/spell (scope "skill") or item (scope "item") by exact name.
@@ -56,5 +59,6 @@ export function fullCatalog() {
     utility: UTILITY.map(strip),
     spells: SPELLS.map(strip),
     items: ITEMS.map(strip),
+    homebrew: HOMEBREW_ITEMS,
   };
 }

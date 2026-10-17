@@ -5,6 +5,7 @@ import {
   api,
   type Declaration,
   type Encounter,
+  type LinkKind,
   type Npc,
   type NpcAttack,
   type Opponent,
@@ -16,6 +17,7 @@ import { useLive } from '../lib/live';
 import { normalize, signed } from '../lib/sheet';
 import { applyAttackDamage } from '../lib/combat';
 import { HitResult } from './CombatAttack';
+import { DegreeBadge, LinkChips, linkText } from './Status';
 import { derive } from '../lib/rules';
 import { NPC_KINDS } from '../lib/npc';
 
@@ -241,7 +243,113 @@ export function Opponents({ wide = false }: { wide?: boolean }) {
       {list.map((o) => (
         <OpponentRow key={o.id} o={o} floor={encounter.floor} round={encounter.round} gm={gm} wide={wide} />
       ))}
+      {gm && <LinksEditor />}
       {gm && <AddOpponent />}
+    </div>
+  );
+}
+
+/** GM: link two participants ("Bad Llama 2 is grabbing Alvaro"); links clear when either side leaves the fight. */
+function LinksEditor() {
+  const { t } = useI18n();
+  const { encounter, party, setEncounter } = useLive();
+  const [open, setOpen] = useState(false);
+  const [kind, setKind] = useState<LinkKind>('grab');
+  const [a, setA] = useState('');
+  const [b, setB] = useState('');
+  const [label, setLabel] = useState('');
+  if (!encounter?.active) return null;
+  const sides = [
+    ...encounter.opponents.filter((o) => !o.defeated).map((o) => ({ key: `opponent:${o.id}`, name: o.name })),
+    ...(party ?? []).map((m) => ({ key: `crawler:${m.id}`, name: m.view.name || '?' })),
+  ];
+  const parse = (k: string) => {
+    const [type, id] = k.split(':');
+    return { type: type as 'crawler' | 'opponent', id: Number(id) };
+  };
+  const add = async () => {
+    setEncounter(await api.addLink({ kind, a: parse(a), b: parse(b), label }));
+    setA('');
+    setB('');
+    setLabel('');
+    setOpen(false);
+  };
+  const links = encounter.links ?? [];
+  return (
+    <div className="links-editor">
+      {links.length > 0 && (
+        <ul className="links-list">
+          {links.map((l) => (
+            <li key={l.id}>
+              <span className="grow">
+                ⛓ {l.a.name} · {linkText(t, l, 'a')}
+              </span>
+              <button
+                type="button"
+                className="icon-btn small"
+                title={t('link.remove')}
+                aria-label={t('link.remove')}
+                onClick={async () => setEncounter(await api.removeLink(l.id))}
+              >
+                ×
+              </button>
+            </li>
+          ))}
+        </ul>
+      )}
+      {!open ? (
+        <button type="button" className="btn small ghost" onClick={() => setOpen(true)}>
+          ⛓ {t('link.add')}
+        </button>
+      ) : (
+        <div className="link-form">
+          <select className="in sel" value={a} onChange={(e) => setA(e.target.value)} aria-label={t('link.who')}>
+            <option value="">{t('link.who')}</option>
+            {sides.map((x) => (
+              <option key={x.key} value={x.key}>
+                {x.name}
+              </option>
+            ))}
+          </select>
+          <select
+            className="in sel"
+            value={kind}
+            onChange={(e) => setKind(e.target.value as LinkKind)}
+            aria-label={t('link.kind')}
+          >
+            {(['grab', 'protect', 'taunt', 'custom'] as LinkKind[]).map((k) => (
+              <option key={k} value={k}>
+                {t(`link.verb.${k}` as MsgKey)}
+              </option>
+            ))}
+          </select>
+          {kind === 'custom' && (
+            <input
+              className="in"
+              value={label}
+              maxLength={40}
+              placeholder={t('link.labelPh')}
+              onChange={(e) => setLabel(e.target.value)}
+            />
+          )}
+          <select className="in sel" value={b} onChange={(e) => setB(e.target.value)} aria-label={t('link.whom')}>
+            <option value="">{t('link.whom')}</option>
+            {sides
+              .filter((x) => x.key !== a)
+              .map((x) => (
+                <option key={x.key} value={x.key}>
+                  {x.name}
+                </option>
+              ))}
+          </select>
+          <button type="button" className="btn small primary" disabled={!a || !b} onClick={add}>
+            {t('link.add')}
+          </button>
+          <button type="button" className="btn small ghost" onClick={() => setOpen(false)}>
+            {t('common.cancel')}
+          </button>
+        </div>
+      )}
     </div>
   );
 }
@@ -327,6 +435,9 @@ function OpponentRow({
           </div>
         )}
         <span className="hp-pct">{o.defeated ? '✝' : `${o.pct}%`}</span>
+      </div>
+      <div className="member-chips">
+        <LinkChips type="opponent" id={o.id} />
       </div>
       {gm && (
         <div className="opp-dmg">
@@ -529,7 +640,7 @@ function AddOpponent() {
 /** GM: one chip per attack of an opponent; pick one, then who it targets. */
 export function AttackChips({ o, floor }: { o: Opponent; floor: number }) {
   const { t } = useI18n();
-  const { encounter } = useLive();
+  const { encounter, setEncounter } = useLive();
   const [pick, setPick] = useState<number | 'other' | null>(null);
   const attacks = o.attacks ?? [];
   // what this one already declared this round (each copy declares on its own)
@@ -563,8 +674,28 @@ export function AttackChips({ o, floor }: { o: Opponent; floor: number }) {
           {mine.map((d) => (
             <li key={d.id}>
               ✓ {t('decl.declaredLine', { attack: d.attack.name, targets: d.targets.map((x) => x.name).join(', ') })}
+              <button
+                type="button"
+                className="link-btn"
+                title={t('decl.remove')}
+                aria-label={t('decl.remove')}
+                onClick={async () => setEncounter(await api.removeDeclaration(d.id))}
+              >
+                ×
+              </button>
             </li>
           ))}
+          {mine.length > 1 && (
+            <li>
+              <button
+                type="button"
+                className="link-btn"
+                onClick={async () => setEncounter(await api.clearDeclarations(o.id))}
+              >
+                {t('decl.clearAll', { name: o.name })}
+              </button>
+            </li>
+          )}
         </ul>
       )}
       {pick !== null && (
@@ -768,11 +899,13 @@ function DeclarationRow({ d }: { d: Declaration }) {
       const tg = d.targets.find((x) => x.id === cid);
       if (!d.damage || !tg) return;
       const f = factorOf(d, tg);
-      const note = f < 1 ? ` (${fraction(f)})` : '';
+      const note = [f < 1 && fraction(f), tg.evade?.double && '×2', tg.evade?.extra && `+${tg.evade.extra}`]
+        .filter(Boolean)
+        .join(' ');
       const r = await applyAttackDamage(
         cid,
-        Math.floor(d.damage.total * f),
-        `${d.opponentName} – ${d.attack.name}${note}`,
+        shareOf(d, tg, d.damage.total),
+        `${d.opponentName} – ${d.attack.name}${note ? ` (${note})` : ''}`,
       );
       setEncounter(await api.markTarget(d.id, cid, { applied: r }));
     });
@@ -784,6 +917,11 @@ function DeclarationRow({ d }: { d: Declaration }) {
         </span>
         {d.area && <span className="pill area-pill">{t('decl.areaShort')}</span>}
         <span className="pill">{t('decl.dc', { n: d.dc ?? '?' })}</span>
+        {d.taunt && (
+          <span className={`pill ${d.taunt.won ? 'ok-pill' : 'bad-pill'}`} title={t('taunt.title')}>
+            📣 {d.taunt.name} {d.taunt.won ? '✓' : '✗'}
+          </span>
+        )}
         <button
           type="button"
           className="icon-btn small"
@@ -820,6 +958,7 @@ function DeclarationRow({ d }: { d: Declaration }) {
               <span className="grow">
                 {tg.name}
                 {tg.splash && <span className="dim tiny"> · {t('decl.splash')}</span>}
+                {tg.caughtFor && <span className="dim tiny"> · 🛡 {t('catch.for', { name: tg.caughtFor })}</span>}
               </span>
               <EvadeResult evade={tg.evade} area={d.area} />
               {tg.applied ? (
@@ -829,14 +968,18 @@ function DeclarationRow({ d }: { d: Declaration }) {
               ) : (
                 <button
                   type="button"
-                  className={`btn small ${tg.evade?.success === false ? 'primary' : 'ghost'}`}
+                  className={`btn small ${tg.evade?.success === false || tg.noEvade ? 'primary' : 'ghost'}`}
                   disabled={!d.damage || busy === tg.id}
                   title={t('decl.applyHint')}
                   onClick={() => apply(tg.id)}
                 >
                   {t('decl.apply')}
                   {f < 1 && ` ${fraction(f)}`}
-                  {d.damage && f < 1 && ` (${Math.floor(d.damage.total * f)})`}
+                  {tg.evade?.double && ' ×2'}
+                  {!!tg.evade?.extra && ` +${tg.evade.extra}`}
+                  {d.damage &&
+                    shareOf(d, tg, d.damage.total) !== d.damage.total &&
+                    ` (${shareOf(d, tg, d.damage.total)})`}
                 </button>
               )}
             </li>
@@ -848,6 +991,12 @@ function DeclarationRow({ d }: { d: Declaration }) {
   );
 }
 
+/**
+ * Damage a target takes: its share (Area/Splash/Evade, see damageFactor in shared/formula.js), doubled on a
+ * Critical Fail Evade, plus the Floor on a Major Fail.
+ */
+const shareOf = (d: Declaration, tg: Declaration['targets'][number], total: number) =>
+  Math.floor(total * factorOf(d, tg) * (tg.evade?.double ? 2 : 1)) + (tg.evade?.extra ?? 0);
 /** Share of the damage a target takes: see damageFactor (shared/formula.js). */
 const factorOf = (d: Declaration, tg: Declaration['targets'][number]) =>
   damageFactor({ area: !!d.area, splash: !!tg.splash, evaded: tg.evade?.success === true });
@@ -860,6 +1009,7 @@ function EvadeResult({ evade, area }: { evade: Declaration['targets'][number]['e
     <span className={`evade-res ${evade.success ? 'ok' : evade.success === false ? 'bad' : ''}`}>
       {evade.success ? '✓' : evade.success === false ? '✗' : '•'} {evade.total}
       {evade.success && area && <span className="tiny"> · {t('decl.half')}</span>}
+      <DegreeBadge degree={evade.degree} />
       {evade.rerolled && (
         <span className="dim tiny" title={t('decl.rerolled')}>
           {' '}
@@ -927,9 +1077,15 @@ export function TargetedBy({
               </span>
             )}
             <span className="pill">{t('decl.dc', { n: d.dc ?? '?' })}</span>
+            {tg.caughtFor && (
+              <span className="pill" title={t('catch.noEvade')}>
+                🛡 {t('catch.for', { name: tg.caughtFor })}
+              </span>
+            )}
+            {d.taunt?.won && d.taunt.id === memberId && <span className="pill">📣 {t('taunt.drawn')}</span>}
             {e ? (
               <EvadeResult evade={e} area={d.area} />
-            ) : (
+            ) : tg.noEvade ? null : (
               canRoll && (
                 <button
                   type="button"
@@ -969,6 +1125,91 @@ export function TargetedBy({
       })}
       {error && <li className="error tiny">{error}</li>}
     </ul>
+  );
+}
+
+/**
+ * Crawler Reaction: Interrupts this crawler can use to protect an ally. Taunt (an Int-opposed Taunt Check: the Mob
+ * attacks the taunter instead) and Catcher (for crawlers with Ranks in it: take the hit, no Evade).
+ */
+export function AllyInterrupts({
+  memberId,
+  tauntBonus,
+  catcher,
+}: {
+  memberId: number;
+  /** Taunt Check bonus (Taunt Rank + Int Mod + penalties); null = unknown. */
+  tauntBonus: number | null;
+  catcher: boolean;
+}) {
+  const { t, err } = useI18n();
+  const { encounter, setEncounter } = useLive();
+  const [busy, setBusy] = useState<string | null>(null);
+  const [error, setError] = useState('');
+  if (!encounter?.active || encounter.phase !== 2 || encounter.round < 1) return null;
+  const others = (encounter.declarations ?? []).filter((d) => !d.targets.some((x) => x.id === memberId));
+  if (!others.length) return null;
+  const acts = encounter.actions?.[memberId] ?? { used: [], extra: false, max: 2 };
+  const none = acts.used.length >= acts.max;
+  const run = async (key: string, fn: () => Promise<Encounter>) => {
+    setBusy(key);
+    setError('');
+    try {
+      setEncounter(await fn());
+    } catch (e) {
+      setError(err(e));
+    } finally {
+      setBusy(null);
+    }
+  };
+  return (
+    <details className="ally-int">
+      <summary>
+        🛡 {t('ally.title')} <span className="dim tiny">({others.length})</span>
+      </summary>
+      <ul>
+        {others.map((d) => (
+          <li key={d.id}>
+            <div className="grow">
+              <strong>{d.opponentName}</strong> · {d.attack.name} → {d.targets.map((x) => x.name).join(', ')}
+            </div>
+            {!d.area && !d.taunt && (
+              <button
+                type="button"
+                className="btn small"
+                disabled={none || busy !== null}
+                title={t('taunt.hint')}
+                onClick={() => run(`t${d.id}`, () => api.taunt(d.id, memberId, `d20${signed(tauntBonus ?? 0)}`))}
+              >
+                📣 {t('taunt.button')} {tauntBonus !== null && signed(tauntBonus)}
+              </button>
+            )}
+            {d.taunt && (
+              <span className="dim tiny">
+                📣 {d.taunt.name} {d.taunt.won ? '✓' : '✗'}
+              </span>
+            )}
+            {catcher &&
+              d.targets
+                .filter((x) => !x.evade && !x.noEvade)
+                .map((x) => (
+                  <button
+                    key={x.id}
+                    type="button"
+                    className="btn small"
+                    disabled={none || busy !== null}
+                    title={t('catch.hint')}
+                    onClick={() => run(`c${d.id}:${x.id}`, () => api.catchAttack(d.id, memberId, x.id))}
+                  >
+                    🛡 {t('catch.button', { name: x.name })}
+                  </button>
+                ))}
+          </li>
+        ))}
+      </ul>
+      {none && <p className="dim tiny">{t('actions.none')}</p>}
+      {error && <p className="error tiny">{error}</p>}
+    </details>
   );
 }
 
@@ -1061,6 +1302,15 @@ function OpponentHits({ o }: { o: Opponent }) {
             <strong>{a.charName}</strong> · {a.label}
           </span>
           <HitResult a={a} showDc />
+          <button
+            type="button"
+            className="link-btn"
+            title={t('atkt.undo')}
+            aria-label={t('atkt.undo')}
+            onClick={() => run(() => api.removeAttack(a.id))}
+          >
+            ×
+          </button>
           {a.hit === null && (
             <>
               <button
@@ -1109,7 +1359,7 @@ function OpponentDetails({ o, floor }: { o: Opponent; floor: number }) {
   const { t, lang } = useI18n();
   const ai = (lang === 'es' && o.npcDescriptionEs) || o.npcDescription || o.npcDescriptionEs;
   const attacks = o.attacks ?? [];
-  if (!attacks.length && !o.npcNotes && !ai) return null;
+  if (!attacks.length && !o.npcNotes && !o.npcNotesEs && !ai) return null;
   return (
     <details className="opp-details">
       <summary>{t('combatPage.details')}</summary>
@@ -1126,7 +1376,9 @@ function OpponentDetails({ o, floor }: { o: Opponent; floor: number }) {
           ))}
         </ul>
       )}
-      {o.npcNotes && <div className="npc-notes-view small">{o.npcNotes}</div>}
+      {(o.npcNotes || o.npcNotesEs) && (
+        <div className="npc-notes-view small">{(lang === 'es' && o.npcNotesEs) || o.npcNotes || o.npcNotesEs}</div>
+      )}
       {ai && (
         <blockquote className="ai-says small">
           <span className="ai-says-lbl">{t('npc.aiSays')}</span>

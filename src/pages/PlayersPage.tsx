@@ -111,6 +111,66 @@ export default function PlayersPage() {
           </table>
         </div>
       )}
+      <BackupsCard />
+    </div>
+  );
+}
+
+/** Nightly database backups: list, and take one now. */
+function BackupsCard() {
+  const { t, err, locale } = useI18n();
+  const [info, setInfo] = useState<Awaited<ReturnType<typeof api.backups>> | null>(null);
+  const [msg, setMsg] = useState('');
+  useEffect(() => {
+    api
+      .backups()
+      .then(setInfo)
+      .catch(() => {});
+  }, []);
+  if (!info) return null;
+  const now = async () => {
+    setMsg('');
+    try {
+      const r = await api.backupNow();
+      setInfo({ ...info, files: r.files });
+      setMsg(t('backup.done', { name: r.name }));
+    } catch (e) {
+      setMsg(err(e));
+    }
+  };
+  const when = (name: string) => {
+    const m = name.match(/(\d{4})-(\d{2})-(\d{2})-(\d{2})-(\d{2})-(\d{2})/);
+    return m ? new Date(Date.UTC(+m[1], +m[2] - 1, +m[3], +m[4], +m[5], +m[6])).toLocaleString(locale) : name;
+  };
+  return (
+    <div className="card backups-card">
+      <div className="card-body">
+        <h2>{t('backup.title')}</h2>
+        <p className="dim small">
+          {info.enabled ? t('backup.hint', { dir: info.dir ?? '', n: info.keep }) : t('backup.off')}
+        </p>
+        {info.enabled && (
+          <>
+            <ul className="backup-list">
+              {info.files.length === 0 && <li className="dim">{t('backup.none')}</li>}
+              {info.files.map((f) => (
+                <li key={f.name}>
+                  <span>{when(f.name)}</span>
+                  <span className="dim tiny">
+                    {f.name} · {(f.size / 1024).toFixed(0)} KB
+                  </span>
+                </li>
+              ))}
+            </ul>
+            <div className="row-gap">
+              <button type="button" className="btn small" onClick={now}>
+                {t('backup.now')}
+              </button>
+              {msg && <span className="dim small">{msg}</span>}
+            </div>
+          </>
+        )}
+      </div>
     </div>
   );
 }

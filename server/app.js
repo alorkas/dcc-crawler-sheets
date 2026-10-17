@@ -8,13 +8,24 @@ import { fullCatalog, lookup, publicSkills } from './catalog/index.js';
 import { mountLive } from './live.js';
 import { mountGame } from './game.js';
 import { mountWorld } from './world.js';
+import { mountRewards } from './rewards.js';
+import { mountMaps } from './maps.js';
+import { backupNow, listBackups } from './backup.js';
 import { applyPlay } from '../shared/lockRules.js';
 
 const COOKIE = 'dcc_session';
 const VIEW_COOKIE = 'dcc_view_as';
 const USERNAME_RE = /^[a-zA-Z0-9_.-]{3,32}$/;
 
-export function createApp({ db, jwtSecret, allowRegistration = true, cookieSecure = false, staticDir }) {
+export function createApp({
+  db,
+  jwtSecret,
+  allowRegistration = true,
+  cookieSecure = false,
+  staticDir,
+  backupDir = null,
+  backupKeep = 14,
+}) {
   const app = express();
   app.set('trust proxy', true);
   app.use(express.json({ limit: '6mb' }));
@@ -285,6 +296,21 @@ export function createApp({ db, jwtSecret, allowRegistration = true, cookieSecur
   });
 
   // ---------- admin: users ----------
+  // GM: list backups and take one now (Players page)
+  app.get('/api/admin/backups', auth, adminOnly, (_req, res) =>
+    res.json({
+      enabled: !!backupDir,
+      dir: backupDir,
+      keep: backupKeep,
+      files: backupDir ? listBackups(backupDir) : [],
+    }),
+  );
+  app.post('/api/admin/backups', auth, adminOnly, (_req, res) => {
+    if (!backupDir) return res.status(400).json({ error: 'Backups are off', code: 'bad_request' });
+    const name = backupNow(db, backupDir, backupKeep || 14);
+    res.status(201).json({ name, files: listBackups(backupDir) });
+  });
+
   app.get('/api/users', auth, adminOnly, (_req, res) => {
     const rows = db
       .prepare(
@@ -326,8 +352,12 @@ export function createApp({ db, jwtSecret, allowRegistration = true, cookieSecur
   // ---------- party, roll log & chat (live) ----------
   const live = mountLive(app, { db, auth, adminOnly, loadChar });
   // ---------- GM tools: NPC stat blocks, combat tracker, level-ups ----------
-  const game = mountGame(app, { db, auth, adminOnly, loadChar, live });
-  mountWorld(app, { db, auth, adminOnly, live, onFloor: (floor, sync) => game.setFloor(floor, sync) });
+  const hooks = {};
+  const game = mountGame(app, { db, auth, adminOnly, loadChar, live, hooks });
+  const world = mountWorld(app, { db, auth, adminOnly, live, onFloor: (floor, sync) => game.setFloor(floor, sync) });
+  hooks.onTimePassed = (h) => world.timePassed(h);
+  mountRewards(app, { db, auth, adminOnly, loadChar, live });
+  mountMaps(app, { db, auth, adminOnly, live });
 
   // ---------- book catalog ----------
   // Anyone logged in can look up an entry by its exact name (spells and items stay hidden until named).
@@ -347,7 +377,17 @@ export function createApp({ db, jwtSecret, allowRegistration = true, cookieSecur
 
   // ---------- SPA ----------
   if (staticDir && fs.existsSync(staticDir)) {
-    app.use(express.static(staticDir, { index: false, maxAge: '1h' }));
+    // the service worker and manifest are always revalidated, so app updates reach installed copies
+    app.use(
+      express.static(staticDir, {
+        index: false,
+        maxAge: '1h',
+        setHeaders: (res, file) => {
+          if (/[\\/](sw\.js|manifest\.webmanifest)$/.test(file)) res.set('Cache-Control', 'no-cache');
+          if (file.endsWith('.webmanifest')) res.set('Content-Type', 'application/manifest+json');
+        },
+      }),
+    );
     app.get('*', (_req, res) => res.sendFile(path.join(staticDir, 'index.html')));
   }
 

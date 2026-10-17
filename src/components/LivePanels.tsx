@@ -7,7 +7,11 @@ import { useLive } from '../lib/live';
 import { derive, num } from '../lib/rules';
 import { normalize, signed } from '../lib/sheet';
 import { ChatIcon, ChevronIcon, DiceIcon, PartyIcon } from './icons';
-import { ActionPips, CombatHeader, Declarations, Opponents, TargetedBy } from './CombatTracker';
+import { ActionPips, AllyInterrupts, CombatHeader, Declarations, Opponents, TargetedBy } from './CombatTracker';
+import { QuickItems } from './QuickItems';
+import { MiniMap } from './MapView';
+import { BoxChip } from './Achievements';
+import { DegreeBadge, StatusChips } from './Status';
 
 /* ---------------- collapsible side panel ---------------- */
 
@@ -133,6 +137,28 @@ function useMemberStats(m: PartyMember) {
   }, [m.view]);
 }
 
+/** A crawler's portrait (served separately so the party view stays small), or their initials. */
+export function Avatar({
+  id,
+  tag,
+  name,
+  className = '',
+}: {
+  id: number;
+  tag?: string;
+  name: string;
+  className?: string;
+}) {
+  const [broken, setBroken] = useState(false);
+  if (tag && !broken)
+    return (
+      <span className={`avatar has-img ${className}`}>
+        <img src={`/api/characters/${id}/portrait?v=${tag}`} alt="" loading="lazy" onError={() => setBroken(true)} />
+      </span>
+    );
+  return <span className={`avatar ${className}`}>{initials(name)}</span>;
+}
+
 const hpTone = (pct: number, dying: boolean) => (dying ? 'dying' : pct >= 60 ? 'ok' : pct >= 30 ? 'warn' : 'bad');
 
 export function PartyPanel() {
@@ -172,6 +198,7 @@ export function PartyPanel() {
           <MemberCard key={m.id} m={m} />
         ))}
         <Opponents />
+        <MiniMap />
       </div>
     </SidePanel>
   );
@@ -195,7 +222,7 @@ function RailMember({ m, onOpen }: { m: PartyMember; onOpen: () => void }) {
       title={`${name} · ${der.hbPercent}%`}
       onClick={onOpen}
     >
-      <span>{initials(name)}</span>
+      <Avatar id={m.id} tag={m.view.portraitTag} name={name} />
     </button>
   );
 }
@@ -209,6 +236,7 @@ export function MemberCard({ m, wide = false }: { m: PartyMember; wide?: boolean
   const { sheet, der, showMana } = useMemberStats(m);
   const canOpen = m.mine || !!user?.isAdmin;
   const aiFavor = showMana ? num(sheet.dr.aiFavor) : null;
+  const interrupts = (m.view as { interrupts?: { catcher: boolean; tauntRank: number } }).interrupts;
   const tone = hpTone(der.hbPercent, der.dying);
   const slots = 10 - der.hbLost;
   const manaPct =
@@ -219,7 +247,7 @@ export function MemberCard({ m, wide = false }: { m: PartyMember; wide?: boolean
   return (
     <div className={`member tone-${tone} ${m.mine ? 'mine' : ''}`}>
       <div className="member-head">
-        <span className="member-avatar">{initials(sheet.name)}</span>
+        <Avatar id={m.id} tag={m.view.portraitTag} name={sheet.name} className="member-avatar" />
         <div className="member-id">
           {canOpen ? (
             <button type="button" className="member-name link" onClick={() => navigate(`/sheet/${m.id}`)}>
@@ -275,22 +303,27 @@ export function MemberCard({ m, wide = false }: { m: PartyMember; wide?: boolean
       )}
       <ActionPips memberId={m.id} canEdit={canOpen} aiFavor={aiFavor} />
       <TargetedBy memberId={m.id} canRoll={canOpen} evadeTotal={der.evadeTotal} aiFavor={aiFavor} />
-      {(der.dying || sheet.debuffList.length > 0) && (
-        <div className="member-chips">
-          {der.dying && (
+      {canOpen && interrupts && (
+        <AllyInterrupts
+          memberId={m.id}
+          catcher={interrupts.catcher}
+          tauntBonus={der.mods.int === null ? null : interrupts.tauntRank + (der.mods.int ?? 0) + (der.penalty ?? 0)}
+        />
+      )}
+      {canOpen && wide && <QuickItems memberId={m.id} items={m.view.inventory ?? []} manaMax={der.manaMax} />}
+      <StatusChips
+        debuffs={sheet.debuffList}
+        effects={sheet.effects}
+        memberId={m.id}
+        extra={
+          der.dying && (
             <span className="chip dying-chip">
               {t('party.dying')}
               {sheet.dyingRounds && ` · ${t('party.rounds', { n: sheet.dyingRounds })}`}
             </span>
-          )}
-          {sheet.debuffList.map((d) => (
-            <span key={d.id} className="chip">
-              {t(`debuff.${d.id}` as MsgKey)}
-              {d.stacks > 1 && ` ×${d.stacks}`}
-            </span>
-          ))}
-        </div>
-      )}
+          )
+        }
+      />
     </div>
   );
 }
@@ -394,7 +427,7 @@ function MessageList({ filter }: { filter: Filter }) {
   // "All" is rolls and chat, plus the Mobs' declared attacks (players need those during combat)
   const shown = messages.filter((m) =>
     filter === 'all'
-      ? m.kind !== 'event' || m.event?.type === 'declare' || m.event?.type === 'world'
+      ? m.kind !== 'event' || ['declare', 'world', 'achievement', 'reward', 'interrupt'].includes(m.event?.type ?? '')
       : m.kind === filter,
   );
 
@@ -421,6 +454,112 @@ function MessageList({ filter }: { filter: Filter }) {
   );
 }
 
+/**
+ * AI Favor reroll of a d20 Check (Core Rulebook "AI Favor"): own crawler's roll, not a Natural 1, not already
+ * rerolled, within a few minutes. Evade rolls are rerolled from the party card instead.
+ */
+function RerollButton({ m }: { m: Message }) {
+  const { t, err } = useI18n();
+  const { user } = useAuth();
+  const { party } = useLive();
+  const [error, setError] = useState('');
+  const r = m.roll;
+  const recent = Date.now() - new Date(m.createdAt).getTime() < 15 * 60 * 1000;
+  if (
+    !r ||
+    !m.characterId ||
+    r.natural === null ||
+    r.natural === 1 ||
+    r.rerolled ||
+    r.rerollOf ||
+    (r.vs && r.vs.kind !== 'attack') ||
+    !recent ||
+    !(m.userId === user?.id || user?.isAdmin)
+  )
+    return null;
+  const view = party?.find((p) => p.id === m.characterId)?.view as { dr?: { aiFavor?: string } } | undefined;
+  const favor = view?.dr?.aiFavor !== undefined ? Number(view.dr.aiFavor) || 0 : null;
+  const go = async () => {
+    const msg = favor === null ? t('reroll.confirm') : t('reroll.confirmN', { n: favor });
+    if (!confirm(msg)) return;
+    setError('');
+    try {
+      await api.rerollMessage(m.id);
+    } catch (e) {
+      setError(err(e));
+    }
+  };
+  return (
+    <div className="reroll-row">
+      <button type="button" className="link-btn" disabled={favor === 0} onClick={go}>
+        ↻ {t('reroll.button')}
+        {favor !== null && ` (${t('reroll.left', { n: favor })})`}
+      </button>
+      {error && <span className="error tiny"> {error}</span>}
+    </div>
+  );
+}
+
+/**
+ * Intervene (Interrupt, combat only): another crawler spends an Action to add 1d6 to this d20 Check after the result
+ * is known (not Stat Checks). Most useful on a Near Miss, where the button stands out.
+ */
+function InterveneButton({ m }: { m: Message }) {
+  const { t, err } = useI18n();
+  const { user } = useAuth();
+  const { party, encounter, setEncounter } = useLive();
+  const [pick, setPick] = useState<number | ''>('');
+  const [error, setError] = useState('');
+  const r = m.roll;
+  const recent = Date.now() - new Date(m.createdAt).getTime() < 15 * 60 * 1000;
+  if (!r || !encounter?.active || !m.characterId || r.natural === null || r.stat || r.rerolled || !recent) return null;
+  const helpers = (party ?? []).filter(
+    (p) => (p.mine || user?.isAdmin) && p.id !== m.characterId && !r.intervene?.some((x) => x.id === p.id),
+  );
+  if (!helpers.length) return null;
+  const chosen = helpers.length === 1 ? helpers[0].id : pick;
+  const near = r.vs?.degree === 'nearMiss';
+  const go = async () => {
+    if (!chosen) return;
+    setError('');
+    try {
+      setEncounter(await api.intervene(m.id, Number(chosen)));
+    } catch (e) {
+      setError(err(e));
+    }
+  };
+  return (
+    <div className={`intervene-row ${near ? 'near' : ''}`}>
+      {helpers.length > 1 && (
+        <select
+          className="in sel tiny-sel"
+          value={pick}
+          aria-label={t('intervene.who')}
+          onChange={(e) => setPick(e.target.value ? Number(e.target.value) : '')}
+        >
+          <option value="">{t('intervene.who')}</option>
+          {helpers.map((h) => (
+            <option key={h.id} value={h.id}>
+              {h.view.name || '?'}
+            </option>
+          ))}
+        </select>
+      )}
+      <button
+        type="button"
+        className={near ? 'btn small primary' : 'link-btn'}
+        disabled={!chosen}
+        title={t('intervene.hint')}
+        onClick={go}
+      >
+        🤝 {t('intervene.button')}
+        {helpers.length === 1 && ` (${helpers[0].view.name || '?'})`}
+      </button>
+      {error && <span className="error tiny"> {error}</span>}
+    </div>
+  );
+}
+
 function LogEntry({ m }: { m: Message }) {
   const { t, locale } = useI18n();
   const { user } = useAuth();
@@ -441,7 +580,7 @@ function LogEntry({ m }: { m: Message }) {
       </div>
       {m.kind === 'chat' && <div className="log-text">{m.text}</div>}
       {r && (
-        <div className={`log-roll ${crit ? 'crit' : ''} ${fumble ? 'fumble' : ''}`}>
+        <div className={`log-roll ${r.rerolled ? 'rerolled' : ''} ${crit ? 'crit' : ''} ${fumble ? 'fumble' : ''}`}>
           <div className="roll-line">
             <span className="roll-label">{r.label || t('log.roll')}</span>
             <span className="roll-result">{r.total}</span>
@@ -451,10 +590,18 @@ function LogEntry({ m }: { m: Message }) {
               {r.vs.success ? '✓ ' : '✗ '}
               {r.vs.kind === 'attack'
                 ? t(r.vs.success ? 'atkt.hit' : 'atkt.miss')
-                : `${t(r.vs.success ? 'log.evaded' : 'log.notEvaded')} · ${t('decl.dc', { n: r.vs.dc ?? '?' })}`}
+                : r.vs.kind === 'taunt'
+                  ? t(r.vs.success ? 'taunt.won' : 'taunt.lost', { n: r.vs.dc ?? '?' })
+                  : `${t(r.vs.success ? 'log.evaded' : 'log.notEvaded')} · ${t('decl.dc', { n: r.vs.dc ?? '?' })}`}
               {r.vs.success && r.vs.area && ` · ${t('decl.half')}`}
+              <DegreeBadge degree={r.vs.degree} />
             </div>
           )}
+          {r.intervene?.map((x) => (
+            <div key={x.id} className="intervened tiny">
+              🤝 {t('intervene.added', { n: x.value, name: x.name })}
+            </div>
+          ))}
           <div className="roll-break dim tiny">
             {r.expr} →{' '}
             {r.parts.map((p, i) => (
@@ -478,6 +625,9 @@ function LogEntry({ m }: { m: Message }) {
             ))}
           </div>
           {crit && <div className="roll-flag">{t('log.crit')}</div>}
+          {r.rerolled && <div className="dim tiny">{t('reroll.replaced')}</div>}
+          <RerollButton m={m} />
+          <InterveneButton m={m} />
           {fumble && <div className="roll-flag">{t('log.fumble')}</div>}
         </div>
       )}
@@ -612,6 +762,71 @@ function EventEntry({ m, ev, time }: { m: Message; ev: LogEvent; time: string })
         <>
           <strong>{who}</strong> {t(ev.use === 'reroll' ? 'log.ev.favorReroll' : 'log.ev.favorAction')}
           <span className="dim"> · {t('log.ev.favorLeft', { n: ev.to })}</span>
+        </>
+      );
+      break;
+    case 'expired':
+      icon = '⏱';
+      tone = '';
+      body = (
+        <>
+          <strong>{who}</strong>{' '}
+          {t('log.ev.expired', {
+            list: ev.names.map((n) => (n.startsWith('debuff:') ? t(`debuff.${n.slice(7)}` as MsgKey) : n)).join(', '),
+          })}
+        </>
+      );
+      break;
+    case 'injury':
+      icon = '✖';
+      tone = 'bad';
+      body = (
+        <>
+          <strong>{who}</strong> {t('log.ev.injury', { d: t(`debuff.${ev.debuff}` as MsgKey) })}
+          {ev.source && <span className="dim"> · {ev.source}</span>}
+        </>
+      );
+      break;
+    case 'item':
+      icon = '⚗';
+      tone = 'good';
+      body = (
+        <>
+          <strong>{who}</strong>{' '}
+          {ev.target ? t('log.ev.itemOn', { item: ev.item, target: ev.target }) : t('log.ev.item', { item: ev.item })}
+          {ev.applied?.type === 'heal' && <span> · {t('log.ev.itemHeal', { n: ev.applied.slots })}</span>}
+          {ev.applied?.type === 'mana' && <span> · {t('log.ev.itemMana')}</span>}
+          <span className="dim"> · {t('log.ev.itemLeft', { n: ev.left })}</span>
+        </>
+      );
+      break;
+    case 'interrupt':
+      icon = '🛡';
+      tone = 'good';
+      body = (
+        <>
+          <strong>{who}</strong> {t('log.ev.catch', { ally: ev.ally, attack: ev.attack })}
+        </>
+      );
+      break;
+    case 'achievement':
+      icon = '🏆';
+      tone = 'good';
+      body = (
+        <>
+          <strong>{who}</strong> {t('log.ev.achievement', { title: ev.title })}
+        </>
+      );
+      break;
+    case 'reward':
+      icon = '▣';
+      tone = 'good';
+      body = (
+        <>
+          <strong>{who}</strong> {t('log.ev.reward', { title: ev.title })}{' '}
+          {ev.boxes.map((b, i) => (
+            <BoxChip key={i} box={b} />
+          ))}
         </>
       );
       break;
