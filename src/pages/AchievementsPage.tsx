@@ -17,6 +17,8 @@ import { useLive } from '../lib/live';
 import { ACCESSORY_FITS, BONUS_KEYS, EQUIP_FITS, ITEM_TYPES, RARITIES } from '../../shared/items.js';
 import { BoxChip } from '../components/Achievements';
 import { ItemNameList, rarityClass } from '../components/Inventory';
+import { generateItem } from '../../shared/lootgen.js';
+import { toRewardItem, useLootStash, useWorldFloor } from './GeneratorPage';
 
 const newItem = (): RewardItem => ({
   item: '',
@@ -483,6 +485,8 @@ function randomBox(tier: string, all: HomebrewItem[]): RewardItem[] {
 export function RewardEditor({ value, onChange }: { value: Reward; onChange: (r: Reward) => void }) {
   const { t } = useI18n();
   const collection = useCollection();
+  const stash = useLootStash();
+  const worldFloor = useWorldFloor();
   const byName = new Map(collection.map((h) => [h.name.toLowerCase(), h]));
   const setBox = (i: number, b: LootBox) => onChange({ ...value, boxes: value.boxes.map((x, j) => (j === i ? b : x)) });
   const setItem = (bi: number, ii: number, patch: Partial<RewardItem>) => {
@@ -685,6 +689,43 @@ export function RewardEditor({ value, onChange }: { value: Reward; onChange: (r:
                 onClick={() => setBox(bi, { ...b, items: randomBox(b.tier, collection) })}
               >
                 🎲 {t('loot.random')}
+              </button>
+              {stash.items.length > 0 && (
+                <select
+                  className="in sel tiny-sel"
+                  value=""
+                  aria-label={t('gen.fromStash')}
+                  onChange={(e) => {
+                    const i = Number(e.target.value);
+                    const it = stash.items[i];
+                    if (!e.target.value || !it) return;
+                    setBox(bi, { ...b, items: [...b.items.filter((x) => x.item.trim()), it] });
+                    stash.save(stash.items.filter((_, j) => j !== i));
+                  }}
+                >
+                  <option value="">📦 {t('gen.fromStash')}</option>
+                  {stash.items.map((it, i) => (
+                    <option key={i} value={i}>
+                      {it.item} ({t(`rarity.${it.rarity || 'common'}` as MsgKey)})
+                    </option>
+                  ))}
+                </select>
+              )}
+              <button
+                type="button"
+                className="btn small"
+                title={t('gen.inBoxHint', { n: worldFloor })}
+                onClick={() =>
+                  setBox(bi, {
+                    ...b,
+                    items: [
+                      ...b.items.filter((x) => x.item.trim()),
+                      toRewardItem(generateItem({ floor: worldFloor, quality: b.tier })),
+                    ],
+                  })
+                }
+              >
+                ✨ {t('gen.inBox')}
               </button>
             </div>
           )}

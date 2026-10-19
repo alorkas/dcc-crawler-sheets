@@ -1492,3 +1492,33 @@ test('item categories: what can be used, Hotlist changes cost an Action in comba
   assert.equal((await dm('POST', '/api/encounter/attacks', shot)).body.code, 'no_ammo');
   await dm('POST', '/api/encounter', { action: 'end' });
 });
+
+test('loot generator: GM gives generated items, keeps a stash', async () => {
+  const { generateItem, makeRng } = await import('../shared/lootgen.js');
+  const dm = client();
+  const pl = client();
+  await dm('POST', '/api/auth/login', { username: 'dm', password: 'adminpass123' });
+  await pl('POST', '/api/auth/register', { username: 'lucky', password: 'password1' });
+  const c = await pl('POST', '/api/characters', { data: { schema: 9, name: 'Suertudo' } });
+  const rng = makeRng(3);
+  // eslint-disable-next-line no-unused-vars
+  const items = [1, 2].map(() => (({ gen, ...it }) => it)(generateItem({ quality: 'gold', kind: 'armor', rng })));
+  assert.equal((await pl('POST', `/api/characters/${c.body.id}/gift`, { items })).status, 403);
+  const gift = await dm('POST', `/api/characters/${c.body.id}/gift`, { items });
+  assert.equal(gift.status, 200);
+  const inv = (await pl('GET', `/api/characters/${c.body.id}`)).body.data.inventory;
+  const got = inv.find((i) => i.item === items[0].item);
+  assert.equal(got.rarity, 'gold');
+  assert.equal(got.fits, items[0].fits);
+  assert.deepEqual(got.bonus, items[0].bonus);
+  const msgs = (await pl('GET', '/api/messages')).body;
+  assert.ok(msgs.some((m) => m.event?.type === 'gift' && m.characterId === c.body.id));
+  // the stash
+  assert.equal((await pl('GET', '/api/loot-stash')).status, 403);
+  await dm('PUT', '/api/loot-stash', { items: [items[1], { item: '' }] });
+  const stash = (await dm('GET', '/api/loot-stash')).body.items;
+  assert.deepEqual(
+    stash.map((i) => i.item),
+    [items[1].item],
+  );
+});

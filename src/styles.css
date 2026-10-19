@@ -5765,3 +5765,119 @@ ul.plain {
   border-left: 3px solid #7e57c2;
   background: color-mix(in srgb, #7e57c2 9%, var(--bg-2));
 }
+
+/* ---------- Loot generator ---------- */
+.generator-page {
+  display: grid;
+  gap: 1rem;
+}
+.gen-controls {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-end;
+  gap: 0.6rem;
+}
+.gen-controls .field {
+  min-width: 120px;
+}
+.gen-controls .field:first-child {
+  min-width: 70px;
+  max-width: 90px;
+}
+.gen-roll {
+  min-height: 2.4rem;
+}
+.gen-odds {
+  display: grid;
+  gap: 0.25rem;
+  margin-top: 0.8rem;
+}
+.gen-odds-bar {
+  display: flex;
+  height: 1.4rem;
+  border-radius: 999px;
+  overflow: hidden;
+  border: 1px solid var(--border);
+}
+.gen-odds-seg {
+  display: grid;
+  place-items: center;
+  min-width: 4px;
+  font-size: 0.68rem;
+  font-weight: 700;
+  color: #111;
+  background: var(--rar, #9e9e9e);
+  white-space: nowrap;
+  overflow: hidden;
+}
+.gen-results {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(300px, 1fr));
+  gap: 0.8rem;
+}
+.gen-card {
+  display: grid;
+  gap: 0.4rem;
+  align-content: start;
+  padding: 0.7rem 0.8rem;
+  border: 1px solid color-mix(in srgb, var(--rar, var(--border-2)) 60%, transparent);
+  border-top: 3px solid var(--rar, var(--border-2));
+  border-radius: 12px;
+  background: color-mix(in srgb, var(--rar, transparent) 6%, var(--surface));
+}
+.gen-card-head {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+}
+.gen-affixes {
+  margin-left: auto;
+  color: var(--rar, var(--gold));
+  letter-spacing: 0.1em;
+}
+.gen-name {
+  font-weight: 700;
+  color: var(--rar, var(--text));
+}
+.gen-bonus {
+  font-weight: 700;
+  font-size: 0.85rem;
+  color: var(--gold);
+}
+.gen-notes {
+  margin: 0;
+  font-size: 0.85rem;
+  white-space: pre-line;
+  color: var(--text);
+}
+.gen-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.35rem;
+  margin-top: 0.2rem;
+}
+.gen-give {
+  max-width: 11rem;
+}
+.gen-stash {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  gap: 0.35rem;
+}
+.gen-stash li {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.4rem;
+  padding: 0.35rem 0.5rem;
+  border-left: 3px solid var(--rar, var(--border-2));
+  border-radius: 6px;
+  background: var(--bg-2);
+}
+@media (max-width: 600px) {
+  .gen-results {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}

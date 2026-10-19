@@ -177,6 +177,7 @@ export type LogEvent =
     }
   | { type: 'interrupt'; kind: 'catch'; ally: string; attack: string }
   | { type: 'reward'; title: string; boxes: Pick<LootBox, 'tier' | 'kind' | 'label'>[] }
+  | { type: 'gift'; items: { item: string; rarity: string; qty: string }[] }
   | { type: 'world'; action: 'floor'; from: number; to: number; name: string; nameEs: string }
   | {
       type: 'declare';
@@ -556,6 +557,12 @@ export const api = {
     /** A ranged weapon's Ammunition (inventory item id, on the Hotlist): one is spent. */
     ammoItemId?: string;
   }) => request<Encounter>('POST', '/api/encounter/attacks', a),
+  /** GM: give items straight to a crawler (loot generator). */
+  giftItems: (characterId: number, items: RewardItem[]) =>
+    request<{ ok: boolean; count: number }>('POST', `/api/characters/${characterId}/gift`, { items }),
+  /** GM: generated items kept for later. */
+  lootStash: () => request<{ items: RewardItem[] }>('GET', '/api/loot-stash'),
+  saveLootStash: (items: RewardItem[]) => request<{ items: RewardItem[] }>('PUT', '/api/loot-stash', { items }),
   setHotSlot: (characterId: number, slot: number, itemId: string) =>
     request<{ version: number; messageId: number | null }>('POST', `/api/characters/${characterId}/hotlist`, {
       slot,

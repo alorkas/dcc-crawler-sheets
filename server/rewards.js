@@ -23,7 +23,7 @@ export const BOX_KINDS = ['adventurer', 'boss', 'crafter', 'assassin', 'fan', 'b
 const clip = (v, n = 200) => String(v ?? '').slice(0, n);
 const pick = (v, list, d = '') => (list.includes(v) ? v : d);
 
-function cleanItem(raw) {
+export function cleanItem(raw) {
   const it = raw && typeof raw === 'object' ? raw : {};
   const base = emptyItem();
   const bonus = it.bonus && typeof it.bonus === 'object' ? it.bonus : {};
@@ -298,6 +298,50 @@ export function mountRewards(app, { db, auth, adminOnly, loadChar, live }) {
       };
     });
     res.json({ ...settings(), awards });
+  });
+
+  /* ---------- the GM gives items straight to a crawler (e.g. from the loot generator) ---------- */
+  app.post('/api/characters/:id/gift', auth, adminOnly, (req, res) => {
+    const row = q.char.get(Number(req.params.id));
+    if (!row) return res.status(404).json({ error: 'Character not found', code: 'char_not_found' });
+    const items = (Array.isArray(req.body?.items) ? req.body.items : [])
+      .slice(0, 20)
+      .map(cleanItem)
+      .filter((it) => it.item)
+      .map(({ special, ...it }) => it); // eslint-disable-line no-unused-vars
+    if (!items.length) return res.status(400).json({ error: 'Nothing to give', code: 'bad_request' });
+    const data = JSON.parse(row.data || '{}');
+    const inv = ensureIds(Array.isArray(data.inventory) ? data.inventory : []);
+    const next = { ...data, inventory: addItems(inv, items) };
+    db.prepare(`UPDATE characters SET data = ?, version = version + 1, updated_at = datetime('now') WHERE id = ?`).run(
+      JSON.stringify(next),
+      row.id,
+    );
+    live.characterChanged(row, data, next, { version: row.version + 1, actorId: req.user.id });
+    live.postEvent({
+      ownerId: row.owner_id,
+      characterId: row.id,
+      charName: clip(data.name, 80),
+      event: { type: 'gift', items: items.map((it) => ({ item: it.item, rarity: it.rarity, qty: it.qty })) },
+      gmOnly: !row.party_since,
+    });
+    res.json({ ok: true, count: items.length });
+  });
+
+  /* ---------- the GM's stash: generated items kept for later (loot boxes, gifts) ---------- */
+  const stashGet = db.prepare(`SELECT value FROM kv WHERE key = 'lootStash'`);
+  const stashPut = db.prepare(
+    `INSERT INTO kv (key, value) VALUES ('lootStash', ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value`,
+  );
+  const stash = () => JSON.parse(stashGet.get()?.value || '{"items":[]}');
+  app.get('/api/loot-stash', auth, adminOnly, (_req, res) => res.json(stash()));
+  app.put('/api/loot-stash', auth, adminOnly, (req, res) => {
+    const items = (Array.isArray(req.body?.items) ? req.body.items : [])
+      .slice(0, 200)
+      .map(cleanItem)
+      .filter((it) => it.item);
+    stashPut.run(JSON.stringify({ items }));
+    res.json({ items });
   });
 
   app.post('/api/awards/:id/claim', auth, (req, res) => {

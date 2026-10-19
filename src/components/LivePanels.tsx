@@ -11,6 +11,7 @@ import { ActionPips, AllyInterrupts, CombatHeader, Declarations, Opponents, Targ
 import { QuickItems } from './QuickItems';
 import { MiniMap } from './MapView';
 import { BoxChip } from './Achievements';
+import { rarityClass } from './Inventory';
 import { DegreeBadge, StatusChips } from './Status';
 
 /* ---------------- collapsible side panel ---------------- */
@@ -429,7 +430,9 @@ function MessageList({ filter }: { filter: Filter }) {
   const shown = messages.filter((m) =>
     filter === 'all'
       ? m.kind !== 'event' ||
-        ['declare', 'world', 'achievement', 'reward', 'interrupt', 'hotlist', 'item'].includes(m.event?.type ?? '')
+        ['declare', 'world', 'achievement', 'reward', 'interrupt', 'hotlist', 'item', 'gift'].includes(
+          m.event?.type ?? '',
+        )
       : m.kind === filter,
   );
 
@@ -888,6 +891,21 @@ function EventEntry({ m, ev, time }: { m: Message; ev: LogEvent; time: string })
           <strong>{who}</strong> {t('log.ev.reward', { title: ev.title })}{' '}
           {ev.boxes.map((b, i) => (
             <BoxChip key={i} box={b} />
+          ))}
+        </>
+      );
+      break;
+    case 'gift':
+      icon = '🎁';
+      tone = 'good';
+      body = (
+        <>
+          <strong>{who}</strong> {t('log.ev.gift')}{' '}
+          {ev.items.map((it, i) => (
+            <span key={i} className={`pill tiny-pill rar-pill ${rarityClass(it.rarity)}`}>
+              {it.item}
+              {Number(it.qty) > 1 ? ` ×${it.qty}` : ''}
+            </span>
           ))}
         </>
       );

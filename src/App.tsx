@@ -13,6 +13,7 @@ import NpcPage from './pages/NpcPage';
 import CombatPage from './pages/CombatPage';
 import WorldPage from './pages/WorldPage';
 import AchievementsPage from './pages/AchievementsPage';
+import GeneratorPage from './pages/GeneratorPage';
 import MapPage from './pages/MapPage';
 import { LiveProvider } from './lib/live';
 import { LogPanel, PartyPanel } from './components/LivePanels';
@@ -49,6 +50,7 @@ function Shell() {
           {user.isAdmin && <Route path="/admin/players" element={<PlayersPage />} />}
           {user.isAdmin && <Route path="/admin/npcs" element={<NpcsPage />} />}
           {user.isAdmin && <Route path="/admin/achievements" element={<AchievementsPage />} />}
+          {user.isAdmin && <Route path="/admin/generator" element={<GeneratorPage />} />}
           {user.isAdmin && <Route path="/admin/npcs/:id" element={<NpcPage />} />}
           <Route path="*" element={<Navigate to="/" replace />} />
         </Routes>
@@ -81,6 +83,7 @@ function Layout({ children }: { children: ReactNode }) {
           {user?.isAdmin && <NavLink to="/admin/crawlers">{t('nav.all')}</NavLink>}
           {user?.isAdmin && <NavLink to="/admin/npcs">{t('nav.npcs')}</NavLink>}
           {user?.isAdmin && <NavLink to="/admin/achievements">{t('nav.achievements')}</NavLink>}
+          {user?.isAdmin && <NavLink to="/admin/generator">{t('nav.generator')}</NavLink>}
           {user?.isAdmin && <NavLink to="/admin/players">{t('nav.players')}</NavLink>}
         </nav>
         <LanguageSwitcher className="top-lang" />
