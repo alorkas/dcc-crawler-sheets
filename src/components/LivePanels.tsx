@@ -430,7 +430,7 @@ function MessageList({ filter }: { filter: Filter }) {
   const shown = messages.filter((m) =>
     filter === 'all'
       ? m.kind !== 'event' ||
-        ['declare', 'world', 'achievement', 'reward', 'interrupt', 'hotlist', 'item', 'gift'].includes(
+        ['declare', 'world', 'achievement', 'reward', 'interrupt', 'hotlist', 'item', 'gift', 'cursed'].includes(
           m.event?.type ?? '',
         )
       : m.kind === filter,
@@ -892,6 +892,15 @@ function EventEntry({ m, ev, time }: { m: Message; ev: LogEvent; time: string })
           {ev.boxes.map((b, i) => (
             <BoxChip key={i} box={b} />
           ))}
+        </>
+      );
+      break;
+    case 'cursed':
+      icon = '☠';
+      tone = 'bad';
+      body = (
+        <>
+          <strong>{who}</strong> {t('log.ev.cursed', { item: ev.item })}
         </>
       );
       break;

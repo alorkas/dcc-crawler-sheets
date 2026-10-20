@@ -1522,3 +1522,39 @@ test('loot generator: GM gives generated items, keeps a stash', async () => {
     [items[1].item],
   );
 });
+
+test('cursed items: hidden until equipped, then stuck (only the GM can take them off)', async () => {
+  const { generateItem, makeRng } = await import('../shared/lootgen.js');
+  const dm = client();
+  const pl = client();
+  await dm('POST', '/api/auth/login', { username: 'dm', password: 'adminpass123' });
+  await pl('POST', '/api/auth/register', { username: 'cursee', password: 'password1' });
+  const c = await pl('POST', '/api/characters', { data: { schema: 9, name: 'Gafe' } });
+  const id = c.body.id;
+  // eslint-disable-next-line no-unused-vars
+  const { gen, ...ring } = generateItem({ fixed: { curse: '*', base: 'Anillo', quality: 'gold' }, rng: makeRng(5) });
+  await dm('POST', `/api/characters/${id}/gift`, { items: [ring] });
+  let mine = (await pl('GET', `/api/characters/${id}`)).body;
+  let it = mine.data.inventory.find((i) => i.item === ring.item);
+  assert.equal(it.curse, null, 'the player does not see the curse');
+  const gm = (await dm('GET', `/api/characters/${id}`)).body.data.inventory.find((i) => i.item === ring.item);
+  assert.equal(gm.curse.revealed, false, 'the GM does');
+  // equip it
+  const inv = mine.data.inventory.map((i) => (i.id === it.id ? { ...i, slot: 'acc.finger.1' } : i));
+  const put = await pl('PUT', `/api/characters/${id}`, {
+    version: mine.version,
+    data: { ...mine.data, inventory: inv },
+  });
+  assert.equal(put.body.serverChanged, true);
+  it = put.body.data.inventory.find((i) => i.id === it.id);
+  assert.equal(it.curse.revealed, true);
+  assert.match(it.notes, /Maldito/);
+  const msgs = (await pl('GET', '/api/messages')).body;
+  assert.ok(msgs.some((m) => m.event?.type === 'cursed' && m.characterId === id));
+  // try to take it off
+  mine = (await pl('GET', `/api/characters/${id}`)).body;
+  const off = mine.data.inventory.map((i) => (i.id === it.id ? { ...i, slot: '' } : i));
+  await pl('PUT', `/api/characters/${id}`, { version: mine.version, data: { ...mine.data, inventory: off } });
+  mine = (await pl('GET', `/api/characters/${id}`)).body;
+  assert.equal(mine.data.inventory.find((i) => i.id === it.id).slot, 'acc.finger.1');
+});

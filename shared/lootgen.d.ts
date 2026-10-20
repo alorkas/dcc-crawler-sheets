@@ -1,7 +1,21 @@
-import type { BonusKey, Fits, ItemType, Rarity } from './items.js';
+import type { BonusKey, Curse, Fits, ItemType, Rarity } from './items.js';
 
 export type Quality = 'common' | 'bronze' | 'silver' | 'gold' | 'platinum' | 'legendary' | 'celestial';
-export type GenKind = 'armor' | 'weapon' | 'shield' | 'accessory' | 'consumable' | 'ammo';
+export type GenKind = 'armor' | 'weapon' | 'shield' | 'accessory' | 'consumable' | 'ammo' | 'crafting';
+export type GenPart = 'prefix' | 'base' | 'adjective' | 'role' | 'theme' | 'curse';
+export type GenInfo = {
+  floor: number;
+  quality: Quality;
+  kind: GenKind;
+  base: string;
+  prefix: string;
+  adjective: string;
+  role: string;
+  theme: string;
+  curse: string;
+  seed: number;
+  part: string;
+};
 export type GeneratedItem = {
   item: string;
   qty: string;
@@ -20,25 +34,43 @@ export type GeneratedItem = {
   maxCharges: string;
   ability: string;
   bonus: Record<BonusKey, string>;
-  gen: { floor: number; quality: Quality; kind: GenKind; base: string; prefix: string; role: string; theme: string };
+  curse: Curse | null;
+  gen: GenInfo;
 };
+export type Affix = { lvl: number; on: string[]; bonus: [string, number][]; text?: string; ability?: boolean };
 export const QUALITIES: Quality[];
 export const GEN_KINDS: GenKind[];
+export const PARTS: GenPart[];
+export const PREFIXES: (Affix & { word: string })[];
+export const ADJECTIVES: (Affix & { word: string | Record<string, string> })[];
+export const CONSUMABLE_ADJECTIVES: (Affix & { word: string | Record<string, string>; potency: number })[];
+export const ROLES: (Affix & { name: string })[];
+export const THEMES: (Affix & { name: string })[];
+export const CURSES: { text: string; bonus: [string, number][] }[];
+export const BASES: { name: string; g: 'm' | 'f'; n: 's' | 'p'; kind: GenKind; fits?: string }[];
+export const JUNK: { name: string; g: 'm' | 'f'; n: 's' | 'p'; kind: 'crafting'; lvl: number }[];
 export function qualityOdds(floor: number): Record<Quality, number>;
 export function rollQuality(floor: number, rng?: () => number): Quality;
 export function agree(adj: string | Record<string, string>, g: 'm' | 'f', n: 's' | 'p'): string;
+export function glue(prefix: string, name: string): string;
 export function makeRng(seed?: number): () => number;
-export function generateItem(opts?: {
+export type GenOptions = {
   floor?: number;
   quality?: Quality | '';
-  kind?: GenKind | 'equipment' | '';
+  kind?: GenKind | 'equipment' | 'gear' | '';
   part?: string;
+  filter?: (base: { kind: string; skill?: string; base?: string; name: string }) => boolean;
+  fixed?: Partial<Record<GenPart | 'quality', string>>;
+  current?: Partial<Record<GenPart, string>>;
   rng?: () => number;
-}): GeneratedItem;
+  seed?: number;
+};
+export function generateItem(opts?: GenOptions): GeneratedItem;
+export function partsOf(gen: GenInfo): Record<GenPart | 'quality', string>;
+export function rerollItem(gen: GenInfo, locks?: Partial<Record<GenPart, boolean>>, rng?: () => number): GeneratedItem;
+export function changePart(gen: GenInfo, part: GenPart, mode: 'reroll' | 'remove', rng?: () => number): GeneratedItem;
+export function generateBox(opts?: { tier?: string; kind?: string; floor?: number; rng?: () => number }): {
+  items: GeneratedItem[];
+  gold: number;
+};
 export function combinations(): number;
-export type Affix = { lvl: number; on: string[]; bonus: [string, number][]; text?: string; ability?: boolean };
-export const PREFIXES: (Affix & { word: string | Record<string, string> })[];
-export const ROLES: (Affix & { name: string })[];
-export const THEMES: (Affix & { name: string })[];
-export const CONSUMABLE_PREFIXES: (Affix & { word: string | Record<string, string>; potency: number })[];
-export const BASES: { name: string; g: 'm' | 'f'; n: 's' | 'p'; kind: GenKind; fits?: string }[];

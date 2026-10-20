@@ -104,8 +104,14 @@ export default function SheetPage() {
         const sources = sourcesRef.current;
         sourcesRef.current = { hp: [], mana: [] };
         const res = await api.saveCharacter(charId, snapshot, versionRef.current, sources);
+        // the server changed the sheet while saving (e.g. a curse showed up): take its version
+        if (res.serverChanged && res.data && !dirtyRef.current) {
+          applyServer(res as Character);
+          return;
+        }
         versionRef.current = res.version;
-        setMeta((m) => (m ? { ...m, ...res } : m));
+        const { data: _ignored, ...summary } = res; // eslint-disable-line @typescript-eslint/no-unused-vars
+        setMeta((m) => (m ? { ...m, ...summary } : m));
         setSaveError(null);
         setSaveState(dirtyRef.current ? 'dirty' : 'saved');
       } catch (e) {
@@ -124,7 +130,7 @@ export default function SheetPage() {
     savingRef.current = p;
     await p;
     savingRef.current = null;
-  }, [charId]);
+  }, [charId, applyServer]);
 
   // debounced autosave
   useEffect(() => {

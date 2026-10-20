@@ -32,7 +32,9 @@ export type Item = {
   maxCharges: string;
   ability: string;
   bonus: Record<BonusKey, string>;
+  curse: Curse | null;
 };
+export type Curse = { text: string; bonus: Partial<Record<BonusKey, string>>; revealed: boolean };
 export type BonusKey = 'damage' | 'dr' | 'evade' | 'str' | 'int' | 'con' | 'dex' | 'cha';
 export const BONUS_KEYS: BonusKey[];
 export const STAT_BONUS_KEYS: ('str' | 'int' | 'con' | 'dex' | 'cha')[];
@@ -90,3 +92,13 @@ export function spendOne(
   hotSlots: string[],
   itemId: string,
 ): { inventory: Item[]; hotSlots: string[]; left: number; charges: number | null } | null;
+export const CURSE_MARK: string;
+export function applyCurse<T extends Partial<Item>>(it: T): T;
+export function removeCurse<T extends Partial<Item>>(it: T): T;
+export function isStuck(it: Partial<Item> | undefined): boolean;
+export function hideCurses<T>(data: T): T;
+export function mergeCurses(
+  stored: Item[],
+  incoming: Item[],
+  isAdmin: boolean,
+): { inventory: Item[]; revealed: string[]; changed: boolean };

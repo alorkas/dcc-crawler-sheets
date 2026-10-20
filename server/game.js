@@ -16,6 +16,7 @@ import {
   tickRound,
 } from '../shared/combat.js';
 import {
+  hideCurses,
   hotlistable,
   hotlistSpells,
   isSpellRef,
@@ -968,7 +969,12 @@ export function mountGame(app, { db, auth, adminOnly, loadChar, live, hooks = {}
       gmOnly: !req.char.party_since,
     });
     if (inFight) putEnc(enc);
-    res.json({ left, applied, data: mine, version: charRow(req.char.id).version });
+    res.json({
+      left,
+      applied,
+      data: req.user.is_admin ? mine : hideCurses(mine),
+      version: charRow(req.char.id).version,
+    });
   });
 
   // Put an item on a Hotlist slot ({ slot, itemId }; '' empties it). In combat this takes an Action and is logged,
@@ -1022,7 +1028,7 @@ export function mountGame(app, { db, auth, adminOnly, loadChar, live, hooks = {}
       });
       messageId = msg?.id ?? null;
     }
-    res.json({ data: mine, version: charRow(req.char.id).version, messageId });
+    res.json({ data: req.user.is_admin ? mine : hideCurses(mine), version: charRow(req.char.id).version, messageId });
   });
 
   /** Give back the Action an undone entry used (only within the same round of the same fight). */

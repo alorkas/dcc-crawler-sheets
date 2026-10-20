@@ -12,7 +12,7 @@ import { mountRewards } from './rewards.js';
 import { mountMaps } from './maps.js';
 import { backupNow, listBackups } from './backup.js';
 import { applyPlay } from '../shared/lockRules.js';
-import { SLOT_KEYS } from '../shared/items.js';
+import { hideCurses, mergeCurses, SLOT_KEYS } from '../shared/items.js';
 
 const COOKIE = 'dcc_session';
 const VIEW_COOKIE = 'dcc_view_as';
@@ -46,8 +46,10 @@ export function createApp({
 
   const publicUser = (u) => ({ id: u.id, username: u.username, isAdmin: !!u.is_admin });
 
-  const toChar = (row, withData = true) => {
-    const data = JSON.parse(row.data || '{}');
+  /** A character for the client; `viewer` (the request's user) decides whether hidden curses are shown. */
+  const toChar = (row, withData = true, viewer = null) => {
+    const raw = JSON.parse(row.data || '{}');
+    const data = viewer?.is_admin ? raw : hideCurses(raw);
     const out = {
       id: row.id,
       ownerId: row.owner_id,
@@ -244,10 +246,10 @@ export function createApp({
     }
     const data = req.body?.data && typeof req.body.data === 'object' ? req.body.data : {};
     const r = db.prepare('INSERT INTO characters (owner_id, data) VALUES (?, ?)').run(ownerId, JSON.stringify(data));
-    res.status(201).json(toChar(q.charById.get(r.lastInsertRowid)));
+    res.status(201).json(toChar(q.charById.get(r.lastInsertRowid), true, req.user));
   });
 
-  app.get('/api/characters/:id', auth, loadChar, (req, res) => res.json(toChar(req.char)));
+  app.get('/api/characters/:id', auth, loadChar, (req, res) => res.json(toChar(req.char, true, req.user)));
 
   app.put('/api/characters/:id', auth, loadChar, (req, res) => {
     const { data, version } = req.body || {};
@@ -256,7 +258,11 @@ export function createApp({
     if (Number(version) !== req.char.version) {
       return res
         .status(409)
-        .json({ error: 'Sheet was changed elsewhere', code: 'sheet_conflict', character: toChar(req.char) });
+        .json({
+          error: 'Sheet was changed elsewhere',
+          code: 'sheet_conflict',
+          character: toChar(req.char, true, req.user),
+        });
     }
     // A locked sheet only takes the play fields (health, mana, buffs, debuffs, advancement marks);
     // everything else is kept as stored. One-time format upgrades (higher schema) are saved whole.
@@ -265,13 +271,29 @@ export function createApp({
     // only the GM changes how many Equipment/Accessory slots a crawler has
     if (!req.user.is_admin)
       next = { ...next, slotCounts: stored.slotCounts ?? Object.fromEntries(SLOT_KEYS.map((k) => [k, ''])) };
+    // curses stay with their items; equipping a cursed one reveals it, and a revealed one can't be taken off
+    const cursed = mergeCurses(
+      stored.inventory || [],
+      Array.isArray(next.inventory) ? next.inventory : [],
+      !!req.user.is_admin,
+    );
+    if (Array.isArray(next.inventory)) next = { ...next, inventory: cursed.inventory };
     db.prepare(`UPDATE characters SET data = ?, version = version + 1, updated_at = datetime('now') WHERE id = ?`).run(
       JSON.stringify(next),
       req.char.id,
     );
     const sources = req.body?.sources && typeof req.body.sources === 'object' ? req.body.sources : {};
     live.characterChanged(req.char, stored, next, { version: req.char.version + 1, sources, actorId: req.user.id });
-    res.json(toChar(q.charById.get(req.char.id), false));
+    for (const item of cursed.revealed)
+      live.postEvent({
+        ownerId: req.char.owner_id,
+        characterId: req.char.id,
+        charName: String(next.name || '').slice(0, 80),
+        event: { type: 'cursed', item: String(item).slice(0, 120) },
+        gmOnly: !req.char.party_since,
+      });
+    // when the server changed the sheet (a curse showed up or held on), the client gets the result back
+    res.json({ ...toChar(q.charById.get(req.char.id), cursed.changed, req.user), serverChanged: cursed.changed });
   });
 
   app.post('/api/characters/:id/lock', auth, loadChar, (req, res) => {

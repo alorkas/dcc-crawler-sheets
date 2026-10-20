@@ -7,6 +7,7 @@ import {
   fitsSlot,
   gearBonus,
   isBlankItem,
+  isStuck,
   sanitizeEquipped,
   slotList,
   type SlotInfo,
@@ -97,6 +98,7 @@ function SlotBox({ slot, onOpen, compact }: { slot: SlotInfo; onOpen: (i: number
   const { data, update, playLocked } = useSheet();
   const i = data.inventory.findIndex((it) => it.slot === slot.id);
   const it = i >= 0 ? data.inventory[i] : null;
+  const { user } = useAuth();
   const kindLbl = slot.kind === 'acc' ? t('itemType.accessory') : t('itemType.equipment');
   const many = (DEFAULT_SLOT_COUNTS[slot.key] ?? 1) > 1 || slot.n > 1;
   const label = compact || many ? `${kindLbl} ${slot.n}` : kindLbl;
@@ -117,7 +119,12 @@ function SlotBox({ slot, onOpen, compact }: { slot: SlotInfo; onOpen: (i: number
             <strong>{it.item}</strong>
             {!compact && bonusText(it, t) && <span className="dim tiny"> {bonusText(it, t)}</span>}
           </button>
-          {!playLocked && (
+          {it.curse?.revealed && (
+            <span className="curse-mark" title={`${t('curse.stuck')} ${it.curse.text}`}>
+              ☠
+            </span>
+          )}
+          {!playLocked && !(isStuck(it) && !user?.isAdmin) && (
             <button
               type="button"
               className="icon-btn small"

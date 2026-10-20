@@ -15,6 +15,8 @@ import {
   hotlistSpells,
   isBlankItem,
   isSpellRef,
+  isStuck,
+  removeCurse,
   isWorn,
   setHotSlot,
   slotKeyOf,
@@ -32,6 +34,17 @@ import { Area, Input, Section, useSheet } from './fields';
 import { UseItemControls } from './QuickItems';
 
 type T = ReturnType<typeof useI18n>['t'];
+
+/** A cursed item: the player sees it once it's revealed; the GM sees it before, marked as hidden. */
+export function CursePill({ it }: { it: Item }) {
+  const { t } = useI18n();
+  if (!it.curse) return null;
+  return (
+    <span className={`pill tiny-pill curse-pill ${it.curse.revealed ? '' : 'hidden'}`} title={it.curse.text}>
+      ☠ {t(it.curse.revealed ? 'curse.pill' : 'curse.pillHidden')}
+    </span>
+  );
+}
 
 /** "Head", "Head · Accessory", "Finger 3", "Main hand". */
 export function slotLabel(id: string, t: T): string {
@@ -263,6 +276,7 @@ function InventoryRow({
 }) {
   const { data, playLocked, update, charId, der, runServer } = useSheet();
   const { t } = useI18n();
+  const { user } = useAuth();
   const [msg, setMsg] = useState('');
   const hot = useHotlistChange();
   const it = data.inventory[i];
@@ -313,6 +327,7 @@ function InventoryRow({
         {!blank && (
           <span className="inv-tags">
             {it.slot && <span className="pill tiny-pill gold">{slotLabel(it.slot, t)}</span>}
+            {it.curse && <CursePill it={it} />}
             {it.rarity && (
               <span className={`pill tiny-pill rar-pill ${rarityClass(it.rarity)}`}>
                 {t(`rarity.${it.rarity}` as MsgKey)}
@@ -370,7 +385,7 @@ function InventoryRow({
             {t('fill.short')}
           </button>
         )}
-        {!playLocked && (
+        {!playLocked && !(isStuck(it) && !user?.isAdmin) && (
           <button
             type="button"
             className="row-del"
@@ -430,9 +445,11 @@ export function ItemNameList() {
 export function ItemDialog({ i, onClose }: { i: number; onClose: () => void }) {
   const { t } = useI18n();
   const { data, set, update, playLocked } = useSheet();
+  const { user } = useAuth();
   const hot = useHotlistChange();
   const it = data.inventory[i];
   if (!it) return null;
+  const stuck = isStuck(it) && !user?.isAdmin;
   const type = it.type;
   const worn = isWorn(type);
   const held = type === 'equipment' && it.fits === 'held';
@@ -511,7 +528,8 @@ export function ItemDialog({ i, onClose }: { i: number; onClose: () => void }) {
                 <select
                   className="in sel"
                   value={it.slot}
-                  disabled={!it.fits}
+                  disabled={!it.fits || stuck}
+                  title={stuck ? t('curse.stuck') : undefined}
                   onChange={(e) => update((d) => ({ ...d, inventory: equipItem(d.inventory, it.id, e.target.value) }))}
                 >
                   <option value="">{t('inv.notEquipped')}</option>
@@ -531,6 +549,24 @@ export function ItemDialog({ i, onClose }: { i: number; onClose: () => void }) {
             </>
           )}
 
+          {it.curse && (
+            <div className="field span-2 curse-box">
+              <span>
+                ☠ <strong>{t(it.curse.revealed ? 'curse.active' : 'curse.hidden')}</strong> {it.curse.text}
+              </span>
+              {user?.isAdmin && !playLocked && (
+                <button
+                  type="button"
+                  className="btn small ghost"
+                  onClick={() =>
+                    update((d) => ({ ...d, inventory: d.inventory.map((x) => (x.id === it.id ? removeCurse(x) : x)) }))
+                  }
+                >
+                  {t('curse.lift')}
+                </button>
+              )}
+            </div>
+          )}
           {held && (
             <div className="field span-2 item-flags">
               <label className="gm-check">

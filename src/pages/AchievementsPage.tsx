@@ -17,8 +17,8 @@ import { useLive } from '../lib/live';
 import { ACCESSORY_FITS, BONUS_KEYS, EQUIP_FITS, ITEM_TYPES, RARITIES } from '../../shared/items.js';
 import { BoxChip } from '../components/Achievements';
 import { ItemNameList, rarityClass } from '../components/Inventory';
-import { generateItem } from '../../shared/lootgen.js';
-import { toRewardItem, useLootStash, useWorldFloor } from './GeneratorPage';
+import { generateBox, generateItem } from '../../shared/lootgen.js';
+import { goldItem, toRewardItem, useLootStash, useWorldFloor } from './GeneratorPage';
 
 const newItem = (): RewardItem => ({
   item: '',
@@ -426,60 +426,18 @@ const fromCollection = (h: HomebrewItem, qty = '1'): RewardItem => ({
   bonus: { ...newItem().bonus, ...h.bonus },
 });
 const pick = <T,>(list: T[]) => list[Math.floor(Math.random() * list.length)];
-/** Book staples by tier (Core Rulebook "Loot Boxes"), plus gold. */
-function staples(tier: string): RewardItem[] {
-  const d = (n: number) => 1 + Math.floor(Math.random() * n);
-  // the book's staples, named and described in Spanish (the table plays in Spanish)
-  const item = (name: string, qty: number, notes = '', type: RewardItem['type'] = 'consumable'): RewardItem => ({
-    ...newItem(),
-    item: name,
-    qty: String(qty),
-    type,
-    notes,
-  });
-  const oro = (n: number) => item('Oro', n, '', 'other');
-  if (tier === 'bronze')
-    return [
-      pick([
-        item('Poción de curación', 1, 'Cura 5 casillas de salud.'),
-        item('Venda', d(6), 'Gasta una Acción: quita Rastro de sangre.'),
-        item('Antorcha', 10, 'Luz brillante 20 pies y tenue 20 más; dura como una hora.', 'special'),
-        item('Poción de maná', 1, 'Recupera todo el maná (1 Acción para pimplártela).'),
-      ]),
-      oro(d(10)),
-    ];
-  if (tier === 'silver')
-    return [
-      pick([
-        item('Poción de curación buena', 1, 'Cura 6 casillas de salud.'),
-        item('Antídoto', 2, 'Quita el veneno.'),
-        item('Poción de curar mascota', 1, 'Cura a tu mascota como una poción de curación.'),
-      ]),
-      oro(d(10) * 10),
-    ];
-  return [
-    pick([
-      item('Poción de curación de oro', 1, 'Cura 7 casillas de salud y arregla una Lesión menor.'),
-      item('Poción de curación buena', 2, 'Cura 6 casillas de salud.'),
-    ]),
-    oro(d(10) * 100),
-  ];
-}
 /**
- * A box filled the way the book describes it: one magic item of the box's tier (or the best below it), a
- * consumable from the collection, a book staple, and gold.
+ * A whole box from the loot generator (items that fit the box's kind, and gold); now and then the main item comes
+ * from the campaign's collection instead.
  */
-function randomBox(tier: string, all: HomebrewItem[]): RewardItem[] {
+function randomBox(tier: string, kind: string, floor: number, all: HomebrewItem[]): RewardItem[] {
   const rank = (r: string) => TIER_ORDER.indexOf(r);
-  const gear = all.filter((h) => h.type !== 'consumable');
-  let pool: HomebrewItem[] = [];
-  for (let r = rank(tier); r >= 0 && !pool.length; r--) pool = gear.filter((h) => rank(h.rarity) === r);
-  const cons = all.filter((h) => h.type === 'consumable' && rank(h.rarity) <= Math.max(0, rank(tier)));
-  return [
-    ...(pool.length ? [fromCollection(pick(pool))] : []),
-    ...(cons.length ? [fromCollection(pick(cons), String(1 + Math.floor(Math.random() * 3)))] : []),
-    ...staples(tier),
-  ];
+  const box = generateBox({ tier, kind, floor });
+  const items = box.items.map(toRewardItem);
+  const gear = all.filter((h) => h.type !== 'consumable' && rank(h.rarity) === rank(tier));
+  const first = items.findIndex((it) => it.type === 'equipment' || it.type === 'accessory');
+  if (gear.length && first >= 0 && Math.random() < 0.4) items[first] = fromCollection(pick(gear));
+  return [...items, goldItem(box.gold)];
 }
 
 export function RewardEditor({ value, onChange }: { value: Reward; onChange: (r: Reward) => void }) {
@@ -686,7 +644,7 @@ export function RewardEditor({ value, onChange }: { value: Reward; onChange: (r:
                 type="button"
                 className="btn small"
                 title={t('loot.randomHint')}
-                onClick={() => setBox(bi, { ...b, items: randomBox(b.tier, collection) })}
+                onClick={() => setBox(bi, { ...b, items: randomBox(b.tier, b.kind, worldFloor, collection) })}
               >
                 🎲 {t('loot.random')}
               </button>

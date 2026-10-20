@@ -46,6 +46,16 @@ export function cleanItem(raw) {
     maxCharges: clip(it.maxCharges, 4),
     ability: clip(it.ability, 500),
     bonus: Object.fromEntries(BONUS_KEYS.map((k) => [k, clip(bonus[k], 8)])),
+    curse:
+      it.curse && typeof it.curse === 'object' && String(it.curse.text || '').trim()
+        ? {
+            text: clip(it.curse.text, 300),
+            bonus: Object.fromEntries(
+              BONUS_KEYS.filter((k) => it.curse.bonus?.[k]).map((k) => [k, clip(it.curse.bonus[k], 8)]),
+            ),
+            revealed: !!it.curse.revealed,
+          }
+        : null,
     slot: base.slot,
     hot: false,
   };
@@ -64,6 +74,16 @@ export function cleanReward(raw) {
   }));
   return { boxes, note: clip(r.note, 1000).trim() };
 }
+
+/** Opened boxes as a player sees them: curses not yet revealed are invisible. */
+const hideBoxCurses = (o) =>
+  o && {
+    ...o,
+    boxes: (o.boxes || []).map((b) => ({
+      ...b,
+      items: (b.items || []).map((it) => (it?.curse && !it.curse.revealed ? { ...it, curse: null } : it)),
+    })),
+  };
 
 const hasReward = (r) => !!(r && (r.boxes?.length || r.note));
 
@@ -287,14 +307,15 @@ export function mountRewards(app, { db, auth, adminOnly, loadChar, live }) {
         claimedAt: w.claimed_at,
         hasReward: hasReward(reward),
         // the boxes' contents stay secret until claimed (the GM sees them)
-        reward:
-          admin || w.claimed_at
-            ? reward
+        reward: admin
+          ? reward
+          : w.claimed_at
+            ? hideBoxCurses(reward)
             : {
                 boxes: (reward.boxes || []).map(({ tier, kind, label }) => ({ tier, kind, label, items: [] })),
                 note: '',
               },
-        opened,
+        opened: admin ? opened : hideBoxCurses(opened),
       };
     });
     res.json({ ...settings(), awards });
@@ -385,6 +406,6 @@ export function mountRewards(app, { db, auth, adminOnly, loadChar, live }) {
       gmOnly: !row.party_since,
     });
     notify([row.id]);
-    res.json({ id: w.id, opened });
+    res.json({ id: w.id, opened: req.user.is_admin ? opened : hideBoxCurses(opened) });
   });
 }

@@ -178,6 +178,7 @@ export type LogEvent =
   | { type: 'interrupt'; kind: 'catch'; ally: string; attack: string }
   | { type: 'reward'; title: string; boxes: Pick<LootBox, 'tier' | 'kind' | 'label'>[] }
   | { type: 'gift'; items: { item: string; rarity: string; qty: string }[] }
+  | { type: 'cursed'; item: string }
   | { type: 'world'; action: 'floor'; from: number; to: number; name: string; nameEs: string }
   | {
       type: 'declare';
@@ -416,7 +417,9 @@ export const BOX_KINDS: BoxKind[] = [
 ];
 /** An item inside a loot box (`special` gets the spotlight when it's opened). */
 export type RewardItem = Pick<Item, 'item' | 'qty' | 'notes' | 'type' | 'rarity' | 'unique' | 'skill' | 'upgrades'> &
-  Partial<Pick<Item, 'fits' | 'twoHanded' | 'ranged' | 'ammo' | 'ammoType' | 'charges' | 'maxCharges' | 'ability'>> & {
+  Partial<
+    Pick<Item, 'fits' | 'twoHanded' | 'ranged' | 'ammo' | 'ammoType' | 'charges' | 'maxCharges' | 'ability' | 'curse'>
+  > & {
     bonus: Item['bonus'];
     special: boolean;
   };
@@ -500,7 +503,11 @@ export const api = {
     request<Character>('POST', '/api/characters', { data, ownerId }),
   getCharacter: (id: number) => request<Character>('GET', `/api/characters/${id}`),
   saveCharacter: (id: number, data: SheetData, version: number, sources?: HpManaSources) =>
-    request<CharacterSummary>('PUT', `/api/characters/${id}`, { data, version, sources }),
+    request<CharacterSummary & { data?: Partial<SheetData>; serverChanged?: boolean }>('PUT', `/api/characters/${id}`, {
+      data,
+      version,
+      sources,
+    }),
   setLocked: (id: number, locked: boolean) =>
     request<CharacterSummary>('POST', `/api/characters/${id}/lock`, { locked }),
   deleteCharacter: (id: number) => request('DELETE', `/api/characters/${id}`),

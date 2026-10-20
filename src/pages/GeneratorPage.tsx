@@ -1,38 +1,65 @@
 import { useEffect, useMemo, useState } from 'react';
-import { api, type CharacterSummary, type RewardItem } from '../lib/api';
+import { api, BOX_KINDS, type BoxKind, type CharacterSummary, type RewardItem } from '../lib/api';
 import { useI18n, type MsgKey } from '../lib/i18n';
 import {
   QUALITIES,
+  changePart,
   combinations,
+  generateBox,
   generateItem,
   qualityOdds,
+  rerollItem,
   type GeneratedItem,
   type GenKind,
+  type GenPart,
   type Quality,
 } from '../../shared/lootgen.js';
+import { emptyItem } from '../../shared/items.js';
 import { bonusText, rarityClass } from '../components/Inventory';
+import { boxName } from '../components/Achievements';
 import type { Item } from '../lib/sheet';
 
 /* GM: the loot generator. Pick a Floor (the odds of each quality follow it) or a quality, what kind of item and
-   where it's worn, and roll. Each result can be rerolled, renamed, given to a crawler or kept in the stash (which
-   the loot box editor can also use). */
+   where it's worn, and roll. Each result can be rerolled (keeping the parts you lock), have one part changed or
+   removed, be renamed, given to a crawler or kept in the stash (which the loot box editor can also use). Whole loot
+   boxes can be generated too. */
 
-type Kind = GenKind | 'equipment' | '';
-const KINDS: Kind[] = ['', 'equipment', 'armor', 'weapon', 'shield', 'accessory', 'consumable', 'ammo'];
-const PARTS: Record<string, string[]> = {
+type Kind = GenKind | 'equipment' | 'gear' | '';
+const KINDS: Kind[] = [
+  '',
+  'gear',
+  'equipment',
+  'armor',
+  'weapon',
+  'shield',
+  'accessory',
+  'consumable',
+  'ammo',
+  'crafting',
+];
+const BODY: Record<string, string[]> = {
   armor: ['head', 'shoulders', 'chest', 'bracers', 'hands', 'back', 'waist', 'pants', 'feet'],
   accessory: ['head', 'shoulders', 'chest', 'bracers', 'hands', 'back', 'waist', 'pants', 'feet', 'neck', 'finger'],
 };
-type Rolled = GeneratedItem & { uid: number };
+type Locks = Partial<Record<GenPart, boolean>>;
+type Rolled = GeneratedItem & { uid: number; locks: Locks };
 let uidSeq = 0;
-const withUid = (it: GeneratedItem): Rolled => ({ ...it, uid: ++uidSeq });
+const withUid = (it: GeneratedItem, locks: Locks = {}): Rolled => ({ ...it, uid: ++uidSeq, locks });
 
 /** What a generated item looks like as a reward/inventory item (no generator details). */
 export function toRewardItem(it: GeneratedItem | Rolled): RewardItem {
   // eslint-disable-next-line @typescript-eslint/no-unused-vars
-  const { gen, uid, ...rest } = it as Rolled;
+  const { gen, uid, locks, ...rest } = it as Rolled;
   return { ...rest, special: false };
 }
+/** Gold as a reward item. */
+export const goldItem = (qty: number): RewardItem => ({
+  ...emptyItem(),
+  item: 'Oro',
+  qty: String(qty),
+  type: 'other',
+  special: false,
+});
 
 /** The GM's stash of generated items (shared with the loot box editor). */
 export function useLootStash() {
@@ -66,6 +93,8 @@ export function useWorldFloor(): number {
   return floor;
 }
 
+type Box = { uid: number; tier: Quality; kind: BoxKind; items: Rolled[]; gold: number };
+
 export default function GeneratorPage() {
   const { t, err } = useI18n();
   const worldFloor = useWorldFloor();
@@ -75,6 +104,9 @@ export default function GeneratorPage() {
   const [part, setPart] = useState('');
   const [count, setCount] = useState(6);
   const [results, setResults] = useState<Rolled[]>([]);
+  const [boxTier, setBoxTier] = useState<Quality>('bronze');
+  const [boxKind, setBoxKind] = useState<BoxKind>('adventurer');
+  const [boxes, setBoxes] = useState<Box[]>([]);
   const [crawlers, setCrawlers] = useState<CharacterSummary[]>([]);
   const [msg, setMsg] = useState<{ text: string; bad?: boolean } | null>(null);
   const stash = useLootStash();
@@ -88,15 +120,13 @@ export default function GeneratorPage() {
       .catch(() => {});
   }, []);
 
-  const opts = { floor: f, quality, kind, part };
-  const roll = () => setResults(Array.from({ length: count }, () => withUid(generateItem(opts))));
-  const reroll = (uid: number) =>
-    setResults((rs) =>
-      rs.map((r) =>
-        r.uid === uid ? withUid(generateItem({ floor: f, quality: r.gen.quality, kind: r.gen.kind, part })) : r,
-      ),
-    );
-  const rename = (uid: number, item: string) => setResults((rs) => rs.map((r) => (r.uid === uid ? { ...r, item } : r)));
+  const roll = () =>
+    setResults(Array.from({ length: count }, () => withUid(generateItem({ floor: f, quality, kind, part }))));
+  /** Replace an item (in the results or in a generated box). */
+  const replace = (uid: number, fn: (r: Rolled) => Rolled) => {
+    setResults((rs) => rs.map((r) => (r.uid === uid ? fn(r) : r)));
+    setBoxes((bs) => bs.map((b) => ({ ...b, items: b.items.map((r) => (r.uid === uid ? fn(r) : r)) })));
+  };
   const flash = (text: string, bad = false) => {
     setMsg({ text, bad });
     setTimeout(() => setMsg(null), 3000);
@@ -112,6 +142,28 @@ export default function GeneratorPage() {
       return false;
     }
   };
+  const cardProps = (r: Rolled) => ({
+    it: r,
+    crawlers,
+    onReroll: () => replace(r.uid, (x) => withUid(rerollItem(x.gen, x.locks), x.locks)),
+    onPart: (p: GenPart, mode: 'reroll' | 'remove') =>
+      replace(r.uid, (x) => withUid(changePart(x.gen, p, mode), x.locks)),
+    onLock: (p: GenPart) => replace(r.uid, (x) => ({ ...x, locks: { ...x.locks, [p]: !x.locks[p] } })),
+    onRename: (name: string) => replace(r.uid, (x) => ({ ...x, item: name })),
+    onStash: () => {
+      stash.save([...stash.items, toRewardItem(r)]);
+      flash(t('gen.stashed'));
+    },
+    onGive: (to: number) => give([toRewardItem(r)], to),
+  });
+  const makeBox = () => {
+    const b = generateBox({ tier: boxTier, kind: boxKind, floor: f });
+    setBoxes((bs) => [
+      { uid: ++uidSeq, tier: boxTier, kind: boxKind, items: b.items.map((x) => withUid(x)), gold: b.gold },
+      ...bs,
+    ]);
+  };
+  const boxItems = (b: Box) => [...b.items.map(toRewardItem), goldItem(b.gold)];
 
   return (
     <div className="page generator-page">
@@ -159,12 +211,12 @@ export default function GeneratorPage() {
                 ))}
               </select>
             </label>
-            {PARTS[kind] && (
+            {BODY[kind] && (
               <label className="field">
                 <span className="lbl">{t('gen.part')}</span>
                 <select className="in sel" value={part} onChange={(e) => setPart(e.target.value)}>
                   <option value="">{t('gen.anyPart')}</option>
-                  {PARTS[kind].map((p) => (
+                  {BODY[kind].map((p) => (
                     <option key={p} value={p}>
                       {t(`part.${p}` as MsgKey)}
                     </option>
@@ -203,25 +255,79 @@ export default function GeneratorPage() {
               </div>
             </div>
           )}
+          <div className="gen-box-controls">
+            <span className="lbl">{t('gen.boxTitle')}</span>
+            <select className="in sel" value={boxTier} onChange={(e) => setBoxTier(e.target.value as Quality)}>
+              {QUALITIES.filter((q) => q !== 'common').map((q) => (
+                <option key={q} value={q}>
+                  {t(`rarity.${q}` as MsgKey)}
+                </option>
+              ))}
+            </select>
+            <select className="in sel" value={boxKind} onChange={(e) => setBoxKind(e.target.value as BoxKind)}>
+              {BOX_KINDS.map((k) => (
+                <option key={k} value={k}>
+                  {t(`box.kind.${k}` as MsgKey)}
+                </option>
+              ))}
+            </select>
+            <button type="button" className="btn small" onClick={makeBox}>
+              ▣ {t('gen.box')}
+            </button>
+          </div>
           {msg && <p className={`small ${msg.bad ? 'error' : 'ok'}`}>{msg.text}</p>}
         </div>
       </section>
 
+      {boxes.map((b) => (
+        <section key={b.uid} className={`card gen-boxed ${rarityClass(b.tier)}`}>
+          <header className="card-head">
+            <h2>
+              ▣ {boxName(t, { tier: b.tier as never, kind: b.kind, label: '' })}{' '}
+              <span className="dim small">· {t('gen.gold', { n: b.gold.toLocaleString() })}</span>
+            </h2>
+          </header>
+          <div className="card-body">
+            <div className="gen-actions">
+              <GiveTo
+                crawlers={crawlers}
+                label={t('gen.giveAll')}
+                onGive={async (to) => {
+                  if (await give(boxItems(b), to)) setBoxes((bs) => bs.filter((x) => x.uid !== b.uid));
+                }}
+              />
+              <button
+                type="button"
+                className="btn small ghost"
+                onClick={() => {
+                  stash.save([...stash.items, ...b.items.map(toRewardItem)]);
+                  setBoxes((bs) => bs.filter((x) => x.uid !== b.uid));
+                  flash(t('gen.stashed'));
+                }}
+              >
+                📦 {t('gen.allToStash')}
+              </button>
+              <button
+                type="button"
+                className="btn small ghost"
+                onClick={() => setBoxes((bs) => bs.filter((x) => x.uid !== b.uid))}
+              >
+                × {t('gen.discard')}
+              </button>
+            </div>
+            <div className="gen-results">
+              {b.items.map((r) => (
+                <GenCard key={r.uid} {...cardProps(r)} />
+              ))}
+            </div>
+          </div>
+        </section>
+      ))}
+
       {results.length > 0 && (
         <div className="gen-results">
           {results.map((r) => (
-            <GenCard
-              key={r.uid}
-              it={r}
-              crawlers={crawlers}
-              onReroll={() => reroll(r.uid)}
-              onRename={(name) => rename(r.uid, name)}
-              onStash={() => {
-                stash.save([...stash.items, toRewardItem(r)]);
-                flash(t('gen.stashed'));
-              }}
-              onGive={(to) => give([toRewardItem(r)], to)}
-            />
+            <GenCard key={r.uid} {...cardProps(r)} />
           ))}
         </div>
       )}
@@ -244,7 +350,14 @@ export default function GeneratorPage() {
                     <span className={`pill tiny-pill rar-pill ${rarityClass(it.rarity)}`}>
                       {t(`rarity.${it.rarity || 'common'}` as MsgKey)}
                     </span>{' '}
-                    <strong>{it.item}</strong> <span className="dim tiny">{bonusText(it as unknown as Item, t)}</span>
+                    <strong>{it.item}</strong>
+                    {it.curse && (
+                      <span className="curse-mark" title={it.curse.text}>
+                        {' '}
+                        ☠
+                      </span>
+                    )}{' '}
+                    <span className="dim tiny">{bonusText(it as unknown as Item, t)}</span>
                   </span>
                   <GiveTo
                     crawlers={crawlers}
@@ -271,10 +384,15 @@ export default function GeneratorPage() {
   );
 }
 
+/** The parts of a generated item, each with lock / change / remove. */
+const PART_ORDER: GenPart[] = ['prefix', 'base', 'adjective', 'role', 'theme'];
+
 function GenCard({
   it,
   crawlers,
   onReroll,
+  onPart,
+  onLock,
   onRename,
   onStash,
   onGive,
@@ -282,15 +400,22 @@ function GenCard({
   it: Rolled;
   crawlers: CharacterSummary[];
   onReroll: () => void;
+  onPart: (p: GenPart, mode: 'reroll' | 'remove') => void;
+  onLock: (p: GenPart) => void;
   onRename: (name: string) => void;
   onStash: () => void;
   onGive: (to: number) => void;
 }) {
   const { t } = useI18n();
   const where = it.fits ? t(`part.${it.fits}` as MsgKey) : '';
-  const affixes = [it.gen.prefix, it.gen.role, it.gen.theme].filter(Boolean).length;
+  const k = it.gen.kind;
+  const isCons = k === 'consumable' || k === 'ammo';
+  const isJunk = k === 'crafting';
+  const parts = PART_ORDER.filter((p) => !(isJunk && p !== 'base') && !(isCons && p === 'role'));
+  const affixes = [it.gen.adjective, it.gen.role, it.gen.theme].filter(Boolean).length;
+  const wearable = ['armor', 'weapon', 'shield', 'accessory'].includes(k);
   return (
-    <article className={`gen-card ${rarityClass(it.rarity)}`}>
+    <article className={`gen-card ${rarityClass(it.rarity)} ${it.curse ? 'is-cursed' : ''}`}>
       <div className="gen-card-head">
         <span className={`pill tiny-pill rar-pill ${rarityClass(it.rarity)}`}>
           {t(`rarity.${it.rarity}` as MsgKey)}
@@ -300,6 +425,7 @@ function GenCard({
             t(`itemType.${it.type}` as MsgKey),
             where,
             it.twoHanded && t('inv.twoHanded'),
+            it.unique && t('inv.unique'),
             Number(it.qty) > 1 && `×${it.qty}`,
           ]
             .filter(Boolean)
@@ -309,11 +435,12 @@ function GenCard({
           {'✦'.repeat(affixes) || '·'}
         </span>
       </div>
-      <input
+      <textarea
         className="in gen-name"
+        rows={2}
         value={it.item}
         aria-label={t('inv.item')}
-        onChange={(e) => onRename(e.target.value)}
+        onChange={(e) => onRename(e.target.value.replace(/\n/g, ' '))}
       />
       {bonusText(it as unknown as Item, t) && <div className="gen-bonus">{bonusText(it as unknown as Item, t)}</div>}
       <p className="gen-notes">{it.notes}</p>
@@ -322,6 +449,77 @@ function GenCard({
           ★ {t('gen.ability')}: <span className="dim">{it.ability}</span>
         </p>
       )}
+      {it.curse && (
+        <p className="tiny curse-line">
+          ☠ <strong>{t('gen.cursed')}</strong> {it.curse.text}
+          {Object.entries(it.curse.bonus).length > 0 &&
+            ` (${Object.entries(it.curse.bonus)
+              .map(([key, v]) => `${v} ${t(`bonus.${key}` as MsgKey)}`)
+              .join(', ')})`}
+          <span className="dim"> · {t('gen.cursedHint')}</span>
+        </p>
+      )}
+      <div className="gen-parts">
+        {parts.map((p) => {
+          const value = it.gen[p];
+          return (
+            <span key={p} className={`gen-part ${value ? '' : 'empty'} ${it.locks[p] ? 'locked' : ''}`}>
+              <span className="gen-part-lbl">{t(`gen.part.${p}` as MsgKey)}</span>
+              <span className="gen-part-val">{value || '—'}</span>
+              <button
+                type="button"
+                className="icon-btn small"
+                aria-pressed={!!it.locks[p]}
+                title={t(it.locks[p] ? 'gen.unlock' : 'gen.lock')}
+                onClick={() => onLock(p)}
+              >
+                {it.locks[p] ? '🔒' : '🔓'}
+              </button>
+              <button
+                type="button"
+                className="icon-btn small"
+                title={t(value ? 'gen.change' : 'gen.add')}
+                onClick={() => onPart(p, 'reroll')}
+              >
+                {value ? '↻' : '+'}
+              </button>
+              {value && p !== 'base' && (
+                <button
+                  type="button"
+                  className="icon-btn small"
+                  title={t('gen.remove')}
+                  onClick={() => onPart(p, 'remove')}
+                >
+                  ×
+                </button>
+              )}
+            </span>
+          );
+        })}
+        {wearable && (
+          <span className={`gen-part curse ${it.gen.curse ? '' : 'empty'}`}>
+            <span className="gen-part-lbl">☠ {t('gen.part.curse')}</span>
+            <button
+              type="button"
+              className="icon-btn small"
+              title={t(it.gen.curse ? 'gen.change' : 'gen.add')}
+              onClick={() => onPart('curse', 'reroll')}
+            >
+              {it.gen.curse ? '↻' : '+'}
+            </button>
+            {it.gen.curse && (
+              <button
+                type="button"
+                className="icon-btn small"
+                title={t('gen.remove')}
+                onClick={() => onPart('curse', 'remove')}
+              >
+                ×
+              </button>
+            )}
+          </span>
+        )}
+      </div>
       <div className="gen-actions">
         <button type="button" className="btn small ghost" onClick={onReroll} title={t('gen.rerollHint')}>
           🎲 {t('gen.reroll')}
@@ -335,7 +533,15 @@ function GenCard({
   );
 }
 
-function GiveTo({ crawlers, onGive }: { crawlers: CharacterSummary[]; onGive: (to: number) => void }) {
+function GiveTo({
+  crawlers,
+  onGive,
+  label,
+}: {
+  crawlers: CharacterSummary[];
+  onGive: (to: number) => void;
+  label?: string;
+}) {
   const { t } = useI18n();
   if (!crawlers.length) return null;
   const party = crawlers.filter((c) => c.inParty);
@@ -349,10 +555,10 @@ function GiveTo({ crawlers, onGive }: { crawlers: CharacterSummary[]; onGive: (t
     <select
       className="in sel tiny-sel gen-give"
       value=""
-      aria-label={t('gen.give')}
+      aria-label={label ?? t('gen.give')}
       onChange={(e) => e.target.value && onGive(Number(e.target.value))}
     >
-      <option value="">🎁 {t('gen.give')}</option>
+      <option value="">🎁 {label ?? t('gen.give')}</option>
       {party.length > 0 && <optgroup label={t('party.title')}>{party.map(opt)}</optgroup>}
       {others.length > 0 && <optgroup label={t('achPage.others')}>{others.map(opt)}</optgroup>}
     </select>

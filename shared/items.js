@@ -176,6 +176,8 @@ export function emptyItem() {
     /** Equipment / Accessory / Special: what it does when used from the Hotlist (not used up). */
     ability: '',
     bonus: { damage: '', dr: '', evade: '', str: '', int: '', con: '', dex: '', cha: '' },
+    /** A curse ({ text, bonus, revealed }): hidden from the player until the item is equipped, then it sticks. */
+    curse: null,
   };
 }
 
@@ -210,6 +212,7 @@ export function ensureIds(list) {
 /** Items stack when they are the same thing: same name, type, rarity, bonuses and upgrades, and not unique. */
 export function sameKind(a, b) {
   if (a.unique || b.unique || a.rarity === 'unique' || b.rarity === 'unique') return false;
+  if (a.curse || b.curse) return false;
   return (
     norm(a.item) === norm(b.item) &&
     norm(a.type) === norm(b.type) &&
@@ -378,4 +381,86 @@ export function spendOne(inventory, hotSlots, itemId) {
     left: 0,
     charges: null,
   };
+}
+
+/* ---------------- curses ---------------- */
+export const CURSE_MARK = '☠';
+/** The curse kicks in (the item was equipped): its penalties join the bonuses and it's written in the notes. */
+export function applyCurse(it) {
+  if (!it?.curse || it.curse.revealed) return it;
+  const bonus = { ...(it.bonus || {}) };
+  for (const [k, v] of Object.entries(it.curse.bonus || {})) bonus[k] = String(n(bonus[k]) + n(v) || '');
+  for (const k of Object.keys(bonus)) if (bonus[k] === '0') bonus[k] = '';
+  const notes = `${it.notes ? `${it.notes}\n` : ''}${CURSE_MARK} Maldito: ${it.curse.text} No te lo puedes quitar (solo el DJ).`;
+  return { ...it, bonus, notes, curse: { ...it.curse, revealed: true } };
+}
+/** The GM lifts a curse: its penalties and its line in the notes go. */
+export function removeCurse(it) {
+  if (!it?.curse) return it;
+  const bonus = { ...(it.bonus || {}) };
+  if (it.curse.revealed)
+    for (const [k, v] of Object.entries(it.curse.bonus || {})) {
+      const left = n(bonus[k]) - n(v);
+      bonus[k] = left ? String(left) : '';
+    }
+  const notes = String(it.notes || '')
+    .split('\n')
+    .filter((l) => !l.startsWith(`${CURSE_MARK} Maldito:`))
+    .join('\n');
+  return { ...it, bonus, notes, curse: null };
+}
+/** Is this item stuck on its wearer (a revealed curse, equipped)? */
+export const isStuck = (it) => !!(it?.curse?.revealed && it.slot);
+
+/** A sheet as a player sees it: curses not yet revealed are invisible. */
+export function hideCurses(data) {
+  const inv = data?.inventory;
+  if (!Array.isArray(inv) || !inv.some((it) => it?.curse && !it.curse.revealed)) return data;
+  return { ...data, inventory: inv.map((it) => (it?.curse && !it.curse.revealed ? { ...it, curse: null } : it)) };
+}
+
+/**
+ * Saving a sheet: curses stay with their items (the player never sees the hidden ones, so their copy has none),
+ * an item equipped with a hidden curse reveals it, and (for players) a revealed cursed item can't be taken off or
+ * thrown away. Returns { inventory, revealed: [item names], changed }.
+ */
+export function mergeCurses(stored, incoming, isAdmin) {
+  const before = new Map((stored || []).filter((it) => it?.id).map((it) => [it.id, it]));
+  const revealed = [];
+  let changed = false;
+  let inv = (incoming || []).map((it) => {
+    const old = before.get(it?.id);
+    let out = it;
+    // players can't see or change curses; the GM's copy is complete (a missing field keeps the stored one)
+    if (old?.curse && (!isAdmin || it.curse === undefined)) out = { ...out, curse: old.curse };
+    if (out.curse && !out.curse.revealed && out.slot) {
+      out = applyCurse(out);
+      revealed.push(out.item);
+      changed = true;
+    }
+    if (!isAdmin && isStuck(old) && out.slot !== old.slot) {
+      out = { ...out, slot: old.slot };
+      changed = true;
+    }
+    return out;
+  });
+  if (!isAdmin) {
+    // stuck items stay in their slot (anything else put there goes back to the bag) and can't be thrown away
+    const ids = new Set(inv.map((it) => it.id));
+    for (const old of before.values())
+      if (isStuck(old) && !ids.has(old.id)) {
+        inv.push(old);
+        changed = true;
+      }
+    const stuckSlots = new Map(inv.filter(isStuck).map((it) => [it.slot, it.id]));
+    inv = inv.map((it) => {
+      const holder = stuckSlots.get(it.slot);
+      if (it.slot && holder && holder !== it.id) {
+        changed = true;
+        return { ...it, slot: '' };
+      }
+      return it;
+    });
+  }
+  return { inventory: inv, revealed, changed };
 }
