@@ -17,6 +17,8 @@ export type CharacterSummary = {
   ownerName: string;
   locked: boolean;
   inParty: boolean;
+  /** GM switch for a crawler outside the party: in a Saferoom (party members follow World Stats). */
+  saferoom: boolean;
   version: number;
   createdAt: string;
   updatedAt: string;
@@ -35,6 +37,8 @@ export type Character = CharacterSummary & { data: Partial<SheetData> };
 /** A book entry from the server-side catalog (see server/catalog). All fields are optional strings. */
 export type CatalogEntry = {
   name: string;
+  /** Spanish name. */
+  nameEs?: string;
   subtype?: string;
   attackType?: '' | 'melee' | 'ranged';
   stat?: string;
@@ -178,8 +182,19 @@ export type LogEvent =
   | { type: 'interrupt'; kind: 'catch'; ally: string; attack: string }
   | { type: 'reward'; title: string; boxes: Pick<LootBox, 'tier' | 'kind' | 'label'>[] }
   | { type: 'gift'; items: { item: string; rarity: string; qty: string }[] }
+  | {
+      type: 'quest';
+      /** offered = assigned; accepted/declined only in entries from the first version. */
+      action: 'offered' | 'accepted' | 'declined' | 'completed' | 'failed' | 'claimed';
+      title: string;
+      boxes?: Pick<LootBox, 'tier' | 'kind' | 'label'>[];
+      levels?: number;
+      note?: string;
+      penalty?: string;
+    }
   | { type: 'cursed'; item: string }
   | { type: 'world'; action: 'floor'; from: number; to: number; name: string; nameEs: string }
+  | { type: 'world'; action: 'saferoom'; on: boolean }
   | {
       type: 'declare';
       round: number;
@@ -210,6 +225,8 @@ export type World = {
   maxFloor: number;
   /** "2 hours passed" also takes 2 hours off the Level Collapse clock. */
   autoClock: boolean;
+  /** The party is in a Saferoom (loot boxes can be opened). */
+  saferoom: boolean;
 };
 export type WorldPatch = Partial<{
   floor: number;
@@ -218,6 +235,7 @@ export type WorldPatch = Partial<{
   collapseHours: number;
   addHours: number;
   autoClock: boolean;
+  saferoom: boolean;
   name: string;
   nameEs: string;
   ambience: string;
@@ -333,6 +351,8 @@ export type ActionKind = 'evade' | 'interrupt' | 'heal' | 'action' | 'attack';
 export type CrawlerActions = { used: ActionKind[]; extra: boolean; max: number };
 export type NpcData = {
   name: string;
+  /** Spanish name (shown when the app is in Spanish; the book's name stays in `name`). */
+  nameEs: string;
   kind: OpponentKind;
   size: string;
   tags: string;
@@ -486,6 +506,61 @@ export type MapPatch = Partial<
 export const mapImageUrl = (m: Pick<GameMap, 'id' | 'imageTag'>, asPlayer = false) =>
   `/api/maps/${m.id}/image?v=${m.imageTag}${asPlayer ? '&as=player' : ''}`;
 
+/* ---------- quests ---------- */
+export type QuestStatus = 'active' | 'completed' | 'failed';
+export type QuestObjective = { id: string; text: string; done: boolean };
+/** A quest's reward: loot boxes, something written out, and Levels. */
+export type QuestReward = Reward & { levels: number };
+export type Quest = {
+  id: number;
+  title: string;
+  description: string;
+  giver: string;
+  floor: number;
+  objectives: QuestObjective[];
+  reward: QuestReward;
+  /** What happens if it fails (shown to the crawlers, announced when it fails). */
+  penalty: string;
+  status: QuestStatus;
+  /** Only the GM sees it (prepared ahead). */
+  hidden: boolean;
+  createdAt: string;
+  updatedAt: string;
+  crawlers: {
+    id: number;
+    characterId: number;
+    name: string;
+    /** When they got the reward (the quest was completed). */
+    grantedAt: string | null;
+    /** Loot boxes they got, and when they opened them. */
+    boxes: number;
+    openedAt: string | null;
+  }[];
+};
+export type QuestInput = Omit<Quest, 'id' | 'createdAt' | 'updatedAt' | 'crawlers'> & { characterIds?: number[] };
+/** A quest as one crawler has it. */
+export type CrawlerQuest = {
+  linkId: number;
+  questId: number;
+  title: string;
+  description: string;
+  giver: string;
+  floor: number;
+  objectives: QuestObjective[];
+  penalty: string;
+  status: QuestStatus;
+  hidden: boolean;
+  assignedAt: string;
+  updatedAt: string;
+  /** Completed: Levels given, boxes kept sealed for a Saferoom. */
+  grantedAt: string | null;
+  openedAt: string | null;
+  hasReward: boolean;
+  /** For players the boxes' items are empty until opened. */
+  reward: QuestReward;
+  opened: QuestReward | null;
+};
+
 export type AchievementInput = { title: string; description: string; reward: Reward; characterIds?: number[] };
 
 export const api = {
@@ -570,6 +645,8 @@ export const api = {
   /** GM: generated items kept for later. */
   lootStash: () => request<{ items: RewardItem[] }>('GET', '/api/loot-stash'),
   saveLootStash: (items: RewardItem[]) => request<{ items: RewardItem[] }>('PUT', '/api/loot-stash', { items }),
+  /** Spanish names for names the player already has (skills, spells, items). */
+  translateNames: (names: string[]) => request<Record<string, string>>('POST', '/api/catalog/translate', { names }),
   setHotSlot: (characterId: number, slot: number, itemId: string) =>
     request<{ version: number; messageId: number | null }>('POST', `/api/characters/${characterId}/hotlist`, {
       slot,
@@ -636,7 +713,30 @@ export const api = {
   revokeAward: (id: number) => request('DELETE', `/api/awards/${id}`),
   setAwardReward: (id: number, reward: Reward) => request('PUT', `/api/awards/${id}/reward`, { reward }),
   awards: (characterId: number) =>
-    request<{ claimLocked: boolean; awards: Award[] }>('GET', `/api/characters/${characterId}/awards`),
+    request<{ claimLocked: boolean; inSaferoom: boolean; awards: Award[] }>(
+      'GET',
+      `/api/characters/${characterId}/awards`,
+    ),
+  quests: () => request<Quest[]>('GET', '/api/quests'),
+  createQuest: (q: QuestInput) => request<Quest>('POST', '/api/quests', q),
+  updateQuest: (id: number, q: QuestInput) => request<Quest>('PUT', `/api/quests/${id}`, q),
+  deleteQuest: (id: number) => request('DELETE', `/api/quests/${id}`),
+  offerQuest: (id: number, characterIds: number[]) =>
+    request<Quest>('POST', `/api/quests/${id}/crawlers`, { characterIds }),
+  removeFromQuest: (id: number, linkId: number) => request<Quest>('DELETE', `/api/quests/${id}/crawlers/${linkId}`),
+  crawlerQuests: (characterId: number) =>
+    request<{ claimLocked: boolean; inSaferoom: boolean; quests: CrawlerQuest[] }>(
+      'GET',
+      `/api/characters/${characterId}/quests`,
+    ),
+  setSaferoom: (id: number, saferoom: boolean) =>
+    request<{ id: number; saferoom: boolean; inSaferoom: boolean }>('PATCH', `/api/characters/${id}/saferoom`, {
+      saferoom,
+    }),
+  tickObjective: (linkId: number, objId: string, done: boolean) =>
+    request('POST', `/api/quest-crawlers/${linkId}/objectives/${encodeURIComponent(objId)}`, { done }),
+  openQuestBoxes: (linkId: number) =>
+    request<{ opened: QuestReward }>('POST', `/api/quest-crawlers/${linkId}/open`, {}),
   claimAward: (id: number) => request<{ id: number; opened: Reward }>('POST', `/api/awards/${id}/claim`, {}),
   listUsers: () => request<AdminUser[]>('GET', '/api/users'),
   backups: () =>

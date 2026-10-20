@@ -1,3 +1,4 @@
+import { playSound } from './sounds';
 import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import {
   api,
@@ -35,6 +36,8 @@ type LiveState = {
   onCharacter: (fn: (e: { id: number; version: number; by: number | null }) => void) => () => void;
   /** Goes up whenever achievements, awards or the claim lock change (refetch on change). */
   awardsTick: number;
+  /** Goes up whenever a quest (or who is on it) changes. */
+  questsTick: number;
   /** Goes up whenever a map changes. */
   mapsTick: number;
 };
@@ -54,6 +57,7 @@ export function LiveProvider({ children }: { children: ReactNode }) {
   const [world, setWorld] = useState<World | null>(null);
   const [awardsTick, setAwardsTick] = useState(0);
   const [mapsTick, setMapsTick] = useState(0);
+  const [questsTick, setQuestsTick] = useState(0);
   const loadWorld = useCallback(() => {
     api
       .world()
@@ -124,6 +128,11 @@ export function LiveProvider({ children }: { children: ReactNode }) {
     es.addEventListener('message', (e) => {
       const m = JSON.parse((e as MessageEvent).data) as Message;
       addMessage(m);
+      // sounds for everyone who gets this entry: a new achievement, a new quest, and chat messages from others
+      // (not rolls or automatic log entries)
+      if (m.kind === 'event' && m.event?.type === 'achievement') playSound('achievement');
+      else if (m.kind === 'event' && m.event?.type === 'quest' && m.event.action === 'offered') playSound('quest');
+      else if (m.kind === 'chat' && m.userId !== user.id) playSound('message');
       if (!logVisible.current && m.userId !== user.id && (m.kind !== 'event' || m.event?.type === 'declare'))
         setUnread((n) => n + 1);
     });
@@ -140,6 +149,7 @@ export function LiveProvider({ children }: { children: ReactNode }) {
     es.addEventListener('world', loadWorld);
     es.addEventListener('awards', () => setAwardsTick((n) => n + 1));
     es.addEventListener('maps', () => setMapsTick((n) => n + 1));
+    es.addEventListener('quests', () => setQuestsTick((n) => n + 1));
     es.addEventListener('character', (e) => {
       const ev = JSON.parse((e as MessageEvent).data);
       charListeners.current.forEach((fn) => fn(ev));
@@ -198,6 +208,7 @@ export function LiveProvider({ children }: { children: ReactNode }) {
       setWorld,
       onCharacter,
       awardsTick,
+      questsTick,
       mapsTick,
     }),
     [
@@ -215,6 +226,7 @@ export function LiveProvider({ children }: { children: ReactNode }) {
       world,
       onCharacter,
       awardsTick,
+      questsTick,
       mapsTick,
     ],
   );

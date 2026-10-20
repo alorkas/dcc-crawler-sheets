@@ -4,6 +4,7 @@ import { AdvancementPanel, RankBadge, StatMod, useStatMod } from './rulesWidgets
 import { useI18n, type MsgKey } from '../lib/i18n';
 import { canPin, castHeal, num, spendMana } from '../lib/rules';
 import { spellRef } from '../../shared/items.js';
+import { useNamesEs } from '../lib/namesEs';
 import { emptySkill, signed, type Skill } from '../lib/sheet';
 import { SKILL_CATEGORIES, isCategory, isValidType, type SkillCategory } from '../lib/skillTypes';
 import { fillSkill, hitType, lookup } from '../lib/catalog';
@@ -272,6 +273,7 @@ function NameInput({ i }: { i: number }) {
       .catch(() => {});
   };
   // suggestions only from the book list of this skill's own category; custom skills get none
+  const es = useNamesEs();
   const list = s.custom ? undefined : isCategory(s.category) ? `skill-names-${s.category}` : 'skill-names-all';
   return (
     <div onBlur={autoClassify} className="name-cell">
@@ -282,6 +284,7 @@ function NameInput({ i }: { i: number }) {
         list={list}
       />
       {s.custom && <CustomTag i={i} />}
+      {!s.custom && es(s.name) && <span className="dim tiny name-es">{es(s.name)}</span>}
     </div>
   );
 }
@@ -311,18 +314,20 @@ function SkillNameList() {
       .catch(() => {});
   }, [user?.isAdmin]);
   const all = [...lists.combat, ...lists.utility, ...lists.spell];
+  const es = useNamesEs();
+  const label = (n: string) => (es(n) ? `${es(n)} · ${n}` : undefined);
   return (
     <>
       {(Object.keys(lists) as SkillCategory[]).map((cat) => (
         <datalist key={cat} id={`skill-names-${cat}`}>
           {lists[cat].map((n) => (
-            <option key={n} value={n} />
+            <option key={n} value={n} label={label(n)} />
           ))}
         </datalist>
       ))}
       <datalist id="skill-names-all">
         {all.map((n) => (
-          <option key={n} value={n} />
+          <option key={n} value={n} label={label(n)} />
         ))}
       </datalist>
     </>

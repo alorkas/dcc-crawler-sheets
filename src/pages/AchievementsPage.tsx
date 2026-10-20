@@ -33,11 +33,11 @@ const newItem = (): RewardItem => ({
   bonus: { damage: '', dr: '', evade: '', str: '', int: '', con: '', dex: '', cha: '' },
 });
 const newBox = (): LootBox => ({ tier: 'bronze', kind: 'adventurer', label: '', items: [newItem()] });
-const emptyReward = (): Reward => ({ boxes: [], note: '' });
+export const emptyReward = (): Reward => ({ boxes: [], note: '' });
 const fmtDate = (iso: string | null, locale: string) =>
   iso ? new Date(iso).toLocaleDateString(locale, { day: 'numeric', month: 'short', year: 'numeric' }) : '';
 /** Drop empty item rows before saving. */
-const tidy = (r: Reward): Reward => ({
+export const tidy = (r: Reward): Reward => ({
   note: r.note,
   boxes: r.boxes.map((b) => ({ ...b, items: b.items.filter((it) => it.item.trim()) })),
 });
@@ -198,7 +198,11 @@ export default function AchievementsPage() {
                     </span>
                   ))}
                 </div>
-                <GiveMore a={a} crawlers={crawlers} onGive={(ids) => run(() => api.giveAchievement(a.id, ids))} />
+                <GiveMore
+                  taken={a.awards.map((w) => w.characterId)}
+                  crawlers={crawlers}
+                  onGive={(ids) => run(() => api.giveAchievement(a.id, ids))}
+                />
                 <div className="row-actions">
                   <button type="button" className="btn small" onClick={() => setEditing(a.id)}>
                     {t('achPage.edit')}
@@ -246,19 +250,23 @@ export default function AchievementsPage() {
   );
 }
 
-function GiveMore({
-  a,
+/** "Whole party" and "give to…" for crawlers who don't have it yet (achievements and quests). */
+export function GiveMore({
+  taken,
   crawlers,
   onGive,
+  labels,
 }: {
-  a: Achievement;
+  taken: number[];
   crawlers: CharacterSummary[];
   onGive: (ids: number[]) => void;
+  labels?: { party: MsgKey; to: MsgKey; n: MsgKey };
 }) {
   const { t } = useI18n();
   const [open, setOpen] = useState(false);
   const [ids, setIds] = useState<number[]>([]);
-  const left = crawlers.filter((c) => !a.awards.some((w) => w.characterId === c.id));
+  const L = labels ?? { party: 'achPage.giveParty', to: 'achPage.giveTo', n: 'achPage.giveN' };
+  const left = crawlers.filter((c) => !taken.includes(c.id));
   if (!left.length) return null;
   const party = left.filter((c) => c.inParty);
   const others = left.filter((c) => !c.inParty);
@@ -279,11 +287,11 @@ function GiveMore({
     <div className="give-more">
       {party.length > 0 && (
         <button type="button" className="btn small" onClick={() => give(party.map((c) => c.id))}>
-          {t('achPage.giveParty', { n: party.length })}
+          {t(L.party, { n: party.length })}
         </button>
       )}
       <button type="button" className="btn small ghost" onClick={() => setOpen((o) => !o)} aria-expanded={open}>
-        {t('achPage.giveTo')}
+        {t(L.to)}
       </button>
       {open && (
         <div className="give-more-pick">
@@ -294,7 +302,7 @@ function GiveMore({
             {others.map(pickRow)}
           </div>
           <button type="button" className="btn small primary" disabled={!ids.length} onClick={() => give(ids)}>
-            {t('achPage.giveN', { n: ids.length })}
+            {t(L.n, { n: ids.length })}
           </button>
         </div>
       )}

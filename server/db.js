@@ -66,6 +66,9 @@ export function openDb(file) {
   // added later: party membership (NULL = not in the party; otherwise when they joined, for ordering)
   const cols = db.prepare('PRAGMA table_info(characters)').all();
   if (!cols.some((c) => c.name === 'party_since')) db.exec('ALTER TABLE characters ADD COLUMN party_since TEXT');
+  // added later: the GM marks a crawler outside the party as being in a Saferoom (loot boxes only open there)
+  if (!cols.some((c) => c.name === 'saferoom'))
+    db.exec('ALTER TABLE characters ADD COLUMN saferoom INTEGER NOT NULL DEFAULT 0');
   // added later: structured payload of automatic log entries (HP/mana changes, level-ups, combat…)
   const mcols = db.prepare('PRAGMA table_info(messages)').all();
   if (!mcols.some((c) => c.name === 'event')) db.exec('ALTER TABLE messages ADD COLUMN event TEXT');

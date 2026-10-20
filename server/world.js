@@ -183,6 +183,17 @@ const defaultsFor = (floor) =>
     ambienceEs: '',
   };
 
+/**
+ * Is this crawler in a Saferoom (where loot boxes can be opened)? Party members follow the party's switch on World
+ * Stats; anyone else has their own switch (set by the GM on the sheet).
+ */
+export function inSaferoom(db, row) {
+  if (!row) return false;
+  if (!row.party_since) return !!row.saferoom;
+  const w = db.prepare(`SELECT value FROM kv WHERE key = 'world'`).get();
+  return !!JSON.parse(w?.value || '{}').saferoom;
+}
+
 export function mountWorld(app, { db, auth, adminOnly, live, onFloor }) {
   const EMPTY = { floor: 1, crawlersAlive: null, collapseHours: FLOORS[1].days * 24, custom: {} };
   const getWorld = () => {
@@ -211,6 +222,7 @@ export function mountWorld(app, { db, auth, adminOnly, live, onFloor }) {
       customized: Object.keys(c).length > 0,
       maxFloor: MAX_FLOOR,
       autoClock: !!w.autoClock,
+      saferoom: !!w.saferoom,
     };
   };
 
@@ -237,6 +249,13 @@ export function mountWorld(app, { db, auth, adminOnly, live, onFloor }) {
     if (b.addHours !== undefined) w.collapseHours = Math.max(0, w.collapseHours + int(b.addHours));
     // "2 hours passed" also runs the Level Collapse clock
     if (b.autoClock !== undefined) w.autoClock = !!b.autoClock;
+    // the party is in a Saferoom: loot boxes can be opened (achievements and quests listen for it)
+    if (b.saferoom !== undefined && !!b.saferoom !== !!w.saferoom) {
+      w.saferoom = !!b.saferoom;
+      live.postEvent({ event: { type: 'world', action: 'saferoom', on: w.saferoom } });
+      live.send('awards', {});
+      live.send('quests', {});
+    }
     // per-Floor text overrides; { reset: true } goes back to the defaults
     if (b.reset) {
       delete w.custom[w.floor];

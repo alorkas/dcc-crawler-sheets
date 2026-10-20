@@ -15,6 +15,7 @@ export const emptyAttack = (): NpcData['attacks'][number] => ({
 export function emptyNpc(): NpcData {
   return {
     name: '',
+    nameEs: '',
     kind: 'mob',
     size: '',
     tags: '',
@@ -52,6 +53,7 @@ export function loadNpc(stored: Partial<NpcData> | undefined): NpcData {
   const str = (v: unknown, fallback: string) => (typeof v === 'string' ? v : fallback);
   return {
     name: str(d.name, base.name),
+    nameEs: str(d.nameEs, ''),
     // older imports stored crawlers as NPCs: their tags start with "Crawler"
     kind:
       d.kind === 'npc' && /^Crawler\b/.test(String(d.tags ?? ''))
@@ -89,3 +91,7 @@ export function slotPercents(slots: number): number[] {
   const n = Math.max(1, Math.min(20, Math.floor(slots) || 1));
   return Array.from({ length: n }, (_, i) => Math.round(((i + 1) / n) * 100));
 }
+
+/** The NPC's name in the app's language (the Spanish one when there is one). */
+export const npcName = (d: Partial<NpcData> | undefined, lang: string) =>
+  (lang === 'es' && d?.nameEs?.trim()) || d?.name || '';

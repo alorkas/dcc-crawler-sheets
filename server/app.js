@@ -4,11 +4,12 @@ import bcrypt from 'bcryptjs';
 import jwt from 'jsonwebtoken';
 import path from 'node:path';
 import fs from 'node:fs';
-import { fullCatalog, lookup, publicSkills } from './catalog/index.js';
+import { fullCatalog, lookup, publicSkills, translateNames } from './catalog/index.js';
 import { mountLive } from './live.js';
 import { mountGame } from './game.js';
 import { mountWorld } from './world.js';
 import { mountRewards } from './rewards.js';
+import { mountQuests } from './quests.js';
 import { mountMaps } from './maps.js';
 import { backupNow, listBackups } from './backup.js';
 import { applyPlay } from '../shared/lockRules.js';
@@ -56,6 +57,7 @@ export function createApp({
       ownerName: row.owner_name,
       locked: !!row.locked,
       inParty: !!row.party_since,
+      saferoom: !!row.saferoom,
       version: row.version,
       createdAt: row.created_at,
       updatedAt: row.updated_at,
@@ -256,13 +258,11 @@ export function createApp({
     if (!data || typeof data !== 'object')
       return res.status(400).json({ error: 'Missing sheet data', code: 'missing_data' });
     if (Number(version) !== req.char.version) {
-      return res
-        .status(409)
-        .json({
-          error: 'Sheet was changed elsewhere',
-          code: 'sheet_conflict',
-          character: toChar(req.char, true, req.user),
-        });
+      return res.status(409).json({
+        error: 'Sheet was changed elsewhere',
+        code: 'sheet_conflict',
+        character: toChar(req.char, true, req.user),
+      });
     }
     // A locked sheet only takes the play fields (health, mana, buffs, debuffs, advancement marks);
     // everything else is kept as stored. One-time format upgrades (higher schema) are saved whole.
@@ -382,6 +382,7 @@ export function createApp({
   const world = mountWorld(app, { db, auth, adminOnly, live, onFloor: (floor, sync) => game.setFloor(floor, sync) });
   hooks.onTimePassed = (h) => world.timePassed(h);
   mountRewards(app, { db, auth, adminOnly, loadChar, live });
+  mountQuests(app, { db, auth, adminOnly, loadChar, live });
   mountMaps(app, { db, auth, adminOnly, live });
 
   // ---------- book catalog ----------
@@ -395,6 +396,8 @@ export function createApp({
   });
   // Weapons and utility skills are public in the player books, so players may browse them.
   app.get('/api/catalog/skills', auth, (_req, res) => res.json(publicSkills()));
+  // Spanish names for names the player already has (POST so long lists fit)
+  app.post('/api/catalog/translate', auth, (req, res) => res.json(translateNames(req.body?.names)));
   // The full catalog (including every spell and item) is for the GM only.
   app.get('/api/catalog/all', auth, adminOnly, (_req, res) => res.json(fullCatalog()));
 

@@ -1,6 +1,7 @@
 // Content for the loot generator (shared/lootgen.js): bases, prefixes, adjectives, roles, themes, consumable
 // adjectives, curses, crafting junk and System AI quips. All original, in Spanish (the table plays in Spanish),
-// with a gamer / Spain-slang register. Skill names stay as they are on the sheets (English, from the book).
+// with a gamer / Spain-slang register. Skill names in texts are written in English
+// (as the book data has them) and turned into their Spanish names when the item is generated.
 //
 // Affix fields: lvl 1–5 (stronger ones only appear on better items), on (kinds it fits), bonus [[key, factor]]
 // (× the quality's magnitude, at least ±1), text ({m} magnitude, {m5} 5 × magnitude in feet, {d} damage dice),

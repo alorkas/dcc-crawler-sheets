@@ -13,9 +13,11 @@ import NpcPage from './pages/NpcPage';
 import CombatPage from './pages/CombatPage';
 import WorldPage from './pages/WorldPage';
 import AchievementsPage from './pages/AchievementsPage';
+import QuestsPage from './pages/QuestsPage';
 import GeneratorPage from './pages/GeneratorPage';
 import MapPage from './pages/MapPage';
 import { LiveProvider } from './lib/live';
+import { playSound, setSoundOn, soundOn } from './lib/sounds';
 import { LogPanel, PartyPanel } from './components/LivePanels';
 
 export default function App() {
@@ -50,6 +52,7 @@ function Shell() {
           {user.isAdmin && <Route path="/admin/players" element={<PlayersPage />} />}
           {user.isAdmin && <Route path="/admin/npcs" element={<NpcsPage />} />}
           {user.isAdmin && <Route path="/admin/achievements" element={<AchievementsPage />} />}
+          {user.isAdmin && <Route path="/admin/quests" element={<QuestsPage />} />}
           {user.isAdmin && <Route path="/admin/generator" element={<GeneratorPage />} />}
           {user.isAdmin && <Route path="/admin/npcs/:id" element={<NpcPage />} />}
           <Route path="*" element={<Navigate to="/" replace />} />
@@ -63,6 +66,7 @@ function Layout({ children }: { children: ReactNode }) {
   const { user, logout } = useAuth();
   const { t } = useI18n();
   const [pwOpen, setPwOpen] = useState(false);
+  const [sound, setSound] = useState(soundOn);
   const [viewOpen, setViewOpen] = useState(false);
   const onCombat = useLocation().pathname === '/combat';
   return (
@@ -82,6 +86,7 @@ function Layout({ children }: { children: ReactNode }) {
           <NavLink to="/map">{t('nav.map')}</NavLink>
           {user?.isAdmin && <NavLink to="/admin/crawlers">{t('nav.all')}</NavLink>}
           {user?.isAdmin && <NavLink to="/admin/npcs">{t('nav.npcs')}</NavLink>}
+          {user?.isAdmin && <NavLink to="/admin/quests">{t('nav.quests')}</NavLink>}
           {user?.isAdmin && <NavLink to="/admin/achievements">{t('nav.achievements')}</NavLink>}
           {user?.isAdmin && <NavLink to="/admin/generator">{t('nav.generator')}</NavLink>}
           {user?.isAdmin && <NavLink to="/admin/players">{t('nav.players')}</NavLink>}
@@ -103,6 +108,17 @@ function Layout({ children }: { children: ReactNode }) {
                 {t('user.changePassword')}
               </button>
             )}
+            <button
+              type="button"
+              aria-pressed={sound}
+              onClick={() => {
+                setSoundOn(!sound);
+                setSound(!sound);
+                if (!sound) playSound('message');
+              }}
+            >
+              {sound ? `🔊 ${t('user.soundOn')}` : `🔇 ${t('user.soundOff')}`}
+            </button>
             <button type="button" onClick={logout}>
               {t('user.logout')}
             </button>

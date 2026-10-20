@@ -4,7 +4,7 @@ import { damageDice, resolveNum } from '../../shared/formula.js';
 import { api, type NpcData } from '../lib/api';
 import { useI18n, type MsgKey } from '../lib/i18n';
 import { useLive } from '../lib/live';
-import { NPC_KINDS, NPC_STATS, emptyAttack, loadNpc, slotPercents } from '../lib/npc';
+import { NPC_KINDS, NPC_STATS, emptyAttack, loadNpc, npcName, slotPercents } from '../lib/npc';
 import { LockIcon, UnlockIcon } from '../components/icons';
 import { NpcInFight } from '../components/CombatTracker';
 import { AddToCombat } from './NpcsPage';
@@ -95,7 +95,7 @@ export default function NpcPage() {
             ←
           </Link>
           <div>
-            <h1>{data.name || t('npc.unnamed')}</h1>
+            <h1>{npcName(data, lang) || t('npc.unnamed')}</h1>
             <div className="dim small">
               {[t(`npc.kind.${data.kind}` as MsgKey), data.chapter, data.source].filter(Boolean).join(' · ')}
             </div>
@@ -149,6 +149,7 @@ export default function NpcPage() {
           <fieldset className="plain-fieldset" disabled={locked}>
             <div className="sb-top">
               {txt('name', t('core.name'), { big: true })}
+              {txt('nameEs', t('npc.nameEs'))}
               <label className="field">
                 <span className="lbl">{t('npc.kind')}</span>
                 <select

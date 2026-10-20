@@ -7,6 +7,7 @@ import { useLiveOptional } from '../lib/live';
 import { Section, useSheet } from './fields';
 import { bonusText, rarityClass } from './Inventory';
 import { emptyItem, type Item } from '../lib/sheet';
+import { useNamesEs } from '../lib/namesEs';
 
 type T = ReturnType<typeof useI18n>['t'];
 
@@ -38,7 +39,7 @@ const fmtDate = (iso: string | null, locale: string) =>
 export function useAwards(charId: number | undefined) {
   const live = useLiveOptional();
   const tick = live?.awardsTick ?? 0;
-  const [state, setState] = useState<{ claimLocked: boolean; awards: Award[] } | null>(null);
+  const [state, setState] = useState<{ claimLocked: boolean; inSaferoom: boolean; awards: Award[] } | null>(null);
   const [error, setError] = useState<unknown>(null);
   const load = useCallback(() => {
     if (!charId) return;
@@ -60,6 +61,8 @@ export function AchievementsTab() {
   const { user } = useAuth();
   const { charId, runServer } = useSheet();
   const { state, error, load } = useAwards(charId);
+  // loot boxes only open in a Saferoom (a reward in words can be claimed anywhere)
+  const needsSaferoom = (w: Award) => !admin && !state?.inSaferoom && w.reward.boxes.length > 0;
   const [busy, setBusy] = useState<number | null>(null);
   const [claimError, setClaimError] = useState<unknown>(null);
   const [opening, setOpening] = useState<{ title: string; reward: Reward; replay: boolean } | null>(null);
@@ -129,14 +132,15 @@ export function AchievementsTab() {
                     <>
                       <button
                         type="button"
-                        className="btn primary claim-btn"
-                        disabled={blocked || busy !== null}
+                        className={`btn primary ${blocked || needsSaferoom(w) ? '' : 'claim-btn'}`}
+                        disabled={blocked || needsSaferoom(w) || busy !== null}
                         onClick={() => claim(w)}
-                        title={blocked ? t('ach.lockedMsg') : undefined}
+                        title={blocked ? t('ach.lockedMsg') : needsSaferoom(w) ? t('saferoom.only') : undefined}
                       >
                         {busy === w.id ? t('ach.opening') : t('ach.claim')}
                       </button>
                       {blocked && <span className="dim small">{t('ach.lockedMsg')}</span>}
+                      {!blocked && needsSaferoom(w) && <span className="dim small">🔒 {t('saferoom.only')}</span>}
                     </>
                   )}
                   {w.claimedAt && (
@@ -193,13 +197,17 @@ export function LootBoxOpening({
   reward,
   instant = false,
   onClose,
+  levels = 0,
 }: {
   title: string;
   reward: Reward;
   instant?: boolean;
   onClose: () => void;
+  /** Quests: Levels gained along with the boxes. */
+  levels?: number;
 }) {
   const { t } = useI18n();
+  const es = useNamesEs();
   const [idx, setIdx] = useState(0);
   const [open, setOpen] = useState(instant);
   const box = reward.boxes[idx];
@@ -269,7 +277,7 @@ export function LootBoxOpening({
                       <span className="loot-star" aria-hidden>
                         ★
                       </span>
-                      <strong>{it.item}</strong>
+                      <strong>{es(it.item) || it.item}</strong>
                       {Number(it.qty) > 1 && <span className="dim"> ×{it.qty}</span>}
                       {it.rarity && (
                         <span className={`pill tiny-pill rar-pill ${rarityClass(it.rarity)}`}>
@@ -292,7 +300,7 @@ export function LootBoxOpening({
                         }}
                       >
                         <div className="loot-item-head">
-                          <strong>{it.item}</strong>
+                          <strong>{es(it.item) || it.item}</strong>
                           <span className="loot-qty">×{Number(it.qty) || 1}</span>
                           {it.type && <span className="dim tiny">{t(`itemType.${it.type}` as MsgKey)}</span>}
                           {it.rarity && (
@@ -311,6 +319,11 @@ export function LootBoxOpening({
               </div>
             )}
           </>
+        )}
+        {(open || !box) && last && levels > 0 && (
+          <div className="loot-levels">
+            <span className="pill level-pill">{t('quest.levels', { n: levels })}</span>
+          </div>
         )}
         {(open || !box) && last && reward.note && (
           <div className="ach-note loot-note">

@@ -430,9 +430,18 @@ function MessageList({ filter }: { filter: Filter }) {
   const shown = messages.filter((m) =>
     filter === 'all'
       ? m.kind !== 'event' ||
-        ['declare', 'world', 'achievement', 'reward', 'interrupt', 'hotlist', 'item', 'gift', 'cursed'].includes(
-          m.event?.type ?? '',
-        )
+        [
+          'declare',
+          'world',
+          'achievement',
+          'reward',
+          'interrupt',
+          'hotlist',
+          'item',
+          'gift',
+          'cursed',
+          'quest',
+        ].includes(m.event?.type ?? '')
       : m.kind === filter,
   );
 
@@ -788,6 +797,12 @@ function EventEntry({ m, ev, time }: { m: Message; ev: LogEvent; time: string })
     case 'world':
       icon = '▼';
       tone = 'combat';
+      if (ev.action === 'saferoom') {
+        icon = '🛏';
+        tone = 'good';
+        body = <strong>{t(ev.on ? 'log.ev.saferoomIn' : 'log.ev.saferoomOut')}</strong>;
+        break;
+      }
       body = <strong>{t('log.ev.floor', { n: ev.to, name: lang === 'es' ? ev.nameEs : ev.name })}</strong>;
       break;
     case 'favor':
@@ -892,6 +907,25 @@ function EventEntry({ m, ev, time }: { m: Message; ev: LogEvent; time: string })
           {ev.boxes.map((b, i) => (
             <BoxChip key={i} box={b} />
           ))}
+        </>
+      );
+      break;
+    case 'quest':
+      icon = ev.action === 'failed' ? '✖' : ev.action === 'claimed' ? '▣' : '📜';
+      tone = ev.action === 'failed' || ev.action === 'declined' ? 'bad' : 'good';
+      body = (
+        <>
+          <strong>{who}</strong> {t(`log.ev.quest.${ev.action}` as MsgKey, { title: ev.title })}{' '}
+          {!!ev.levels && <span className="pill level-pill">{t('quest.levels', { n: ev.levels })}</span>}{' '}
+          {ev.boxes?.map((b, i) => (
+            <BoxChip key={i} box={b} sealed={ev.action === 'completed'} />
+          ))}
+          {ev.note && <span className="dim"> · {ev.note}</span>}
+          {ev.penalty && (
+            <div className="log-penalty">
+              {t('quest.penaltyHit')}: {ev.penalty}
+            </div>
+          )}
         </>
       );
       break;

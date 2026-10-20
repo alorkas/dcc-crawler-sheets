@@ -2,6 +2,7 @@
 import { BOOK_NPCS } from './catalog/npcs.js';
 import { lookup } from './catalog/index.js';
 import { NOTES_ES } from './catalog/npcNotesEs.js';
+import { npcNameEs } from './catalog/namesEs.js';
 import { parseDice, rollDice } from './dice.js';
 import { damageDice, isAreaAttack, resolveNum } from '../shared/formula.js';
 import {
@@ -67,6 +68,13 @@ export function mountGame(app, { db, auth, adminOnly, loadChar, live, hooks = {}
     const r = db.prepare('INSERT INTO npcs (data) VALUES (?)').run(JSON.stringify(data));
     res.status(201).json(toNpc(db.prepare('SELECT * FROM npcs WHERE id = ?').get(r.lastInsertRowid)));
   });
+  // book stat blocks imported before they had Spanish names get theirs (once; your own names are kept)
+  for (const r of db.prepare('SELECT id, data FROM npcs').all()) {
+    const d = JSON.parse(r.data || '{}');
+    const es = d.source && !String(d.nameEs ?? '').trim() ? npcNameEs(d.name) : '';
+    if (es) db.prepare('UPDATE npcs SET data = ? WHERE id = ?').run(JSON.stringify({ ...d, nameEs: es }), r.id);
+  }
+
   // add the Core Rulebook's stat blocks (skips ones already imported, so it's safe to run again)
   app.post('/api/npcs/import-book', auth, adminOnly, (_req, res) => {
     const have = new Map(
@@ -83,7 +91,11 @@ export function mountGame(app, { db, auth, adminOnly, loadChar, live, hooks = {}
     let added = 0;
     let updated = 0;
     for (const { prevNotes = [], prevDescriptions = [], prevDescriptionsEs = [], ...book } of BOOK_NPCS) {
-      const n = { ...book, notesEs: NOTES_ES[`${book.name}|${book.source ?? ''}`] ?? '' };
+      const n = {
+        ...book,
+        nameEs: npcNameEs(book.name),
+        notesEs: NOTES_ES[`${book.name}|${book.source ?? ''}`] ?? '',
+      };
       const old = have.get(`${n.name}|${n.source}`);
       if (!old) {
         insert.run(JSON.stringify(n));
@@ -94,6 +106,8 @@ export function mountGame(app, { db, auth, adminOnly, loadChar, live, hooks = {}
       // when you haven't written your own; never the stats you may have edited
       const next = { ...old.d, kind: n.kind, floor: n.floor, chapter: n.chapter };
       if (!old.d.notes || prevNotes.includes(old.d.notes)) next.notes = n.notes;
+      // the Spanish name, unless you've written your own
+      if (n.nameEs && !String(old.d.nameEs ?? '').trim()) next.nameEs = n.nameEs;
       // the Spanish notes follow the book while the English ones are the book's (not rewritten by you)
       if (n.notesEs && (!old.d.notesEs || next.notes === n.notes)) next.notesEs = n.notesEs;
       if (!old.d.description || prevDescriptions.includes(old.d.description)) next.description = n.description;
@@ -397,7 +411,8 @@ export function mountGame(app, { db, auth, adminOnly, loadChar, live, hooks = {}
       if (!row) return res.status(404).json({ error: 'NPC not found', code: 'not_found' });
       const n = JSON.parse(row.data || '{}');
       base = {
-        name: clip(n.name) || '?',
+        // the Spanish name when the GM plays in Spanish (that's what the players see)
+        name: clip((b.lang === 'es' && String(n.nameEs ?? '').trim()) || n.name) || '?',
         kind: OPP_KINDS.includes(n.kind) ? n.kind : 'mob',
         slots: Math.min(20, Math.max(1, int(n.slots, 3))),
         slotValue: Math.max(1, int(n.slotValue, 2)),

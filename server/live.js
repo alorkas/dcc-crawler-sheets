@@ -143,6 +143,9 @@ export function mountLive(app, { db, auth, adminOnly, loadChar }) {
       `UPDATE characters SET party_since = CASE WHEN ? THEN COALESCE(party_since, strftime('%Y-%m-%dT%H:%M:%fZ', 'now')) ELSE NULL END WHERE id = ?`,
     ).run(inParty ? 1 : 0, req.char.id);
     send('party', {});
+    // joining or leaving the party can change whether they're in a Saferoom
+    send('awards', {});
+    send('quests', {});
     res.json({ id: req.char.id, inParty });
   });
 

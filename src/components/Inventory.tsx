@@ -29,6 +29,7 @@ import { useAuth } from '../lib/auth';
 import { fillItem, lookup } from '../lib/catalog';
 import { useI18n, type MsgKey } from '../lib/i18n';
 import { useLiveOptional } from '../lib/live';
+import { useNamesEs } from '../lib/namesEs';
 import { emptyItem, signed, type Item, type ItemType, type SheetData } from '../lib/sheet';
 import { Area, Input, Section, useSheet } from './fields';
 import { UseItemControls } from './QuickItems';
@@ -277,6 +278,7 @@ function InventoryRow({
   const { data, playLocked, update, charId, der, runServer } = useSheet();
   const { t } = useI18n();
   const { user } = useAuth();
+  const es = useNamesEs();
   const [msg, setMsg] = useState('');
   const hot = useHotlistChange();
   const it = data.inventory[i];
@@ -326,6 +328,7 @@ function InventoryRow({
         />
         {!blank && (
           <span className="inv-tags">
+            {es(it.item) && <span className="dim tiny name-es">{es(it.item)}</span>}
             {it.slot && <span className="pill tiny-pill gold">{slotLabel(it.slot, t)}</span>}
             {it.curse && <CursePill it={it} />}
             {it.rarity && (
@@ -424,17 +427,24 @@ export function bonusText(it: Item, t: ReturnType<typeof useI18n>['t']): string 
 /** Item names from the book catalog as suggestions (GM only: the catalog stays server-side for players). */
 export function ItemNameList() {
   const { user } = useAuth();
-  const [names, setNames] = useState<string[]>([]);
+  const { lang } = useI18n();
+  const [names, setNames] = useState<{ name: string; nameEs?: string }[]>([]);
   useEffect(() => {
     if (!user?.isAdmin) return;
     api
       .fullCatalog()
-      .then((c) => setNames([...c.items, ...(c.homebrew ?? [])].map((e) => e.name).sort()))
+      .then((c) =>
+        setNames(
+          [...c.items, ...(c.homebrew ?? [])].map((e) => ({ name: e.name, nameEs: 'nameEs' in e ? e.nameEs : '' })),
+        ),
+      )
       .catch(() => {});
   }, [user?.isAdmin]);
+  // in Spanish, the book items by their Spanish name (they're found by either name)
+  const shown = names.map((n) => (lang === 'es' && n.nameEs ? n.nameEs : n.name)).sort((a, b) => a.localeCompare(b));
   return (
     <datalist id="item-names">
-      {names.map((n) => (
+      {shown.map((n) => (
         <option key={n} value={n} />
       ))}
     </datalist>
@@ -714,6 +724,7 @@ export function ItemDialog({ i, onClose }: { i: number; onClose: () => void }) {
 /* ---------------- the Hotlist (Gear tab): 10 slots holding inventory items, or text ---------------- */
 export function HotlistSlots() {
   const { t } = useI18n();
+  const es = useNamesEs();
   const { data, charId, runServer, der, playLocked } = useSheet();
   const hot = useHotlistChange();
   const [open, setOpen] = useState<number | null>(null);
@@ -749,7 +760,7 @@ export function HotlistSlots() {
                     </button>
                   )}
                 </div>
-                <strong className="hot-item">✦ {sk.name}</strong>
+                <strong className="hot-item">✦ {es(sk.name) || sk.name}</strong>
                 <span className="dim tiny">
                   {t('hot.spell')}
                   {sk.manaCost && ` · ${t('skill.sumMana', { n: sk.manaCost })}`}
@@ -813,7 +824,7 @@ export function HotlistSlots() {
                         <optgroup label={t('hot.spells')}>
                           {freeSpells.map((x) => (
                             <option key={x.name} value={spellRef(x.name)}>
-                              ✦ {x.name}
+                              ✦ {es(x.name) || x.name}
                               {x.manaCost ? ` · ${t('skill.sumMana', { n: x.manaCost })}` : ''}
                             </option>
                           ))}

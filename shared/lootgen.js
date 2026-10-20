@@ -27,6 +27,7 @@ import {
   STATES,
   THEMES,
 } from './lootgen-data.js';
+import { skillEs, skillsInTextEs } from './namesEs.js';
 
 export { ADJECTIVES, BASES, CONSUMABLE_ADJECTIVES, CURSES, JUNK, PREFIXES, ROLES, THEMES };
 
@@ -320,7 +321,7 @@ export function generateItem(opts = {}) {
   // text effects
   const state = pickOne(sub(3), STATES);
   const fill = (s) =>
-    String(s || '')
+    skillsInTextEs(s || '')
       .replace(/\{m\}/g, String(Math.max(1, m)))
       .replace(/\{m5\}/g, String(5 * Math.max(1, m)))
       .replace(/\{d\}/g, DICE[rank])
@@ -391,7 +392,7 @@ export function generateItem(opts = {}) {
     .join(', ');
   const weaponTxt =
     kind === 'weapon'
-      ? `Cuenta como ${base.skill}${base.ranged ? ` (a distancia, dispara ${base.ammo.toLowerCase()}s)` : ''}.`
+      ? `Cuenta como ${skillEs(base.skill) || base.skill}${base.ranged ? ` (a distancia, dispara ${base.ammo.toLowerCase()}s)` : ''}.`
       : '';
   const junkTxt = isJunk ? 'Material de fabricación.' : '';
   const firstLine = [tag, bonusTxt && `${bonusTxt}.`, weaponTxt, junkTxt, use, ...effects].filter(Boolean).join(' ');

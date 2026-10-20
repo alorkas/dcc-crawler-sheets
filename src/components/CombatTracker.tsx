@@ -19,7 +19,7 @@ import { applyAttackDamage } from '../lib/combat';
 import { HitResult } from './CombatAttack';
 import { DegreeBadge, LinkChips, linkText } from './Status';
 import { derive } from '../lib/rules';
-import { NPC_KINDS } from '../lib/npc';
+import { NPC_KINDS, npcName } from '../lib/npc';
 
 export const PHASES = [1, 2, 3, 4, 5] as const;
 
@@ -497,7 +497,7 @@ function OpponentRow({
 }
 
 function AddOpponent() {
-  const { t } = useI18n();
+  const { t, lang } = useI18n();
   const { setEncounter } = useLive();
   const [open, setOpen] = useState(false);
   const [mode, setMode] = useState<'npc' | 'quick'>('npc');
@@ -527,7 +527,7 @@ function AddOpponent() {
     try {
       const body =
         mode === 'npc'
-          ? { npcId: Number(npcId), count: Number(q.count) || 1, hidden: q.hidden }
+          ? { npcId: Number(npcId), count: Number(q.count) || 1, hidden: q.hidden, lang }
           : { ...q, slots: Number(q.slots) || 3, slotValue: Number(q.slotValue) || 2, count: Number(q.count) || 1 };
       setEncounter(await api.addOpponents(body));
       setQ((x) => ({ ...x, name: '' }));
@@ -556,7 +556,7 @@ function AddOpponent() {
           <option value="">{npcs?.length ? t('combat.pickNpc') : t('combat.noNpcs')}</option>
           {(npcs ?? []).map((n) => (
             <option key={n.id} value={n.id}>
-              {n.data.name || t('npc.unnamed')}
+              {npcName(n.data, lang) || t('npc.unnamed')}
             </option>
           ))}
         </select>

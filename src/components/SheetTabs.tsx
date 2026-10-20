@@ -12,6 +12,7 @@ import { HotlistSlots } from './Inventory';
 import { AttackRollButton, CombatTargetBar, TargetProvider } from './CombatAttack';
 import { AssignStatPoints } from './AssignStatPoints';
 import { useI18n, type MsgKey } from '../lib/i18n';
+import { useNamesEs } from '../lib/namesEs';
 import { STATS, signed, type StatKey } from '../lib/sheet';
 
 const statLabel = (k: StatKey) => `stat.${k}` as MsgKey;
@@ -228,6 +229,7 @@ function QuickHeal() {
 function HotlistSpells() {
   const { data } = useSheet();
   const { t } = useI18n();
+  const es = useNamesEs();
   const spells = data.hotSlots
     .map((id, slot) => ({ id, slot }))
     .filter(({ id }) => isSpellRef(id))
@@ -247,7 +249,7 @@ function HotlistSpells() {
           return (
             <li key={slot}>
               <span className="grow" title={sk.effect || sk.description}>
-                <strong>{sk.name}</strong>{' '}
+                <strong>{es(sk.name) || sk.name}</strong>{' '}
                 <span className="dim tiny">
                   · {t('gear.slot', { n: slot + 1 })}
                   {sk.manaCost && ` · ${t('skill.sumMana', { n: sk.manaCost })}`}
@@ -310,6 +312,7 @@ function rangeText(type: string, range: string): string {
 function PinnedRow({ i, der, onEdit }: { i: number; der: ReturnType<typeof useSheet>['der']; onEdit: () => void }) {
   const { data } = useSheet();
   const { t } = useI18n();
+  const es = useNamesEs();
   const s = data.skills[i];
   const mod = useStatMod(s.stat, s.statMod);
   const rank = num(s.rank);
@@ -325,8 +328,13 @@ function PinnedRow({ i, der, onEdit }: { i: number; der: ReturnType<typeof useSh
   return (
     <div className={`pinned-cols pinned-row ${spell ? 'is-spell' : ''}`}>
       <div className="pin-name">
-        <button type="button" className="pin-link" onClick={onEdit} title={t('pin.edit')}>
-          {s.name || t('skills.phSkill')}
+        <button
+          type="button"
+          className="pin-link"
+          onClick={onEdit}
+          title={[es(s.name) && s.name, t('pin.edit')].filter(Boolean).join(' · ')}
+        >
+          {es(s.name) || s.name || t('skills.phSkill')}
         </button>
         <span className="dim tiny">
           {typeLbl}

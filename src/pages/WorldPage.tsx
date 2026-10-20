@@ -53,6 +53,7 @@ export default function WorldPage() {
               <span className="lbl">{t('world.party')}</span>
               <strong>{party?.length ?? 0}</strong>
             </div>
+            <SaferoomTile w={w} />
           </div>
         </div>
       </div>
@@ -69,6 +70,34 @@ export default function WorldPage() {
       </div>
 
       {user?.isAdmin && <WorldControls w={w} />}
+    </div>
+  );
+}
+
+/** Is the party in a Saferoom (loot boxes can be opened there)? Everyone sees it; the GM switches it. */
+function SaferoomTile({ w }: { w: World }) {
+  const { t, err } = useI18n();
+  const { user } = useAuth();
+  const { setWorld } = useLive();
+  const [error, setError] = useState('');
+  const toggle = async () => {
+    setError('');
+    try {
+      setWorld(await api.updateWorld({ saferoom: !w.saferoom }));
+    } catch (e) {
+      setError(err(e));
+    }
+  };
+  return (
+    <div className={`world-tile saferoom-tile ${w.saferoom ? 'on' : ''}`}>
+      <span className="lbl">{t('saferoom.title')}</span>
+      <strong>{w.saferoom ? `🛏 ${t('saferoom.partyIn')}` : t('saferoom.partyOut')}</strong>
+      {user?.isAdmin && (
+        <button type="button" className={`btn small ${w.saferoom ? '' : 'primary'}`} onClick={toggle}>
+          {w.saferoom ? t('saferoom.leave') : t('saferoom.enter')}
+        </button>
+      )}
+      {error && <span className="error tiny">{error}</span>}
     </div>
   );
 }

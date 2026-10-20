@@ -1,8 +1,8 @@
 // The campaign's own loot for the Tutorial Floors (Floors 1–2): original items in the spirit of the first book's
 // loot boxes (cheap enchanted junk, petty curses, stat jewelry). Calibrated to the Core Rulebook's sample loot:
 // Bronze ≈ +1 (one Stat, DR or Evade), Silver ≈ +2 to a Stat or DR, Gold ≈ +3 or two smaller bonuses.
-// All in Spanish (the table plays in Spanish), in a gamer-ish, slangy Spain register. Skill names stay as they are
-// on the sheets (English, from the book). `fits` is where it's worn (shared/items.js); `floor` the Floor it
+// All in Spanish (the table plays in Spanish), in a gamer-ish, slangy Spain register. Skill names use their
+// Spanish names (shared/namesEs.js; the sheets show them in Spanish too). `fits` is where it's worn (shared/items.js); `floor` the Floor it
 // usually drops on.
 
 const b = (o = {}) => ({ damage: '', dr: '', evade: '', str: '', int: '', con: '', dex: '', cha: '', ...o });
@@ -47,7 +47,7 @@ export const HOMEBREW_ITEMS = [
     fits: 'bracers',
     bonus: b({ str: '1' }),
     notes:
-      '[Brazales] +1 FUE. Una vez al día puedes repetir una prueba de Climbing o de Jumping que hayas fallado.\nIA: «Empapadas, rizadas y con un logo que ya no significa nada. Como tu suscripción al gym.»',
+      '[Brazales] +1 FUE. Una vez al día puedes repetir una prueba de Escalada o de Salto que hayas fallado.\nIA: «Empapadas, rizadas y con un logo que ya no significa nada. Como tu suscripción al gym.»',
   },
   {
     name: 'Gafas de Leer del Cuñao Sabelotodo',
@@ -57,7 +57,7 @@ export const HOMEBREW_ITEMS = [
     fits: 'head',
     bonus: b({ int: '1' }),
     notes:
-      '[Accesorio · Cabeza] +1 INT. +1 a Investigation al leer cosas (carteles, notas, la letra pequeña de un trato con el Sistema).\nIA: «Te hacen parecer más listo. Lo de parecerlo ya es mucho pedir, crack.»',
+      '[Accesorio · Cabeza] +1 INT. +1 a Investigación al leer cosas (carteles, notas, la letra pequeña de un trato con el Sistema).\nIA: «Te hacen parecer más listo. Lo de parecerlo ya es mucho pedir, crack.»',
   },
   {
     name: 'Rodilleras de Jardinero Tryhard',
@@ -97,7 +97,7 @@ export const HOMEBREW_ITEMS = [
     fits: 'feet',
     bonus: b({ dex: '1' }),
     notes:
-      '[Pies] +1 DES. −2 a Stealth: hacen «flap, flap» por mucho cuidado que le pongas.\nIA: «A la audiencia le flipa un buen efecto de sonido. A los Mobs, también: os oyen venir desde el spawn.»',
+      '[Pies] +1 DES. −2 a Sigilo: hacen «flap, flap» por mucho cuidado que le pongas.\nIA: «A la audiencia le flipa un buen efecto de sonido. A los Mobs, también: os oyen venir desde el spawn.»',
   },
   {
     name: 'Pendiente Goblin de Dudosa Procedencia',
@@ -107,7 +107,7 @@ export const HOMEBREW_ITEMS = [
     fits: 'head',
     bonus: b({ con: '1' }),
     notes:
-      '[Accesorio · Cabeza] +1 CON. Hueles un poco a goblin: Ventaja en Persuasion y Negotiation con goblins, Desventaja con todo bicho que tenga nariz.\nIA: «Arrancado de una oreja. Con la oreja aún enganchada si miras bien. Loot es loot.»',
+      '[Accesorio · Cabeza] +1 CON. Hueles un poco a goblin: Ventaja en Persuasión y Negociación con goblins, Desventaja con todo bicho que tenga nariz.\nIA: «Arrancado de una oreja. Con la oreja aún enganchada si miras bien. Loot es loot.»',
   },
   {
     name: 'Chaleco Fosforito del Paso de Cebra',
@@ -137,7 +137,7 @@ export const HOMEBREW_ITEMS = [
     fits: 'held',
     bonus: b({ damage: '1' }),
     notes:
-      '[En la mano] Arma contundente (cuenta como Club). +1 de daño; +1 más contra el último Mob que te hizo daño.\nIA: «Cinta americana en el mango y rencor en el alma. Main de venganza desbloqueado.»',
+      '[En la mano] Arma contundente (cuenta como Porra). +1 de daño; +1 más contra el último Mob que te hizo daño.\nIA: «Cinta americana en el mango y rencor en el alma. Main de venganza desbloqueado.»',
   },
   {
     name: 'Rodillo de la Bronca Doméstica',
@@ -147,7 +147,7 @@ export const HOMEBREW_ITEMS = [
     fits: 'held',
     bonus: b({ damage: '1' }),
     notes:
-      '[En la mano] Arma contundente (cuenta como Club). +1 de daño. Con un Éxito Asombroso el objetivo queda Grogui.\nIA: «Harina incrustada y un pasado muy turbio. La abuela estaría orgullosa. O acojonada.»',
+      '[En la mano] Arma contundente (cuenta como Porra). +1 de daño. Con un Éxito Asombroso el objetivo queda Grogui.\nIA: «Harina incrustada y un pasado muy turbio. La abuela estaría orgullosa. O acojonada.»',
   },
   {
     name: 'Riñonera de Acceso Rapidillo',
@@ -286,7 +286,7 @@ export const HOMEBREW_ITEMS = [
     fits: 'head',
     bonus: b(),
     notes:
-      '[Accesorio · Cabeza] Ves en la oscuridad total hasta 30 pies (en verde). Desventaja en Perception con luz fuerte mientras las lleves puestas.\nIA: «El arañazo tiene forma de pene. No preguntes. Nadie lo sabe. Es lore.»',
+      '[Accesorio · Cabeza] Ves en la oscuridad total hasta 30 pies (en verde). Desventaja en Percepción con luz fuerte mientras las lleves puestas.\nIA: «El arañazo tiene forma de pene. No preguntes. Nadie lo sabe. Es lore.»',
   },
   {
     name: 'Tirachinas del Rencor',
@@ -298,7 +298,7 @@ export const HOMEBREW_ITEMS = [
     ammo: 'Piedra',
     bonus: b({ damage: '1' }),
     notes:
-      '[En la mano] Arma a distancia (cuenta como Slingshot), 60 pies, 1d6 contundente; dispara piedras. +1 de daño. +2 para impactar al último Mob que te hizo daño.\nIA: «No olvida. No perdona. Eso sí, a cualquier otro le apunta de pena.»',
+      '[En la mano] Arma a distancia (cuenta como Tirachinas), 60 pies, 1d6 contundente; dispara piedras. +1 de daño. +2 para impactar al último Mob que te hizo daño.\nIA: «No olvida. No perdona. Eso sí, a cualquier otro le apunta de pena.»',
   },
   {
     name: 'Mazo de Filetes del Overkill',
@@ -308,7 +308,7 @@ export const HOMEBREW_ITEMS = [
     fits: 'held',
     bonus: b({ damage: '2' }),
     notes:
-      '[En la mano] Arma contundente (cuenta como Club). +2 de daño. Con un Éxito Asombroso el objetivo queda Tambaleante.\nIA: «Para ablandar filetes. Y lo que se ponga delante, que hoy en día viene a ser lo mismo.»',
+      '[En la mano] Arma contundente (cuenta como Porra). +2 de daño. Con un Éxito Asombroso el objetivo queda Tambaleante.\nIA: «Para ablandar filetes. Y lo que se ponga delante, que hoy en día viene a ser lo mismo.»',
   },
   {
     name: 'Sudadera del Cabrón Sigiloso',
@@ -318,7 +318,7 @@ export const HOMEBREW_ITEMS = [
     fits: 'chest',
     bonus: b({ dr: '1', dex: '1' }),
     notes:
-      '[Pecho] RD +1, +1 DES. +1 a Stealth y Hide in Shadows con la capucha puesta.\nIA: «Capucha arriba, autoestima abajo. El uniforme oficial del que campea en las esquinas.»',
+      '[Pecho] RD +1, +1 DES. +1 a Sigilo y Esconderse en las Sombras con la capucha puesta.\nIA: «Capucha arriba, autoestima abajo. El uniforme oficial del que campea en las esquinas.»',
   },
   {
     name: 'Guantes sin Dedos del Mano Larga',
@@ -328,7 +328,7 @@ export const HOMEBREW_ITEMS = [
     fits: 'hands',
     bonus: b({ dex: '1' }),
     notes:
-      '[Manos] +1 DES. +2 a Lockpicking y Sleight of Hand.\nIA: «Sin dedos, para que los tuyos hagan cosas que tu madre no aprobaría.»',
+      '[Manos] +1 DES. +2 a Ganzúas y Juego de Manos.\nIA: «Sin dedos, para que los tuyos hagan cosas que tu madre no aprobaría.»',
   },
   {
     name: 'Tapa de Contenedor de Último Recurso',
@@ -379,7 +379,7 @@ export const HOMEBREW_ITEMS = [
     fits: 'waist',
     bonus: b({ str: '2', cha: '1' }),
     notes:
-      '[Accesorio · Cintura] +2 FUE, +1 CAR. Ventaja en Intimidate. Si lo pierdes en un combate (te lo quitan o lo sueltas), −2 a Popularidad.\nIA: «Campeón indiscutible de una manzana que ya no existe. Los títulos no caducan; los campeones, sí.»',
+      '[Accesorio · Cintura] +2 FUE, +1 CAR. Ventaja en Intimidar. Si lo pierdes en un combate (te lo quitan o lo sueltas), −2 a Popularidad.\nIA: «Campeón indiscutible de una manzana que ya no existe. Los títulos no caducan; los campeones, sí.»',
   },
   {
     name: 'Anillo de Pie Supersónico (y Ampollas)',
@@ -409,7 +409,7 @@ export const HOMEBREW_ITEMS = [
     fits: 'held',
     bonus: b({ dr: '3' }),
     notes:
-      '[En la mano] Escudo: RD +3, +1 a Shield Block. Los aliados detrás de ti (en línea) tienen +1 a Esquiva contra ataques a distancia.\nIA: «“PROPIEDAD DEL CENTRO COMERCIAL”. El centro comercial ya no existe. Ahora el tanque eres tú.»',
+      '[En la mano] Escudo: RD +3, +1 a Bloqueo con Escudo. Los aliados detrás de ti (en línea) tienen +1 a Esquiva contra ataques a distancia.\nIA: «“PROPIEDAD DEL CENTRO COMERCIAL”. El centro comercial ya no existe. Ahora el tanque eres tú.»',
   },
   {
     name: 'Camisa de Bolos del Pleno de la Suerte',

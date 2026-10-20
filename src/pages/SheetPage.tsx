@@ -20,6 +20,7 @@ import { useLive } from '../lib/live';
 import { isPlayPath, onlyPlayChanges } from '../../shared/lockRules.js';
 import { PartyToggle } from '../components/LivePanels';
 import { AchievementsTab, useAwards } from '../components/Achievements';
+import { QuestsTab, questsPending, useQuests } from '../components/Quests';
 
 const TABS = [
   { id: 'core', label: 'tab.core', el: CoreTab },
@@ -29,6 +30,7 @@ const TABS = [
   { id: 'inventory', label: 'tab.inventory', el: InventoryTab },
   { id: 'companions', label: 'tab.companions', el: CompanionsTab },
   { id: 'abilities', label: 'tab.abilities', el: AbilitiesTab },
+  { id: 'quests', label: 'tab.quests', el: QuestsTab },
   { id: 'achievements', label: 'tab.achievements', el: AchievementsTab },
 ] as const;
 
@@ -217,6 +219,9 @@ export default function SheetPage() {
   // unclaimed rewards: a badge on the Achievements tab
   const { state: awardsState } = useAwards(Number.isFinite(charId) ? charId : undefined);
   const unclaimed = awardsState?.awards.filter((w) => w.hasReward && !w.claimedAt).length ?? 0;
+  // new quest offers and quest rewards to claim: a badge on the Quests tab
+  const { state: questsState } = useQuests(Number.isFinite(charId) ? charId : undefined);
+  const questBadge = questsPending(questsState?.quests);
   const ctx = useMemo(
     () =>
       data && der
@@ -314,6 +319,22 @@ export default function SheetPage() {
                 inParty={meta.inParty}
                 onChange={(inParty) => setMeta((m) => (m ? { ...m, inParty } : m))}
               />
+            )}
+            {user?.isAdmin && !meta.inParty && (
+              <button
+                type="button"
+                className={`btn saferoom-toggle ${meta.saferoom ? 'on' : ''}`}
+                aria-pressed={meta.saferoom}
+                title={t('saferoom.crawlerHint')}
+                onClick={() =>
+                  api
+                    .setSaferoom(charId, !meta.saferoom)
+                    .then((r) => setMeta((m) => (m ? { ...m, saferoom: r.saferoom } : m)))
+                    .catch(() => {})
+                }
+              >
+                🛏 {meta.saferoom ? t('saferoom.crawlerIn') : t('saferoom.crawlerOut')}
+              </button>
             )}
             <button
               type="button"
@@ -425,6 +446,7 @@ export default function SheetPage() {
             >
               {t(x.label)}
               {x.id === 'achievements' && unclaimed > 0 && <span className="tab-badge">{unclaimed}</span>}
+              {x.id === 'quests' && questBadge > 0 && <span className="tab-badge">{questBadge}</span>}
             </button>
           ))}
         </nav>

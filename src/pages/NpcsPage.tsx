@@ -3,11 +3,11 @@ import { Link, useNavigate } from 'react-router-dom';
 import { api, type Npc } from '../lib/api';
 import { useI18n, type MsgKey } from '../lib/i18n';
 import { useLive } from '../lib/live';
-import { NPC_KINDS, loadNpc, npcFloor } from '../lib/npc';
+import { NPC_KINDS, loadNpc, npcFloor, npcName } from '../lib/npc';
 
 /** GM-only list of NPC / Mob stat blocks. */
 export default function NpcsPage() {
-  const { t, err } = useI18n();
+  const { t, err, lang } = useI18n();
   const navigate = useNavigate();
   const [npcs, setNpcs] = useState<Npc[] | null>(null);
   const [error, setError] = useState<unknown>(null);
@@ -57,7 +57,7 @@ export default function NpcsPage() {
     const f = filter.trim().toLowerCase();
     const list = (npcs ?? []).filter(
       (n) =>
-        (!f || `${n.data.name ?? ''} ${n.data.tags ?? ''}`.toLowerCase().includes(f)) &&
+        (!f || `${n.data.name ?? ''} ${n.data.nameEs ?? ''} ${n.data.tags ?? ''}`.toLowerCase().includes(f)) &&
         (floor === '' || npcFloor(n.data) === Number(floor)) &&
         (!kind || loadNpc(n.data).kind === kind),
     );
@@ -67,9 +67,9 @@ export default function NpcsPage() {
       .sort(([a], [b]) => (a || 99) - (b || 99))
       .map(([fl, items]) => ({
         fl,
-        items: items.sort((a, b) => (a.data.name ?? '').localeCompare(b.data.name ?? '')),
+        items: items.sort((a, b) => npcName(a.data, lang).localeCompare(npcName(b.data, lang))),
       }));
-  }, [npcs, filter, floor, kind]);
+  }, [npcs, filter, floor, kind, lang]);
 
   return (
     <div className="page">
@@ -148,7 +148,7 @@ export default function NpcsPage() {
 }
 
 function NpcCard({ npc }: { npc: Npc }) {
-  const { t } = useI18n();
+  const { t, lang } = useI18n();
   const d = loadNpc(npc.data);
   return (
     <Link to={`/admin/npcs/${npc.id}`} className="char-card npc-card">
@@ -156,7 +156,7 @@ function NpcCard({ npc }: { npc: Npc }) {
         <span>{t(`npc.kind.${d.kind}` as MsgKey).slice(0, 1)}</span>
       </div>
       <div className="char-info">
-        <div className="char-name">{d.name || t('npc.unnamed')}</div>
+        <div className="char-name">{npcName(d, lang) || t('npc.unnamed')}</div>
         <div className="dim small">
           {[t(`npc.kind.${d.kind}` as MsgKey), d.size, d.tags].filter(Boolean).join(' · ')}
         </div>

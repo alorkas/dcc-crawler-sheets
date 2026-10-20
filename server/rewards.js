@@ -2,6 +2,7 @@
 // with the date), and each of them can claim its reward once. Loot box contents stay on the server until claimed;
 // claiming opens the boxes and adds the items to the crawler's inventory (stacking where they are the same thing).
 import { lookup } from './catalog/index.js';
+import { inSaferoom } from './world.js';
 import { HOMEBREW_ITEMS } from './catalog/homebrew.js';
 
 const HOMEBREW = new Map(HOMEBREW_ITEMS.map((h) => [h.name.toLowerCase(), h]));
@@ -76,7 +77,7 @@ export function cleanReward(raw) {
 }
 
 /** Opened boxes as a player sees them: curses not yet revealed are invisible. */
-const hideBoxCurses = (o) =>
+export const hideBoxCurses = (o) =>
   o && {
     ...o,
     boxes: (o.boxes || []).map((b) => ({
@@ -121,7 +122,7 @@ function bookKind(e) {
 }
 
 /** Fill an item's description and type from the book catalog when the GM left them empty. */
-function fromBook(it) {
+export function fromBook(it) {
   const brew = HOMEBREW.get(it.item.trim().toLowerCase());
   if (brew) {
     const out = { ...it };
@@ -318,7 +319,16 @@ export function mountRewards(app, { db, auth, adminOnly, loadChar, live }) {
         opened: admin ? opened : hideBoxCurses(opened),
       };
     });
-    res.json({ ...settings(), awards });
+    res.json({ ...settings(), inSaferoom: inSaferoom(db, req.char), awards });
+  });
+
+  /* ---------- the GM marks a crawler outside the party as in a Saferoom (party members follow World Stats) ---------- */
+  app.patch('/api/characters/:id/saferoom', auth, adminOnly, loadChar, (req, res) => {
+    const on = !!req.body?.saferoom;
+    db.prepare('UPDATE characters SET saferoom = ? WHERE id = ?').run(on ? 1 : 0, req.char.id);
+    notify([req.char.id]);
+    live.send('quests', { characterIds: [req.char.id] }, (u) => u.is_admin || u.id === req.char.owner_id);
+    res.json({ id: req.char.id, saferoom: on, inSaferoom: inSaferoom(db, { ...req.char, saferoom: on ? 1 : 0 }) });
   });
 
   /* ---------- the GM gives items straight to a crawler (e.g. from the loot generator) ---------- */
@@ -375,6 +385,9 @@ export function mountRewards(app, { db, auth, adminOnly, loadChar, live }) {
       return res.status(423).json({ error: 'The GM has locked reward claiming', code: 'claim_locked' });
     const reward = JSON.parse(w.reward || '{}');
     if (!hasReward(reward)) return res.status(400).json({ error: 'Nothing to claim', code: 'no_reward' });
+    // loot boxes only open in a Saferoom (a reward that's only words can be claimed anywhere)
+    if (reward.boxes?.length && !req.user.is_admin && !inSaferoom(db, row))
+      return res.status(423).json({ error: 'Loot boxes can only be opened in a Saferoom', code: 'not_in_saferoom' });
 
     const opened = {
       boxes: (reward.boxes || []).map((b) => ({ ...b, items: b.items.map(fromBook) })),
