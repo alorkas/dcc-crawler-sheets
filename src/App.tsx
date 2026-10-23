@@ -14,6 +14,7 @@ import CombatPage from './pages/CombatPage';
 import WorldPage from './pages/WorldPage';
 import AchievementsPage from './pages/AchievementsPage';
 import QuestsPage from './pages/QuestsPage';
+import ImporterPage from './pages/ImporterPage';
 import GeneratorPage from './pages/GeneratorPage';
 import MapPage from './pages/MapPage';
 import { LiveProvider } from './lib/live';
@@ -54,6 +55,7 @@ function Shell() {
           {user.isAdmin && <Route path="/admin/achievements" element={<AchievementsPage />} />}
           {user.isAdmin && <Route path="/admin/quests" element={<QuestsPage />} />}
           {user.isAdmin && <Route path="/admin/generator" element={<GeneratorPage />} />}
+          {user.isAdmin && <Route path="/admin/import" element={<ImporterPage />} />}
           {user.isAdmin && <Route path="/admin/npcs/:id" element={<NpcPage />} />}
           <Route path="*" element={<Navigate to="/" replace />} />
         </Routes>
@@ -89,6 +91,7 @@ function Layout({ children }: { children: ReactNode }) {
           {user?.isAdmin && <NavLink to="/admin/quests">{t('nav.quests')}</NavLink>}
           {user?.isAdmin && <NavLink to="/admin/achievements">{t('nav.achievements')}</NavLink>}
           {user?.isAdmin && <NavLink to="/admin/generator">{t('nav.generator')}</NavLink>}
+          {user?.isAdmin && <NavLink to="/admin/import">{t('nav.importer')}</NavLink>}
           {user?.isAdmin && <NavLink to="/admin/players">{t('nav.players')}</NavLink>}
         </nav>
         <LanguageSwitcher className="top-lang" />

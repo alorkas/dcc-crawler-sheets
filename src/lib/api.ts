@@ -624,14 +624,14 @@ export type AchievementInput = {
   reward: Reward;
   characterIds?: number[];
 };
-/** What a session import added (and skipped: already there). */
+/** What an import adds (or would add, in a dry run), entry by entry. */
+export type ImportStatus = 'added' | 'exists' | 'invalid' | 'unknown';
+export type ImportSection = 'achievements' | 'quests' | 'npcs' | 'bookNpcs' | 'stash';
 export type ImportResult = {
-  achievements: [number, number];
-  quests: [number, number];
-  npcs: [number, number];
-  bookNpcs: [number, number];
-  stash: number;
-  unknownBookNpcs: string[];
+  dryRun: boolean;
+  title: string;
+  report: Record<ImportSection, { name: string; status: ImportStatus }[]>;
+  counts: Record<ImportSection, Partial<Record<ImportStatus, number>>>;
 };
 
 export const api = {
@@ -803,7 +803,8 @@ export const api = {
     request<{ ok: true; count: number }>('POST', `/api/characters/${characterId}/boxes`, { boxes, source, title }),
   openBox: (id: number) => request<{ opened: OpenedBox }>('POST', `/api/boxes/${id}/open`, {}),
   deleteBox: (id: number) => request('DELETE', `/api/boxes/${id}`),
-  importSession: (data: unknown) => request<ImportResult>('POST', '/api/admin/import', data),
+  importSession: (data: unknown, dryRun = false) =>
+    request<ImportResult>('POST', `/api/admin/import${dryRun ? '?dryRun=1' : ''}`, data),
   readBook: (characterId: number, itemId: string) =>
     request<{ name: string; rank: number; raised: boolean }>('POST', `/api/characters/${characterId}/read-book`, {
       itemId,

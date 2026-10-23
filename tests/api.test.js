@@ -1922,15 +1922,33 @@ test('session import: achievements, quests (to the party), stat blocks, book sta
     stash: [{ item: 'Corona de Prueba', type: 'equipment', fits: 'head', bonus: { cha: '2' } }],
   };
   assert.equal((await pl('POST', '/api/admin/import', file)).status, 403);
-  const r = (await dm('POST', '/api/admin/import', file)).body;
-  assert.deepEqual(r.achievements, [1, 0]);
-  assert.deepEqual(r.quests, [1, 0]);
-  assert.deepEqual(r.npcs, [1, 0]);
-  assert.equal(r.bookNpcs[0] + r.bookNpcs[1], 1);
-  assert.deepEqual(r.unknownBookNpcs, ['Nadie Inventado']);
-  assert.equal(r.stash, 1);
+  assert.equal((await dm('POST', '/api/admin/import', { format: 'other' })).body.code, 'bad_import');
+  assert.equal((await dm('POST', '/api/admin/import', { version: 99, quests: [{}] })).body.code, 'import_too_new');
+  assert.equal((await dm('POST', '/api/admin/import', { title: 'x' })).body.code, 'import_empty');
+  // a dry run reports without writing
+  const dry = (await dm('POST', '/api/admin/import?dryRun=1', file)).body;
+  assert.equal(dry.dryRun, true);
+  assert.deepEqual(dry.report.achievements, [{ name: 'Importado', status: 'added' }]);
+  assert.equal(
+    (await dm('GET', '/api/achievements')).body.some((a) => a.title === 'Importado'),
+    false,
+  );
+  const r = (await dm('POST', '/api/admin/import', { format: 'dcc-crawler-sheets/import', version: 1, ...file })).body;
+  assert.equal(r.title, 'Sesión de prueba');
+  assert.deepEqual(r.counts.achievements, { added: 1 });
+  assert.deepEqual(r.counts.quests, { added: 1 });
+  assert.deepEqual(r.counts.npcs, { added: 1 });
+  assert.equal((r.counts.bookNpcs.added ?? 0) + (r.counts.bookNpcs.exists ?? 0), 1);
+  assert.deepEqual(
+    r.report.bookNpcs.find((x) => x.status === 'unknown'),
+    { name: 'Nadie Inventado', status: 'unknown' },
+  );
+  assert.deepEqual(r.counts.stash, { added: 1 });
   const again = (await dm('POST', '/api/admin/import', file)).body;
-  assert.deepEqual([again.achievements, again.quests, again.npcs, again.stash], [[0, 1], [0, 1], [0, 1], 0]);
+  assert.deepEqual(
+    [again.counts.achievements, again.counts.quests, again.counts.npcs, again.counts.stash],
+    [{ exists: 1 }, { exists: 1 }, { exists: 1 }, { exists: 1 }],
+  );
 
   const ach = (await dm('GET', '/api/achievements')).body.find((a) => a.title === 'Importado');
   assert.equal(ach.gmNote, 'Quién: todos');

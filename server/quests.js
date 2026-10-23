@@ -315,13 +315,14 @@ export function mountQuests(app, { db, auth, adminOnly, loadChar, live, boxes })
   // for the session importer
   return {
     /** Create a quest unless one with that title exists; `party` assigns it to the active party. */
-    addQuest(body, actorId) {
+    addQuest(body, actorId, { dry = false } = {}) {
       const data = cleanQuest(body);
-      if (!data.title) return false;
+      if (!data.title) return 'invalid';
       const exists = q.all
         .all()
         .some((r) => JSON.parse(r.data || '{}').title?.toLowerCase() === data.title.toLowerCase());
-      if (exists) return false;
+      if (exists) return 'exists';
+      if (dry) return 'added';
       const r = q.ins.run(JSON.stringify(data));
       const party =
         body?.assign === 'party'
@@ -331,7 +332,7 @@ export function mountQuests(app, { db, auth, adminOnly, loadChar, live, boxes })
               .map((c) => c.id)
           : [];
       assign(Number(r.lastInsertRowid), data, party, actorId);
-      return true;
+      return 'added';
     },
   };
 }

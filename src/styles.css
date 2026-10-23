@@ -6366,3 +6366,95 @@ ul.plain {
 .one-of-in {
   width: 5.5rem;
 }
+
+/* ---------- importer ---------- */
+.importer-input {
+  display: flex;
+  flex-direction: column;
+  gap: 0.8rem;
+}
+.drop-zone {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 0.35rem;
+  padding: 1.8rem 1rem;
+  border: 2px dashed var(--border-2);
+  border-radius: 12px;
+  text-align: center;
+  cursor: pointer;
+  transition:
+    border-color 0.15s,
+    background 0.15s;
+}
+.drop-zone:hover,
+.drop-zone.over {
+  border-color: var(--gold);
+  background: color-mix(in srgb, var(--gold) 6%, transparent);
+}
+.drop-zone.busy {
+  opacity: 0.6;
+  cursor: progress;
+}
+.drop-icon {
+  font-size: 2rem;
+}
+.importer-paste summary {
+  cursor: pointer;
+  color: var(--dim);
+}
+.importer-paste textarea {
+  margin: 0.5rem 0;
+  width: 100%;
+}
+.mono {
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 0.85rem;
+}
+.importer-preview,
+.importer-done {
+  margin-top: 1rem;
+}
+.import-report {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(260px, 1fr));
+  gap: 0.6rem 1.4rem;
+}
+.import-section h3 {
+  margin: 0 0 0.3rem;
+  font-family: var(--font-label);
+  font-size: 0.95rem;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+.import-section ul {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.2rem;
+  font-size: 0.9rem;
+}
+.imp-pill.imp-added {
+  color: var(--green);
+  border-color: color-mix(in srgb, var(--green) 55%, transparent);
+}
+.imp-pill.imp-exists {
+  color: var(--dim);
+}
+.imp-pill.imp-unknown,
+.imp-pill.imp-invalid {
+  color: var(--red);
+  border-color: color-mix(in srgb, var(--red) 55%, transparent);
+}
+li.imp-exists {
+  color: var(--dim);
+}
+/* the GM's menu is long: tighter on medium screens so it fits without scrolling */
+@media (min-width: 641px) and (max-width: 1600px) {
+  .nav a {
+    padding: 0.6rem 0.5rem;
+    letter-spacing: 0.03em;
+  }
+}

@@ -425,24 +425,33 @@ export function mountRewards(app, { db, auth, adminOnly, loadChar, live, boxes }
 
   // for the session importer
   return {
-    /** Create an achievement unless one with that title exists. Returns true when it was added. */
-    addAchievement(body) {
+    /** Create an achievement unless one with that title exists: 'added' | 'exists' | 'invalid'. */
+    addAchievement(body, { dry = false } = {}) {
       const data = cleanAch(body);
-      if (!data.title) return false;
+      if (!data.title) return 'invalid';
       const all = q.allAch.all().map((r) => JSON.parse(r.data || '{}').title?.toLowerCase());
-      if (all.includes(data.title.toLowerCase())) return false;
-      q.insAch.run(JSON.stringify(data));
-      return true;
+      if (all.includes(data.title.toLowerCase())) return 'exists';
+      if (!dry) q.insAch.run(JSON.stringify(data));
+      return 'added';
     },
-    /** Put items in the GM's loot stash (skipping ones already there by name). Returns how many were added. */
-    addToStash(items) {
+    /** Put items in the GM's loot stash, skipping ones already there by name: [{ name, status }]. */
+    addToStash(items, { dry = false } = {}) {
       const cur = stash().items;
       const have = new Set(cur.map((it) => it.item.toLowerCase()));
-      const add = (Array.isArray(items) ? items : [])
-        .map(cleanItem)
-        .filter((it) => it.item && !have.has(it.item.toLowerCase()));
-      if (add.length) stashPut.run(JSON.stringify({ items: [...cur, ...add].slice(0, 200) }));
-      return add.length;
+      const report = [];
+      const add = [];
+      for (const raw of Array.isArray(items) ? items.slice(0, 200) : []) {
+        const it = cleanItem(raw);
+        if (!it.item) report.push({ name: '', status: 'invalid' });
+        else if (have.has(it.item.toLowerCase())) report.push({ name: it.item, status: 'exists' });
+        else {
+          have.add(it.item.toLowerCase());
+          add.push(it);
+          report.push({ name: it.item, status: 'added' });
+        }
+      }
+      if (add.length && !dry) stashPut.run(JSON.stringify({ items: [...cur, ...add].slice(0, 200) }));
+      return report;
     },
   };
 }
