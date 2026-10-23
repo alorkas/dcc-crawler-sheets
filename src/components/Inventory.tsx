@@ -11,6 +11,7 @@ import {
   RARITIES,
   equipItem,
   fitsSlot,
+  goldOf,
   hotlistable,
   hotlistSpells,
   isBlankItem,
@@ -20,6 +21,7 @@ import {
   isWorn,
   setHotSlot,
   slotKeyOf,
+  spellBookSpell,
   slotList,
   spellRef,
   syncHot,
@@ -188,6 +190,11 @@ export function InventoryTab() {
     setDrag(null);
   };
   const add = (type: ItemType | '') => update((d) => ({ ...d, inventory: [...d.inventory, { ...emptyItem(), type }] }));
+  const [notice, setNotice] = useState('');
+  const notify = (text: string) => {
+    setNotice(text);
+    setTimeout(() => setNotice(''), 6000);
+  };
   return (
     <Section
       title={t('inv.title')}
@@ -205,6 +212,12 @@ export function InventoryTab() {
       }
     >
       <ItemNameList />
+      <Wallet />
+      {notice && (
+        <p className="inv-notice ok" role="status">
+          {notice}
+        </p>
+      )}
       <div className="list inventory">
         <div className="list-head inv-cols">
           <span />
@@ -238,6 +251,7 @@ export function InventoryTab() {
                 <InventoryRow
                   i={i}
                   manual={mode === 'manual'}
+                  onNotice={notify}
                   onUp={pos > 0 ? () => move(i, order[pos - 1]) : undefined}
                   onDown={
                     pos < order.length - 1 && !isBlankItem(data.inventory[order[pos + 1]])
@@ -268,15 +282,18 @@ function InventoryRow({
   onUp,
   onDown,
   onOpen,
+  onNotice,
 }: {
   i: number;
   manual: boolean;
   onUp?: () => void;
   onDown?: () => void;
   onOpen: () => void;
+  /** A message that outlives the row (a spellbook disappears once read). */
+  onNotice: (text: string) => void;
 }) {
   const { data, playLocked, update, charId, der, runServer } = useSheet();
-  const { t } = useI18n();
+  const { t, err } = useI18n();
   const { user } = useAuth();
   const es = useNamesEs();
   const [msg, setMsg] = useState('');
@@ -287,6 +304,17 @@ function InventoryRow({
   const toggleHotlist = () => hot.toggle(it.id, hotSlot < 0);
   // out of combat a Consumable is used straight from the inventory (in combat: from the Hotlist)
   const usable = !blank && !hot.inFight && (it.type === 'consumable' || it.type === '') && !!charId;
+  // a spellbook is read: the spell is learned (or goes up a Level)
+  const bookOf = !blank && !!charId ? spellBookSpell(it.item) : '';
+  const read = async () => {
+    setMsg('');
+    try {
+      const r = await runServer(() => api.readBook(charId!, it.id));
+      onNotice(`📖 ${t(r.raised ? 'book.raised' : 'book.learned', { name: r.name, n: r.rank })}`);
+    } catch (e) {
+      setMsg(err(e));
+    }
+  };
   const fill = async () => {
     setMsg('');
     try {
@@ -366,7 +394,13 @@ function InventoryRow({
         {hot.error && <span className="tiny error">{hot.error}</span>}
       </div>
       <span className="inv-actions">
-        {usable && <UseItemControls memberId={charId!} it={it} manaMax={der.manaMax} run={runServer} />}
+        {bookOf ? (
+          <button type="button" className="btn small" onClick={read} title={t('book.readHint', { name: bookOf })}>
+            📖 {t('book.read')}
+          </button>
+        ) : (
+          usable && <UseItemControls memberId={charId!} it={it} manaMax={der.manaMax} run={runServer} />
+        )}
         {!blank && !playLocked && (hotlistable(it) || hotSlot >= 0) && (
           <button
             type="button"
@@ -853,5 +887,51 @@ export function qtyText(it: Pick<Item, 'qty' | 'type' | 'charges' | 'maxCharges'
       ×{Number(it.qty) || 1}
       {max > 0 && ` · ${charges}/${max} ⚡`}
     </span>
+  );
+}
+
+/** The crawler's gold (a currency, not an item). Everyone sees it; only the GM changes it (opened boxes add to it). */
+function Wallet() {
+  const { t } = useI18n();
+  const { user } = useAuth();
+  const { data, update } = useSheet();
+  const [delta, setDelta] = useState('');
+  const gold = goldOf(data);
+  const admin = !!user?.isAdmin;
+  const change = (by: number) => {
+    if (!by) return;
+    update((d) => ({ ...d, gold: String(Math.max(0, goldOf(d) + by)) }));
+    setDelta('');
+  };
+  const n = Number(delta.replace(/[^\d]/g, '')) || 0;
+  return (
+    <div className="wallet">
+      <span className="wallet-icon" aria-hidden>
+        🪙
+      </span>
+      <span className="lbl">{t('wallet.title')}</span>
+      <strong className="wallet-amount">{t('wallet.goldN', { n: gold.toLocaleString() })}</strong>
+      {admin ? (
+        <span className="wallet-gm">
+          <input
+            className="in center tiny-in"
+            inputMode="numeric"
+            value={delta}
+            placeholder="0"
+            aria-label={t('wallet.amount')}
+            onChange={(e) => setDelta(e.target.value)}
+            onKeyDown={(e) => e.key === 'Enter' && change(n)}
+          />
+          <button type="button" className="btn small" disabled={!n} onClick={() => change(n)}>
+            + {t('wallet.add')}
+          </button>
+          <button type="button" className="btn small ghost" disabled={!n} onClick={() => change(-n)}>
+            − {t('wallet.take')}
+          </button>
+        </span>
+      ) : (
+        <span className="dim tiny">{t('wallet.hint')}</span>
+      )}
+    </div>
   );
 }

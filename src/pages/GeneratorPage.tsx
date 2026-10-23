@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from 'react';
-import { api, BOX_KINDS, type BoxKind, type CharacterSummary, type RewardItem } from '../lib/api';
+import { api, BOX_KINDS, type BoxKind, type BoxTier, type CharacterSummary, type RewardItem } from '../lib/api';
 import { useI18n, type MsgKey } from '../lib/i18n';
 import {
   QUALITIES,
@@ -14,7 +14,6 @@ import {
   type GenPart,
   type Quality,
 } from '../../shared/lootgen.js';
-import { emptyItem } from '../../shared/items.js';
 import { bonusText, rarityClass } from '../components/Inventory';
 import { boxName } from '../components/Achievements';
 import type { Item } from '../lib/sheet';
@@ -53,14 +52,6 @@ export function toRewardItem(it: GeneratedItem | Rolled): RewardItem {
   return { ...rest, special: false };
 }
 /** Gold as a reward item. */
-export const goldItem = (qty: number): RewardItem => ({
-  ...emptyItem(),
-  item: 'Oro',
-  qty: String(qty),
-  type: 'other',
-  special: false,
-});
-
 /** The GM's stash of generated items (shared with the loot box editor). */
 export function useLootStash() {
   const [items, setItems] = useState<RewardItem[]>([]);
@@ -93,7 +84,7 @@ export function useWorldFloor(): number {
   return floor;
 }
 
-type Box = { uid: number; tier: Quality; kind: BoxKind; items: Rolled[]; gold: number };
+type Box = { uid: number; tier: Quality; kind: BoxKind; items: Rolled[]; gold: number; from: string };
 
 export default function GeneratorPage() {
   const { t, err } = useI18n();
@@ -159,11 +150,23 @@ export default function GeneratorPage() {
   const makeBox = () => {
     const b = generateBox({ tier: boxTier, kind: boxKind, floor: f });
     setBoxes((bs) => [
-      { uid: ++uidSeq, tier: boxTier, kind: boxKind, items: b.items.map((x) => withUid(x)), gold: b.gold },
+      { uid: ++uidSeq, tier: boxTier, kind: boxKind, items: b.items.map((x) => withUid(x)), gold: b.gold, from: '' },
       ...bs,
     ]);
   };
-  const boxItems = (b: Box) => [...b.items.map(toRewardItem), goldItem(b.gold)];
+  /** Send a generated box sealed to the crawler's Boxes tab (from the GM, or from a sponsor when named). */
+  const sendBox = async (b: Box, to: number) => {
+    const who = crawlers.find((c) => c.id === to)?.summary.name || '?';
+    try {
+      const box = { tier: b.tier as BoxTier, kind: b.kind, label: '', items: b.items.map(toRewardItem), gold: b.gold };
+      await api.sendBoxes(to, [box], b.from.trim() ? 'sponsor' : 'gm', b.from.trim());
+      flash(t('gen.boxSent', { name: who }));
+      return true;
+    } catch (e) {
+      flash(err(e), true);
+      return false;
+    }
+  };
 
   return (
     <div className="page generator-page">
@@ -289,11 +292,21 @@ export default function GeneratorPage() {
           </header>
           <div className="card-body">
             <div className="gen-actions">
+              <input
+                className="in gen-box-from"
+                value={b.from}
+                maxLength={120}
+                placeholder={t('gen.boxFrom')}
+                aria-label={t('gen.boxFrom')}
+                onChange={(e) =>
+                  setBoxes((bs) => bs.map((x) => (x.uid === b.uid ? { ...x, from: e.target.value } : x)))
+                }
+              />
               <GiveTo
                 crawlers={crawlers}
-                label={t('gen.giveAll')}
+                label={t('gen.sendBox')}
                 onGive={async (to) => {
-                  if (await give(boxItems(b), to)) setBoxes((bs) => bs.filter((x) => x.uid !== b.uid));
+                  if (await sendBox(b, to)) setBoxes((bs) => bs.filter((x) => x.uid !== b.uid));
                 }}
               />
               <button

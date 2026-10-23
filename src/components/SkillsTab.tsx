@@ -550,6 +550,7 @@ function SkillCard({
             )}
             <Input path={f('range')} label={t('skill.range')} />
             {spell && <Input path={f('duration')} label={t('skill.duration')} />}
+            {spell && <Check path={f('overcharge')} label={`⚡ ${t('overcharge.label')}`} />}
             <Input path={f('aiFavor')} label={t('skill.aiFavor')} center />
             <Input path={f('cooldown')} label={t('skill.cooldown')} />
             <Input path={f('baseDamage')} label={t('skill.baseDamage')} placeholder={t('skill.phDamage')} />

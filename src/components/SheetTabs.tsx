@@ -1,3 +1,4 @@
+import { useState } from 'react';
 import { Area, Input, Section, useSheet } from './fields';
 import { ListRows, Portrait } from './widgets';
 import { EffectsPanel } from './Status';
@@ -321,7 +322,14 @@ function PinnedRow({ i, der, onEdit }: { i: number; der: ReturnType<typeof useSh
   const spell = s.category === 'spell';
   const gearDmg = damageBonusFor(data.inventory, s.name, spell);
   const baseExpr = s.baseDamage ? damageExpr(s.baseDamage, der, data.floor) : null;
-  const dmgExpr = baseExpr && gearDmg.total ? `${baseExpr}${signed(gearDmg.total)}` : baseExpr;
+  // Overcharge: cheap spells take extra Mana, one more damage die per point (up to the spell's level)
+  const [extra, setExtra] = useState(0);
+  const die = s.baseDamage.match(/\d*d(\d+)/i)?.[1];
+  const maxExtra = spell && s.overcharge && die ? Math.max(0, rank ?? 0) : 0;
+  const boost = Math.min(extra, maxExtra);
+  const withBoost = baseExpr && boost ? `${baseExpr}+${boost}d${die}` : baseExpr;
+  const dmgExpr = withBoost && gearDmg.total ? `${withBoost}${signed(gearDmg.total)}` : withBoost;
+  const cost = spell ? num(s.manaCost) : null;
   const typeLbl = s.subtype
     ? t(`skillsub.${s.category}.${s.subtype}` as MsgKey)
     : t(`skillcat.${s.category}` as MsgKey);
@@ -351,7 +359,7 @@ function PinnedRow({ i, der, onEdit }: { i: number; der: ReturnType<typeof useSh
             label={t('roll.toHit', { name: s.name || t('skills.phSkill') })}
             name={s.name || t('skills.phSkill')}
             damage={dmgExpr}
-            manaCost={spell ? num(s.manaCost) : null}
+            manaCost={cost !== null ? cost + boost : null}
             spell={spell}
             className="pin-roll"
           />
@@ -364,6 +372,29 @@ function PinnedRow({ i, der, onEdit }: { i: number; der: ReturnType<typeof useSh
       </div>
       <div className="pin-dmg">
         {s.baseDamage ? annotateDamage(s.baseDamage, der) : '—'}
+        {maxExtra > 0 && (
+          <span className="overcharge" title={t('overcharge.hint', { n: maxExtra })}>
+            <button
+              type="button"
+              className="icon-btn tiny-btn"
+              aria-label={t('overcharge.less')}
+              disabled={boost <= 0}
+              onClick={() => setExtra(boost - 1)}
+            >
+              −
+            </button>
+            <span className={boost ? 'on' : 'dim'}>⚡{boost ? ` +${boost}d${die}` : ''}</span>
+            <button
+              type="button"
+              className="icon-btn tiny-btn"
+              aria-label={t('overcharge.more')}
+              disabled={boost >= maxExtra}
+              onClick={() => setExtra(boost + 1)}
+            >
+              +
+            </button>
+          </span>
+        )}
         {gearDmg.total !== 0 && (
           <span
             className="dim tiny gear-dmg"
@@ -390,7 +421,9 @@ function PinnedRow({ i, der, onEdit }: { i: number; der: ReturnType<typeof useSh
         {s.limitations && <div className="dim tiny">{s.limitations}</div>}
       </div>
       <div className="pin-cast">
-        {spell && s.manaCost && <span className="pill">{t('skill.sumMana', { n: s.manaCost })}</span>}
+        {spell && s.manaCost && (
+          <span className="pill">{t('skill.sumMana', { n: boost ? `${s.manaCost}+${boost}` : s.manaCost })}</span>
+        )}
         {spell && <CastButton i={i} compact />}
       </div>
     </div>

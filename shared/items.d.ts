@@ -102,3 +102,7 @@ export function mergeCurses(
   incoming: Item[],
   isAdmin: boolean,
 ): { inventory: Item[]; revealed: string[]; changed: boolean };
+export function isGoldItem(it: Partial<Item> | undefined | null): boolean;
+export function splitGold<T extends Partial<Item>>(items: T[]): { gold: number; items: T[] };
+export function goldOf(data: { gold?: string | number } | null | undefined): number;
+export function spellBookSpell(itemName: string | undefined | null): string;

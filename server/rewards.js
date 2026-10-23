@@ -2,13 +2,15 @@
 // with the date), and each of them can claim its reward once. Loot box contents stay on the server until claimed;
 // claiming opens the boxes and adds the items to the crawler's inventory (stacking where they are the same thing).
 import { lookup } from './catalog/index.js';
-import { inSaferoom } from './world.js';
+import { learnAll } from './learn.js';
 import { HOMEBREW_ITEMS } from './catalog/homebrew.js';
 
 const HOMEBREW = new Map(HOMEBREW_ITEMS.map((h) => [h.name.toLowerCase(), h]));
 import {
   ACCESSORY_FITS,
   addItems,
+  goldOf,
+  splitGold,
   BONUS_KEYS,
   emptyItem,
   ensureIds,
@@ -19,7 +21,19 @@ import {
 
 /** Loot box tiers (Core Rulebook "Loot Boxes") and the usual kinds of box. */
 export const BOX_TIERS = ['bronze', 'silver', 'gold', 'platinum', 'legendary', 'celestial'];
-export const BOX_KINDS = ['adventurer', 'boss', 'crafter', 'assassin', 'fan', 'benefactor', 'achievement', 'custom'];
+export const BOX_KINDS = [
+  'adventurer',
+  'boss',
+  'crafter',
+  'assassin',
+  'fan',
+  'benefactor',
+  'achievement',
+  'explosives',
+  'food',
+  'jerk',
+  'custom',
+];
 
 const clip = (v, n = 200) => String(v ?? '').slice(0, n);
 const pick = (v, list, d = '') => (list.includes(v) ? v : d);
@@ -59,6 +73,8 @@ export function cleanItem(raw) {
         : null,
     slot: base.slot,
     hot: false,
+    // items sharing a group: only one of them comes out of the box, picked when it's opened ("1 al azar (1d4)")
+    ...(String(it.oneOf ?? '').trim() ? { oneOf: clip(it.oneOf, 20).trim() } : {}),
   };
 }
 
@@ -72,8 +88,13 @@ export function cleanReward(raw) {
       .slice(0, 40)
       .map(cleanItem)
       .filter((it) => it.item),
+    gold: Math.max(0, Math.min(10_000_000, Math.floor(Number(b?.gold) || 0))),
   }));
-  return { boxes, note: clip(r.note, 1000).trim() };
+  // spells or skills the reward teaches (names from the catalog, or the GM's own)
+  const skills = [
+    ...new Set((Array.isArray(r.skills) ? r.skills : []).map((x) => clip(x, 80).trim()).filter(Boolean)),
+  ].slice(0, 5);
+  return { boxes, note: clip(r.note, 1000).trim(), skills };
 }
 
 /** Opened boxes as a player sees them: curses not yet revealed are invisible. */
@@ -86,7 +107,8 @@ export const hideBoxCurses = (o) =>
     })),
   };
 
-const hasReward = (r) => !!(r && (r.boxes?.length || r.note));
+const hasReward = (r) => !!(r && (r.boxes?.length || r.note || r.skills?.length));
+const boxInfo = (b) => ({ tier: b.tier, kind: b.kind, label: b.label || '' });
 
 /** Book gear slots → our body parts; a few book accessories are worn somewhere specific. */
 const BOOK_PART = {
@@ -146,13 +168,7 @@ export function fromBook(it) {
   return out;
 }
 
-export function mountRewards(app, { db, auth, adminOnly, loadChar, live }) {
-  const kvGet = db.prepare(`SELECT value FROM kv WHERE key = 'rewards'`);
-  const kvPut = db.prepare(
-    `INSERT INTO kv (key, value) VALUES ('rewards', ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value`,
-  );
-  const settings = () => ({ claimLocked: false, ...JSON.parse(kvGet.get()?.value || '{}') });
-
+export function mountRewards(app, { db, auth, adminOnly, loadChar, live, boxes }) {
   const q = {
     ach: db.prepare('SELECT * FROM achievements WHERE id = ?'),
     allAch: db.prepare('SELECT * FROM achievements ORDER BY created_at DESC, id DESC'),
@@ -208,6 +224,8 @@ export function mountRewards(app, { db, auth, adminOnly, loadChar, live }) {
   const cleanAch = (body) => ({
     title: clip(body?.title, 120).trim(),
     description: clip(body?.description, 3000),
+    // for the GM only: who gets it and when (players see the title, the description and the reward)
+    gmNote: clip(body?.gmNote, 1000).trim(),
     reward: cleanReward(body?.reward),
   });
   const toAch = (r) => ({
@@ -222,15 +240,6 @@ export function mountRewards(app, { db, auth, adminOnly, loadChar, live }) {
       claimedAt: w.claimed_at,
       reward: JSON.parse(w.reward || '{}'),
     })),
-  });
-
-  /* ---------- settings: the GM can lock reward claiming for everyone ---------- */
-  app.get('/api/rewards/settings', auth, (_req, res) => res.json(settings()));
-  app.put('/api/rewards/settings', auth, adminOnly, (req, res) => {
-    const next = { ...settings(), claimLocked: !!req.body?.claimLocked };
-    kvPut.run(JSON.stringify(next));
-    live.send('awards', { settings: true });
-    res.json(next);
   });
 
   /* ---------- achievements (GM) ---------- */
@@ -307,28 +316,20 @@ export function mountRewards(app, { db, auth, adminOnly, loadChar, live }) {
         awardedAt: w.created_at,
         claimedAt: w.claimed_at,
         hasReward: hasReward(reward),
-        // the boxes' contents stay secret until claimed (the GM sees them)
+        // the boxes' contents stay secret (they're opened from the Boxes tab); the note and the skills it
+        // teaches show once claimed (before that, only how many skills)
         reward: admin
           ? reward
-          : w.claimed_at
-            ? hideBoxCurses(reward)
-            : {
-                boxes: (reward.boxes || []).map(({ tier, kind, label }) => ({ tier, kind, label, items: [] })),
-                note: '',
-              },
+          : {
+              boxes: (reward.boxes || []).map(({ tier, kind, label }) => ({ tier, kind, label, items: [] })),
+              note: w.claimed_at ? reward.note || '' : '',
+              skills: w.claimed_at ? reward.skills || [] : [],
+            },
+        skillCount: (reward.skills || []).length,
         opened: admin ? opened : hideBoxCurses(opened),
       };
     });
-    res.json({ ...settings(), inSaferoom: inSaferoom(db, req.char), awards });
-  });
-
-  /* ---------- the GM marks a crawler outside the party as in a Saferoom (party members follow World Stats) ---------- */
-  app.patch('/api/characters/:id/saferoom', auth, adminOnly, loadChar, (req, res) => {
-    const on = !!req.body?.saferoom;
-    db.prepare('UPDATE characters SET saferoom = ? WHERE id = ?').run(on ? 1 : 0, req.char.id);
-    notify([req.char.id]);
-    live.send('quests', { characterIds: [req.char.id] }, (u) => u.is_admin || u.id === req.char.owner_id);
-    res.json({ id: req.char.id, saferoom: on, inSaferoom: inSaferoom(db, { ...req.char, saferoom: on ? 1 : 0 }) });
+    res.json({ awards });
   });
 
   /* ---------- the GM gives items straight to a crawler (e.g. from the loot generator) ---------- */
@@ -341,14 +342,17 @@ export function mountRewards(app, { db, auth, adminOnly, loadChar, live }) {
       .filter((it) => it.item)
       .map(({ special, ...it }) => it); // eslint-disable-line no-unused-vars
     if (!items.length) return res.status(400).json({ error: 'Nothing to give', code: 'bad_request' });
+    // gold goes to the wallet, not the inventory
+    const split = splitGold(items);
     const data = JSON.parse(row.data || '{}');
     const inv = ensureIds(Array.isArray(data.inventory) ? data.inventory : []);
-    const next = { ...data, inventory: addItems(inv, items) };
+    let next = split.items.length ? { ...data, inventory: addItems(inv, split.items) } : data;
+    if (split.gold) next = { ...next, gold: String(goldOf(next) + split.gold) };
     db.prepare(`UPDATE characters SET data = ?, version = version + 1, updated_at = datetime('now') WHERE id = ?`).run(
       JSON.stringify(next),
       row.id,
     );
-    live.characterChanged(row, data, next, { version: row.version + 1, actorId: req.user.id });
+    live.characterChanged(row, data, next, { version: row.version + 1, actorId: req.user.id, goldSource: 'gift' });
     live.postEvent({
       ownerId: row.owner_id,
       characterId: row.id,
@@ -375,50 +379,70 @@ export function mountRewards(app, { db, auth, adminOnly, loadChar, live }) {
     res.json({ items });
   });
 
+  // claim an achievement's reward (anywhere): the note shows, the boxes go sealed to the Boxes tab
   app.post('/api/awards/:id/claim', auth, (req, res) => {
     const w = q.award.get(Number(req.params.id));
     const row = w && q.char.get(w.character_id);
     if (!w || !row || (row.owner_id !== req.user.id && !req.user.is_admin))
       return res.status(404).json({ error: 'Not found', code: 'not_found' });
     if (w.claimed_at) return res.status(409).json({ error: 'Already claimed', code: 'already_claimed' });
-    if (settings().claimLocked && !req.user.is_admin)
-      return res.status(423).json({ error: 'The GM has locked reward claiming', code: 'claim_locked' });
     const reward = JSON.parse(w.reward || '{}');
     if (!hasReward(reward)) return res.status(400).json({ error: 'Nothing to claim', code: 'no_reward' });
-    // loot boxes only open in a Saferoom (a reward that's only words can be claimed anywhere)
-    if (reward.boxes?.length && !req.user.is_admin && !inSaferoom(db, row))
-      return res.status(423).json({ error: 'Loot boxes can only be opened in a Saferoom', code: 'not_in_saferoom' });
-
-    const opened = {
-      boxes: (reward.boxes || []).map((b) => ({ ...b, items: b.items.map(fromBook) })),
-      note: reward.note || '',
-    };
+    const opened = { boxes: (reward.boxes || []).map(boxInfo), note: reward.note || '', skills: reward.skills || [] };
     if (q.claim.run(JSON.stringify(opened), w.id).changes !== 1)
       return res.status(409).json({ error: 'Already claimed', code: 'already_claimed' });
-
-    const items = opened.boxes.flatMap((b) => b.items).map(({ special, ...it }) => it); // eslint-disable-line no-unused-vars
-    const data = JSON.parse(row.data || '{}');
-    if (items.length) {
-      const inv = ensureIds(Array.isArray(data.inventory) ? data.inventory : []);
-      const next = { ...data, inventory: addItems(inv, items) };
-      db.prepare(
-        `UPDATE characters SET data = ?, version = version + 1, updated_at = datetime('now') WHERE id = ?`,
-      ).run(JSON.stringify(next), row.id);
-      live.characterChanged(row, data, next, { version: row.version + 1, actorId: req.user.id });
-    }
     const ach = JSON.parse(q.ach.get(w.achievement_id)?.data || '{}');
+    boxes.give(row, reward.boxes, { source: 'achievement', title: ach.title || '' });
+    // skills and spells it teaches go straight onto the sheet
+    if (opened.skills.length) {
+      const before = JSON.parse(row.data || '{}');
+      const r = learnAll(before, opened.skills);
+      if (r.learned.length) {
+        db.prepare(
+          `UPDATE characters SET data = ?, version = version + 1, updated_at = datetime('now') WHERE id = ?`,
+        ).run(JSON.stringify(r.data), row.id);
+        live.characterChanged(row, before, r.data, { version: row.version + 1, actorId: req.user.id });
+        for (const l of r.learned)
+          live.postEvent({
+            ownerId: row.owner_id,
+            characterId: row.id,
+            charName: clip(before.name, 80),
+            event: { type: 'learned', ...l, source: 'achievement', title: ach.title || '' },
+            gmOnly: !row.party_since,
+          });
+      }
+    }
     live.postEvent({
       ownerId: row.owner_id,
       characterId: row.id,
-      charName: clip(data.name, 80),
-      event: {
-        type: 'reward',
-        title: ach.title || '',
-        boxes: opened.boxes.map(({ tier, kind, label }) => ({ tier, kind, label })),
-      },
+      charName: clip(JSON.parse(row.data || '{}').name, 80),
+      event: { type: 'reward', title: ach.title || '', boxes: opened.boxes },
       gmOnly: !row.party_since,
     });
     notify([row.id]);
-    res.json({ id: w.id, opened: req.user.is_admin ? opened : hideBoxCurses(opened) });
+    res.json({ id: w.id, opened });
   });
+
+  // for the session importer
+  return {
+    /** Create an achievement unless one with that title exists. Returns true when it was added. */
+    addAchievement(body) {
+      const data = cleanAch(body);
+      if (!data.title) return false;
+      const all = q.allAch.all().map((r) => JSON.parse(r.data || '{}').title?.toLowerCase());
+      if (all.includes(data.title.toLowerCase())) return false;
+      q.insAch.run(JSON.stringify(data));
+      return true;
+    },
+    /** Put items in the GM's loot stash (skipping ones already there by name). Returns how many were added. */
+    addToStash(items) {
+      const cur = stash().items;
+      const have = new Set(cur.map((it) => it.item.toLowerCase()));
+      const add = (Array.isArray(items) ? items : [])
+        .map(cleanItem)
+        .filter((it) => it.item && !have.has(it.item.toLowerCase()));
+      if (add.length) stashPut.run(JSON.stringify({ items: [...cur, ...add].slice(0, 200) }));
+      return add.length;
+    },
+  };
 }

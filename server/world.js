@@ -253,8 +253,7 @@ export function mountWorld(app, { db, auth, adminOnly, live, onFloor }) {
     if (b.saferoom !== undefined && !!b.saferoom !== !!w.saferoom) {
       w.saferoom = !!b.saferoom;
       live.postEvent({ event: { type: 'world', action: 'saferoom', on: w.saferoom } });
-      live.send('awards', {});
-      live.send('quests', {});
+      live.send('boxes', {});
     }
     // per-Floor text overrides; { reset: true } goes back to the defaults
     if (b.reset) {

@@ -5986,10 +5986,6 @@ ul.plain {
 }
 
 /* ---------- quests ---------- */
-.quest-card.boxes-waiting {
-  border-left-color: var(--green);
-  background: linear-gradient(90deg, color-mix(in srgb, var(--green) 9%, transparent), transparent 40%);
-}
 .quest-card.st-failed {
   border-left-color: var(--border-2);
   background: none;
@@ -6109,7 +6105,7 @@ ul.plain {
   gap: 0.5rem;
 }
 
-.quest-card.st-completed:not(.boxes-waiting) {
+.quest-card.st-completed {
   border-left-color: var(--border-2);
   background: none;
 }
@@ -6167,4 +6163,206 @@ ul.plain {
 .saferoom-toggle.on {
   border-color: color-mix(in srgb, var(--green) 60%, transparent);
   color: var(--green);
+}
+
+.tab-badge.muted {
+  background: var(--border-2);
+  color: var(--text);
+}
+
+/* ---------- loot boxes tab ---------- */
+.boxes-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.6rem;
+  margin: 0.4rem 0 0.5rem;
+}
+.box-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(260px, 1fr));
+  gap: 0.6rem;
+}
+.box-card {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  padding: 0.7rem 0.8rem;
+  border: 1px solid color-mix(in srgb, var(--rar, var(--gold)) 50%, var(--border));
+  border-left: 3px solid var(--rar, var(--gold));
+  border-radius: 10px;
+  background: linear-gradient(90deg, color-mix(in srgb, var(--rar, var(--gold)) 10%, transparent), transparent 60%);
+}
+.box-card-icon {
+  font-size: 2rem;
+  line-height: 1;
+  color: var(--rar, var(--gold));
+}
+.box-card-main {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.15rem;
+}
+.box-card-actions {
+  display: flex;
+  align-items: center;
+  gap: 0.3rem;
+}
+.boxes-history-btn {
+  margin-top: 0.8rem;
+}
+.box-history {
+  list-style: none;
+  margin: 0.5rem 0 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.4rem;
+}
+.box-history li {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.3rem 0.6rem;
+}
+.loot-gold {
+  text-align: center;
+  font: 400 1.4rem/1.2 var(--font-head);
+  letter-spacing: 0.03em;
+  color: var(--gold);
+  margin: 0.4rem 0;
+  animation: loot-in 0.4s ease-out both;
+}
+.claimed-note {
+  position: relative;
+  border: 1px solid color-mix(in srgb, var(--green) 55%, transparent);
+  background: color-mix(in srgb, var(--green) 9%, transparent);
+  border-radius: 8px;
+  padding: 0.6rem 2rem 0.6rem 0.8rem;
+  margin-bottom: 0.7rem;
+  font-size: 0.92rem;
+}
+.claimed-note .icon-btn {
+  position: absolute;
+  top: 0.35rem;
+  right: 0.35rem;
+}
+.claimed-note .ach-note {
+  margin-top: 0.4rem;
+}
+.box-gold {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.25rem;
+}
+.box-gold .in {
+  width: 6.5rem;
+}
+.send-box-from {
+  display: grid;
+  grid-template-columns: 180px 1fr;
+  gap: 0.6rem;
+  margin-bottom: 0.6rem;
+}
+@media (max-width: 560px) {
+  .send-box-from {
+    grid-template-columns: 1fr;
+  }
+}
+.gen-box-from {
+  max-width: 220px;
+}
+.log-items {
+  font-size: 0.85rem;
+  color: var(--dim);
+  margin-top: 0.15rem;
+}
+
+/* ---------- wallet ---------- */
+.wallet {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.4rem 0.7rem;
+  padding: 0.55rem 0.8rem;
+  margin-bottom: 0.8rem;
+  border: 1px solid color-mix(in srgb, var(--gold) 45%, var(--border));
+  border-radius: 10px;
+  background: color-mix(in srgb, var(--gold) 7%, transparent);
+}
+.wallet-icon {
+  font-size: 1.3rem;
+}
+.wallet-amount {
+  font: 400 1.5rem/1 var(--font-head);
+  letter-spacing: 0.03em;
+  color: var(--gold);
+  margin-right: auto;
+}
+.wallet-gm {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+}
+.wallet-gm .in {
+  width: 5.5rem;
+}
+
+/* ---------- spells: overcharge; rewards that teach ---------- */
+.overcharge {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.2rem;
+  margin-left: 0.4rem;
+  font-size: 0.82rem;
+}
+.overcharge .on {
+  color: var(--gold);
+  font-weight: 600;
+}
+.teach-chip {
+  color: #b39dff;
+  border-color: color-mix(in srgb, #b39dff 55%, transparent);
+  background: color-mix(in srgb, #b39dff 10%, transparent);
+}
+.teach-chip .icon-btn {
+  margin-left: 0.2rem;
+}
+.teach-picker {
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+  width: 100%;
+}
+.teach-picker .row-gap .in {
+  flex: 1;
+  min-width: 200px;
+}
+.claimed-skills {
+  margin: 0.35rem 0 0;
+  color: #b39dff;
+}
+.inv-notice {
+  margin: 0 0 0.7rem;
+  padding: 0.5rem 0.8rem;
+  border: 1px solid color-mix(in srgb, var(--green) 55%, transparent);
+  background: color-mix(in srgb, var(--green) 9%, transparent);
+  border-radius: 8px;
+}
+.import-card {
+  margin-top: 1rem;
+}
+.import-result ul {
+  margin: 0.4rem 0 0;
+  padding-left: 1.2rem;
+}
+.ach-gm-note {
+  margin: 0;
+  font-size: 0.85rem;
+  color: var(--dim);
+}
+.one-of-in {
+  width: 5.5rem;
 }

@@ -1,22 +1,21 @@
 import { useCallback, useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
-import { api, type CrawlerQuest, type QuestReward } from '../lib/api';
+import { api, type CrawlerQuest } from '../lib/api';
 import { useAuth } from '../lib/auth';
 import { useI18n, type MsgKey } from '../lib/i18n';
 import { useLiveOptional } from '../lib/live';
 import { Section, useSheet } from './fields';
-import { LootBoxOpening } from './Achievements';
 import { RewardLine } from '../pages/QuestsPage';
 
 const fmtDate = (iso: string | null, locale: string) =>
   iso ? new Date(iso).toLocaleDateString(locale, { day: 'numeric', month: 'short', year: 'numeric' }) : '';
 
-type QuestsState = { claimLocked: boolean; inSaferoom: boolean; quests: CrawlerQuest[] };
+type QuestsState = { quests: CrawlerQuest[] };
 
 /** A crawler's quests, for the sheet tab and its badge. Refetched when the server says they changed. */
 export function useQuests(charId: number | undefined) {
   const live = useLiveOptional();
-  const tick = `${live?.questsTick ?? 0}.${live?.awardsTick ?? 0}`;
+  const tick = live?.questsTick ?? 0;
   const [state, setState] = useState<QuestsState | null>(null);
   const [error, setError] = useState<unknown>(null);
   const load = useCallback(() => {
@@ -33,27 +32,21 @@ export function useQuests(charId: number | undefined) {
   return { state, setState, error, load };
 }
 
-/** Boxes from a completed quest still sealed. */
-const boxesWaiting = (q: CrawlerQuest) => !!q.grantedAt && q.reward.boxes.length > 0 && !q.openedAt;
-/** The tab's badge: quests in progress and sealed boxes waiting for a Saferoom. */
+/** The tab's badge: quests in progress. */
 export const questsPending = (list: CrawlerQuest[] | undefined) =>
-  (list ?? []).filter((q) => q.status === 'active' || boxesWaiting(q)).length;
+  (list ?? []).filter((q) => q.status === 'active').length;
 
-const ORDER = (q: CrawlerQuest) => (boxesWaiting(q) ? 0 : q.status === 'active' ? 1 : q.status === 'completed' ? 2 : 3);
+const ORDER = (q: CrawlerQuest) => (q.status === 'active' ? 0 : q.status === 'completed' ? 1 : 2);
 
 /* ---------------- sheet tab ---------------- */
 export function QuestsTab() {
   const { t, err, locale } = useI18n();
   const { user } = useAuth();
-  const { charId, runServer } = useSheet();
+  const { charId } = useSheet();
   const { state, setState, error, load } = useQuests(charId);
-  const [busy, setBusy] = useState<number | null>(null);
   const [actError, setActError] = useState<unknown>(null);
-  const [opening, setOpening] = useState<{ title: string; reward: QuestReward; replay: boolean } | null>(null);
   const [showClosed, setShowClosed] = useState(false);
   const admin = !!user?.isAdmin;
-  const locked = !!state?.claimLocked && !admin;
-  const safe = !!state?.inSaferoom || admin;
 
   // objectives tick at once (everyone on the quest sees it through the live update)
   function tick(q: CrawlerQuest, objId: string, done: boolean) {
@@ -71,26 +64,10 @@ export function QuestsTab() {
     setActError(null);
     api.tickObjective(q.linkId, objId, done).catch(setActError).finally(load);
   }
-  async function openBoxes(q: CrawlerQuest) {
-    setBusy(q.linkId);
-    setActError(null);
-    try {
-      const r = await runServer(() => api.openQuestBoxes(q.linkId));
-      // the Levels came with the completion; the opening shows only the boxes (and the note)
-      setOpening({ title: q.title, reward: { ...r.opened, levels: 0 }, replay: false });
-    } catch (e) {
-      setActError(e);
-    } finally {
-      setBusy(null);
-      load();
-    }
-  }
-
   const all = [...(state?.quests ?? [])].sort((a, b) => ORDER(a) - ORDER(b));
-  const closed = all.filter((q) => q.status !== 'active' && !boxesWaiting(q));
-  const open = all.filter((q) => !closed.includes(q));
+  const closed = all.filter((q) => q.status !== 'active');
+  const open = all.filter((q) => q.status === 'active');
   const list = showClosed ? all : open;
-  const waiting = all.filter(boxesWaiting).length;
 
   return (
     <Section
@@ -103,12 +80,6 @@ export function QuestsTab() {
         ) : undefined
       }
     >
-      {state && waiting > 0 && (
-        <div className={`saferoom-note ${state.inSaferoom ? 'on' : ''}`}>
-          {state.inSaferoom ? `🛏 ${t('saferoom.youAreIn')}` : `🔒 ${t('saferoom.boxesWait')}`}
-        </div>
-      )}
-      {state?.claimLocked && <div className="ach-locked">🔒 {t('ach.lockedMsg')}</div>}
       {!!error && <p className="error">{err(error)}</p>}
       {!!actError && <p className="error">{err(actError)}</p>}
       {!state && !error && <p className="dim">{t('common.loading')}</p>}
@@ -117,12 +88,8 @@ export function QuestsTab() {
       <div className="ach-list quest-list">
         {list.map((q) => {
           const done = q.objectives.filter((o) => o.done).length;
-          const contents = q.openedAt ? (q.opened ?? q.reward) : q.reward;
           return (
-            <article
-              key={q.linkId}
-              className={`ach-card quest-card st-${q.status} ${boxesWaiting(q) ? 'boxes-waiting' : ''}`}
-            >
+            <article key={q.linkId} className={`ach-card quest-card st-${q.status}`}>
               <div className="ach-trophy" aria-hidden>
                 {q.status === 'completed' ? '✔' : q.status === 'failed' ? '✖' : '📜'}
               </div>
@@ -167,9 +134,7 @@ export function QuestsTab() {
                     </ul>
                   </>
                 )}
-                {(q.hasReward || admin) && (
-                  <RewardLine reward={contents} gm={admin && !q.openedAt} sealed={!q.openedAt} />
-                )}
+                {(q.hasReward || admin) && <RewardLine reward={q.reward} gm={admin} />}
                 {q.penalty && q.status !== 'completed' && (
                   <div className={`quest-penalty ${q.status === 'failed' ? 'hit' : ''}`}>
                     <span className="lbl">{t(q.status === 'failed' ? 'quest.penaltyHit' : 'quest.penalty')}</span>
@@ -180,33 +145,10 @@ export function QuestsTab() {
                   {q.grantedAt && q.reward.levels > 0 && (
                     <span className="ach-claimed">✓ {t('quest.levelsGiven', { n: q.reward.levels })}</span>
                   )}
-                  {boxesWaiting(q) && (
-                    <>
-                      <button
-                        type="button"
-                        className={`btn primary ${safe && !locked ? 'claim-btn' : ''}`}
-                        disabled={!safe || locked || busy !== null}
-                        onClick={() => openBoxes(q)}
-                        title={!safe ? t('saferoom.only') : locked ? t('ach.lockedMsg') : undefined}
-                      >
-                        {busy === q.linkId ? t('ach.opening') : t('quest.openBoxes')}
-                      </button>
-                      {!safe && <span className="dim small">🔒 {t('saferoom.only')}</span>}
-                    </>
-                  )}
-                  {q.openedAt && (
-                    <>
-                      <span className="ach-claimed">
-                        ✓ {t('quest.openedOn', { date: fmtDate(q.openedAt, locale) })}
-                      </span>
-                      <button
-                        type="button"
-                        className="btn small ghost"
-                        onClick={() => setOpening({ title: q.title, reward: { ...contents, levels: 0 }, replay: true })}
-                      >
-                        {t('ach.seeContents')}
-                      </button>
-                    </>
+                  {q.grantedAt && q.reward.boxes.length > 0 && (
+                    <Link className="btn small ghost" to={`/sheet/${charId}?tab=boxes`}>
+                      ▣ {t('quest.boxesToTab', { n: q.reward.boxes.length })}
+                    </Link>
                   )}
                 </div>
               </div>
@@ -218,14 +160,6 @@ export function QuestsTab() {
         <button type="button" className="btn small ghost" onClick={() => setShowClosed((s) => !s)}>
           {showClosed ? t('quest.hideClosed') : t('quest.showClosed', { n: closed.length })}
         </button>
-      )}
-      {opening && (
-        <LootBoxOpening
-          title={opening.title}
-          reward={opening.reward}
-          instant={opening.replay}
-          onClose={() => setOpening(null)}
-        />
       )}
     </Section>
   );

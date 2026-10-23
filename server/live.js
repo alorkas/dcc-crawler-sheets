@@ -144,8 +144,7 @@ export function mountLive(app, { db, auth, adminOnly, loadChar }) {
     ).run(inParty ? 1 : 0, req.char.id);
     send('party', {});
     // joining or leaving the party can change whether they're in a Saferoom
-    send('awards', {});
-    send('quests', {});
+    send('boxes', {});
     res.json({ id: req.char.id, inParty });
   });
 
@@ -155,7 +154,7 @@ export function mountLive(app, { db, auth, adminOnly, loadChar }) {
    * - tells the owner's and GM's open copies of the sheet that there is a newer version
    * - logs HP and mana changes to the event log, with the sources the client reported
    */
-  function characterChanged(row, oldData, newData, { version, sources, actorId } = {}) {
+  function characterChanged(row, oldData, newData, { version, sources, actorId, goldSource } = {}) {
     if (!row) return;
     if (row.party_since) {
       const a = JSON.stringify(partyView(oldData, true));
@@ -199,6 +198,18 @@ export function mountLive(app, { db, auth, adminOnly, loadChar }) {
           gmOnly: !row.party_since,
         });
       }
+    }
+    // the wallet: logged when the GM changes it (boxes and gifts log their own entry)
+    const goldA = Math.floor(Number(oldData?.gold) || 0);
+    const goldB = Math.floor(Number(newData.gold) || 0);
+    if (goldA !== goldB && !goldSource) {
+      postEvent({
+        ownerId: row.owner_id,
+        characterId: row.id,
+        charName: name,
+        event: { type: 'gold', from: goldA, to: goldB },
+        gmOnly: true, // private to the owner and the GM
+      });
     }
     const manaA = String(oldData?.manaCurrent ?? '');
     const manaB = String(newData.manaCurrent ?? '');

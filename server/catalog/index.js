@@ -3,6 +3,8 @@ import { SPELLS } from './spells.js';
 import { UTILITY } from './utility.js';
 import { ITEMS } from './items.js';
 import { HOMEBREW_ITEMS } from './homebrew.js';
+import { HOMEBREW_SPELLS } from './homebrewSpells.js';
+import { HOMEBREW_SKILLS } from './homebrewSkills.js';
 import { ITEMS_ES, SPELLS_ES } from './namesEs.js';
 import { SKILLS_ES } from '../../shared/namesEs.js';
 
@@ -19,6 +21,11 @@ export const nameEs = (kind, name) =>
   (kind === 'item' ? ITEMS_ES[name] : kind === 'spell' ? SPELLS_ES[name] : SKILLS_ES[name]) ?? '';
 const withEs = (kind) => (e) => ({ ...e, nameEs: nameEs(kind, e.name) });
 
+/** The campaign's spells and skills read like the book's; the System AI's line goes where the book's tags go. */
+const campaign = (e) => ({ ...e, tags: [`«${e.ai}»`, e.overcharge && '⚡ Sobrecarga'].filter(Boolean).join(' · ') });
+const CAMPAIGN_SPELLS = HOMEBREW_SPELLS.map(campaign);
+const CAMPAIGN_SKILLS = HOMEBREW_SKILLS.map(campaign);
+
 const index = new Map();
 const put = (kind, raw) => {
   const entry = withEs(kind)(raw);
@@ -31,6 +38,9 @@ const put = (kind, raw) => {
 WEAPONS.forEach((e) => put('weapon', e));
 UTILITY.forEach((e) => put('utility', e));
 SPELLS.forEach((e) => put('spell', e));
+// the campaign's own spells and combat skills (book names win)
+CAMPAIGN_SPELLS.forEach((e) => put('spell', e));
+CAMPAIGN_SKILLS.forEach((e) => put('weapon', e));
 ITEMS.forEach((e) => put('item', e));
 // the campaign's own loot: looked up like book items (book names win)
 HOMEBREW_ITEMS.forEach((e) => put('item', { name: e.name, type: e.type, effect: e.notes, homebrew: true }));
@@ -64,9 +74,9 @@ export function publicSkills() {
 /** Everything, for the GM. */
 export function fullCatalog() {
   return {
-    weapons: WEAPONS.map(withEs('weapon')).map(strip),
+    weapons: [...WEAPONS.map(withEs('weapon')), ...CAMPAIGN_SKILLS].map(strip),
     utility: UTILITY.map(withEs('utility')).map(strip),
-    spells: SPELLS.map(withEs('spell')).map(strip),
+    spells: [...SPELLS.map(withEs('spell')), ...CAMPAIGN_SPELLS].map(strip),
     items: ITEMS.map(withEs('item')).map(strip),
     homebrew: HOMEBREW_ITEMS,
   };

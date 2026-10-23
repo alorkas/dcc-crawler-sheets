@@ -30,3 +30,13 @@ test('Area Attacks: detection and the share of damage taken', async () => {
   assert.equal(damageFactor({ area: true, splash: true }), 0.5);
   assert.equal(damageFactor({ area: true, splash: true, evaded: true }), 0.25);
 });
+
+test('area attacks are recognised in Spanish too', async () => {
+  const { isAreaAttack, hasSplash } = await import('../shared/formula.js');
+  assert.equal(isAreaAttack({ range: 'Cono de 15 ft' }), true);
+  assert.equal(isAreaAttack({ range: 'Explosión de 20 ft a su alrededor' }), true);
+  assert.equal(isAreaAttack({ effect: 'Ataque de área.' }), true);
+  assert.equal(isAreaAttack({ range: '10 ft (15 ft en fase 2)' }), false);
+  assert.equal(isAreaAttack({ range: 'Radiografía' }), false);
+  assert.equal(hasSplash({ effect: '+10 ft de salpicadura' }), true);
+});

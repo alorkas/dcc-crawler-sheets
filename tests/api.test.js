@@ -964,7 +964,6 @@ test('achievements: GM awards, contents hidden until claimed, claim once, GM loc
 
   // the player sees the box (tier, kind) but not what's inside
   const mine = (await pl('GET', `/api/characters/${a.body.id}/awards`)).body;
-  assert.equal(mine.claimLocked, false);
   const w = mine.awards[0];
   assert.equal(w.title, 'First Blood');
   assert.equal(w.hasReward, true);
@@ -974,21 +973,29 @@ test('achievements: GM awards, contents hidden until claimed, claim once, GM loc
   assert.equal((await other('GET', `/api/characters/${a.body.id}/awards`)).status, 404);
   assert.equal((await other('POST', `/api/awards/${w.id}/claim`)).status, 404);
 
-  // GM lock
-  await dm('PUT', '/api/rewards/settings', { claimLocked: true });
-  const lockedTry = await pl('POST', `/api/awards/${w.id}/claim`);
-  assert.equal(lockedTry.status, 423);
-  assert.equal(lockedTry.body.code, 'claim_locked');
-  assert.equal((await pl('GET', `/api/characters/${a.body.id}/awards`)).body.claimLocked, true);
-  await dm('PUT', '/api/rewards/settings', { claimLocked: false });
-
-  // claim (in a Saferoom): works on a locked sheet, items stack or get their own row, contents revealed
-  await dm('PATCH', `/api/characters/${a.body.id}/saferoom`, { saferoom: true });
+  // claim (anywhere, no lock any more): the note shows, the box goes sealed to the Boxes tab
+  assert.equal((await dm('PUT', '/api/rewards/settings', { claimLocked: true })).status, 404);
   const claim = await pl('POST', `/api/awards/${w.id}/claim`);
   assert.equal(claim.status, 200);
-  assert.equal(claim.body.opened.boxes[0].items.length, 2);
-  assert.match(claim.body.opened.boxes[0].items[0].notes, /Heals 5 HB slots/, 'description filled from the book');
+  assert.deepEqual(claim.body.opened.boxes, [{ tier: 'gold', kind: 'adventurer', label: '' }]);
   assert.equal((await pl('POST', `/api/awards/${w.id}/claim`)).status, 409, 'only once');
+  assert.equal((await pl('GET', `/api/characters/${a.body.id}`)).body.data.inventory.length, 1, 'nothing yet');
+  const sealed = (await pl('GET', `/api/characters/${a.body.id}/boxes`)).body;
+  assert.equal(sealed.inSaferoom, false);
+  assert.equal(sealed.boxes.length, 1);
+  assert.equal(sealed.boxes[0].source, 'achievement');
+  assert.equal(sealed.boxes[0].title, 'First Blood');
+  assert.deepEqual(sealed.boxes[0].items, [], 'contents hidden');
+  assert.equal((await other('GET', `/api/characters/${a.body.id}/boxes`)).status, 404);
+  assert.equal((await other('POST', `/api/boxes/${sealed.boxes[0].id}/open`)).status, 404);
+  assert.equal((await pl('POST', `/api/boxes/${sealed.boxes[0].id}/open`)).body.code, 'not_in_saferoom');
+  // open (in a Saferoom): works on a locked sheet, items stack or get their own row, contents revealed
+  await dm('PATCH', `/api/characters/${a.body.id}/saferoom`, { saferoom: true });
+  const open = await pl('POST', `/api/boxes/${sealed.boxes[0].id}/open`);
+  assert.equal(open.status, 200);
+  assert.equal(open.body.opened.items.length, 2);
+  assert.match(open.body.opened.items[0].notes, /Heals 5 HB slots/, 'description filled from the book');
+  assert.equal((await pl('POST', `/api/boxes/${sealed.boxes[0].id}/open`)).status, 409, 'only once');
   const inv = (await pl('GET', `/api/characters/${a.body.id}`)).body.data.inventory;
   assert.equal(inv.find((i) => i.item === 'Healing Potion').qty, '5');
   const crown = inv.find((i) => i.item.startsWith('Crown'));
@@ -1010,9 +1017,10 @@ test('achievements: GM awards, contents hidden until claimed, claim once, GM loc
   // revoke
   assert.equal((await dm('DELETE', `/api/awards/${bw.id}`)).status, 200);
   assert.equal((await other('GET', `/api/characters/${b.body.id}/awards`)).body.awards.length, 0);
-  // the log shows the achievement and the opened box
-  const log = (await dm('GET', '/api/messages')).body.filter((m) => m.event?.type === 'reward');
-  assert.equal(log.at(-1).event.boxes[0].tier, 'gold');
+  // the log shows the claimed reward and the opened box
+  const log = (await dm('GET', '/api/messages')).body;
+  assert.equal(log.filter((m) => m.event?.type === 'reward').at(-1).event.boxes[0].tier, 'gold');
+  assert.equal(log.filter((m) => m.event?.type === 'box').at(-1).event.items.length, 2);
 });
 
 test('Phase 4: effects tick down, Evade degrees, Advantage, Intervene, Taunt, Catcher, links, items, area attacks', async () => {
@@ -1349,6 +1357,8 @@ test('campaign loot: valid items, GM-only list, claimed items bring their bonuse
   });
   await dm('PATCH', `/api/characters/${ach.body.awards[0].characterId}/saferoom`, { saferoom: true });
   await pl('POST', `/api/awards/${ach.body.awards[0].id}/claim`);
+  const ringBox = (await pl('GET', `/api/characters/${c.body.id}/boxes`)).body.boxes[0];
+  await pl('POST', `/api/boxes/${ringBox.id}/open`);
   const ring = (await pl('GET', `/api/characters/${c.body.id}`)).body.data.inventory.find(
     (i) => i.item === 'Anillo de Plata del Estilazo',
   );
@@ -1616,7 +1626,6 @@ test('quests: assigned (no declining), shared objectives, completion gives Level
 
   // the player sees the quest, the penalty, the box (sealed) and the Levels; not someone else's
   const mine = (await pl('GET', `/api/characters/${a.body.id}/quests`)).body;
-  assert.equal(mine.inSaferoom, false);
   const link = mine.quests[0];
   assert.equal(link.penalty, 'El goblin te pone en su lista negra');
   assert.equal(link.reward.levels, 2);
@@ -1631,10 +1640,7 @@ test('quests: assigned (no declining), shared objectives, completion gives Level
   const bl = (await other('GET', `/api/characters/${b.body.id}/quests`)).body.quests[0];
   assert.equal(bl.objectives[0].done, true);
 
-  // nothing to open before it's completed
-  assert.equal((await pl('POST', `/api/quest-crawlers/${link.linkId}/open`)).body.code, 'quest_not_completed');
-
-  // completed: the Levels go onto the sheets at once (every crawler on it), the boxes wait
+  // completed: the Levels go onto the sheets at once (every crawler on it), the boxes to their Boxes tab
   const full = (await dm('GET', '/api/quests')).body.find((x) => x.id === q.body.id);
   await dm('PUT', `/api/quests/${q.body.id}`, { ...full, status: 'completed' });
   let data = (await pl('GET', `/api/characters/${a.body.id}`)).body.data;
@@ -1646,7 +1652,7 @@ test('quests: assigned (no declining), shared objectives, completion gives Level
     undefined,
   );
   assert.equal((await other('GET', `/api/characters/${b.body.id}`)).body.data.level, '5');
-  // reopening and completing again doesn't give the Levels twice; editing the reward doesn't change what they got
+  // reopening and completing again doesn't give anything twice; editing the reward doesn't change what they got
   await dm('PUT', `/api/quests/${q.body.id}`, { ...full, status: 'active' });
   await dm('PUT', `/api/quests/${q.body.id}`, {
     ...full,
@@ -1656,38 +1662,43 @@ test('quests: assigned (no declining), shared objectives, completion gives Level
   assert.equal((await pl('GET', `/api/characters/${a.body.id}`)).body.data.level, '5');
   const done = (await pl('GET', `/api/characters/${a.body.id}/quests`)).body.quests[0];
   assert.ok(done.grantedAt);
-  assert.equal(done.openedAt, null);
   assert.equal(done.reward.boxes[0].tier, 'silver');
+  const myBoxes = (await pl('GET', `/api/characters/${a.body.id}/boxes`)).body.boxes;
+  assert.equal(myBoxes.length, 1);
+  assert.equal(myBoxes[0].source, 'quest');
+  assert.equal(myBoxes[0].tier, 'silver');
 
   // boxes only open in a Saferoom: the party's switch for party members, their own one for anyone else
-  const notSafe = await pl('POST', `/api/quest-crawlers/${link.linkId}/open`);
+  const notSafe = await pl('POST', `/api/boxes/${myBoxes[0].id}/open`);
   assert.equal(notSafe.status, 423);
   assert.equal(notSafe.body.code, 'not_in_saferoom');
   await dm('PATCH', `/api/characters/${a.body.id}/saferoom`, { saferoom: true });
-  assert.equal((await pl('POST', `/api/quest-crawlers/${link.linkId}/open`)).status, 423, 'party follows World Stats');
+  assert.equal((await pl('POST', `/api/boxes/${myBoxes[0].id}/open`)).status, 423, 'party follows World Stats');
   assert.equal((await pl('PATCH', '/api/world', { saferoom: true })).status, 403);
   await dm('PATCH', '/api/world', { saferoom: true });
   assert.equal((await pl('GET', '/api/world')).body.saferoom, true);
-  assert.equal((await other('POST', `/api/quest-crawlers/${bl.linkId}/open`)).status, 423, 'not in the party');
+  assert.equal((await pl('GET', `/api/characters/${a.body.id}/boxes`)).body.inSaferoom, true);
+  const theirBox = (await other('GET', `/api/characters/${b.body.id}/boxes`)).body.boxes[0];
+  assert.equal((await other('POST', `/api/boxes/${theirBox.id}/open`)).status, 423, 'not in the party');
 
-  const open = await pl('POST', `/api/quest-crawlers/${link.linkId}/open`);
+  const open = await pl('POST', `/api/boxes/${myBoxes[0].id}/open`);
   assert.equal(open.status, 200);
-  assert.equal(open.body.opened.boxes[0].items[0].item, 'Healing Potion');
-  assert.equal((await pl('POST', `/api/quest-crawlers/${link.linkId}/open`)).status, 409, 'only once');
+  assert.equal(open.body.opened.items[0].item, 'Healing Potion');
+  assert.equal((await pl('POST', `/api/boxes/${myBoxes[0].id}/open`)).status, 409, 'only once');
   data = (await pl('GET', `/api/characters/${a.body.id}`)).body.data;
   assert.equal(data.inventory.find((i) => i.item === 'Healing Potion').qty, '2');
   assert.equal(data.level, '5');
-  assert.ok((await pl('GET', `/api/characters/${a.body.id}/quests`)).body.quests[0].openedAt);
+  assert.ok((await pl('GET', `/api/characters/${a.body.id}/boxes`)).body.boxes[0].openedAt);
 
   await dm('PATCH', `/api/characters/${b.body.id}/saferoom`, { saferoom: true });
   assert.equal((await other('GET', `/api/characters/${b.body.id}`)).body.saferoom, true);
-  assert.equal((await other('POST', `/api/quest-crawlers/${bl.linkId}/open`)).status, 200);
+  assert.equal((await other('POST', `/api/boxes/${theirBox.id}/open`)).status, 200);
   await dm('PATCH', '/api/world', { saferoom: false });
 
   // log: assigned, completed (with Levels and boxes), boxes opened; the Saferoom announced
   const log = (await dm('GET', '/api/messages')).body;
   const qlog = log.filter((m) => m.event?.type === 'quest');
-  for (const action of ['offered', 'completed', 'claimed'])
+  for (const action of ['offered', 'completed'])
     assert.ok(
       qlog.some((m) => m.event.action === action),
       action,
@@ -1729,29 +1740,216 @@ test('quests: assigned (no declining), shared objectives, completion gives Level
   assert.equal((await dm('GET', `/api/characters/${a.body.id}/quests`)).body.quests.length, visible);
 });
 
-test('achievement loot boxes open only in a Saferoom; a reward in words can be claimed anywhere', async () => {
+test('Boxes tab: the GM sends boxes (own or sponsor), gold goes to the wallet, only the GM changes the wallet', async () => {
   const dm = client();
   const pl = client();
   await dm('POST', '/api/auth/login', { username: 'dm', password: 'adminpass123' });
-  await pl('POST', '/api/auth/register', { username: 'safeach', password: 'password1' });
-  const a = await pl('POST', '/api/characters', { data: { schema: 9, name: 'Boxy' } });
+  await pl('POST', '/api/auth/register', { username: 'walletp', password: 'password1' });
+  const a = await pl('POST', '/api/characters', {
+    data: {
+      schema: 9,
+      name: 'Rich',
+      inventory: [{ id: 'g1', item: 'Torch', qty: '1', type: 'consumable', bonus: {} }],
+    },
+  });
+  const id = a.body.id;
+  assert.equal((await pl('POST', `/api/characters/${id}/boxes`, { boxes: [{ tier: 'gold' }] })).status, 403);
+  const sent = await dm('POST', `/api/characters/${id}/boxes`, {
+    source: 'sponsor',
+    title: 'Borant Corp',
+    boxes: [
+      {
+        tier: 'silver',
+        kind: 'benefactor',
+        items: [
+          { item: 'Torch', qty: '2' },
+          { item: 'Oro', qty: '30' },
+        ],
+        gold: 20,
+      },
+    ],
+  });
+  assert.equal(sent.status, 201);
+  const list = (await pl('GET', `/api/characters/${id}/boxes`)).body.boxes;
+  assert.equal(list[0].source, 'sponsor');
+  assert.equal(list[0].title, 'Borant Corp');
+  assert.equal(list[0].gold, 0, 'hidden until opened');
+  assert.equal((await dm('GET', `/api/characters/${id}/boxes`)).body.boxes[0].gold, 50, 'GM sees it');
+  // the GM opens it anywhere (players need a Saferoom); gold → wallet, items → inventory
+  const open = await dm('POST', `/api/boxes/${list[0].id}/open`);
+  assert.equal(open.body.opened.gold, 50);
+  assert.deepEqual(
+    open.body.opened.items.map((i) => i.item),
+    ['Torch'],
+  );
+  let data = (await pl('GET', `/api/characters/${id}`)).body.data;
+  assert.equal(data.gold, '50');
+  assert.equal(data.inventory.find((i) => i.item === 'Torch').qty, '3');
+  // players can't change their wallet; the GM can (logged)
+  await pl('PUT', `/api/characters/${id}`, {
+    data: { ...data, gold: '9999' },
+    version: (await pl('GET', `/api/characters/${id}`)).body.version,
+  });
+  assert.equal((await pl('GET', `/api/characters/${id}`)).body.data.gold, '50');
+  const v = (await dm('GET', `/api/characters/${id}`)).body;
+  await dm('PUT', `/api/characters/${id}`, { data: { ...v.data, gold: '40' }, version: v.version });
+  assert.equal((await pl('GET', `/api/characters/${id}`)).body.data.gold, '40');
+  const log = (await dm('GET', '/api/messages')).body;
+  assert.ok(log.some((m) => m.event?.type === 'gold' && m.event.from === 50 && m.event.to === 40));
+  assert.ok(log.some((m) => m.event?.type === 'boxes' && m.event.title === 'Borant Corp'));
+  assert.ok(log.some((m) => m.event?.type === 'box' && m.event.gold === 50));
+  // gifts of gold go to the wallet too
+  await dm('POST', `/api/characters/${id}/gift`, { items: [{ item: 'Oro', qty: '5' }] });
+  assert.equal((await pl('GET', `/api/characters/${id}`)).body.data.gold, '45');
+  // the GM can take back a sealed box
+  await dm('POST', `/api/characters/${id}/boxes`, { boxes: [{ tier: 'bronze' }] });
+  const sealed = (await pl('GET', `/api/characters/${id}/boxes`)).body.boxes.find((b) => !b.openedAt);
+  assert.equal((await pl('DELETE', `/api/boxes/${sealed.id}`)).status, 403);
+  assert.equal((await dm('DELETE', `/api/boxes/${sealed.id}`)).status, 200);
+  assert.equal((await pl('GET', `/api/characters/${id}/boxes`)).body.boxes.length, 1);
+});
+
+test('campaign spells and skills: GM-only lookups, spellbooks teach or level up, rewards teach skills', async () => {
+  const dm = client();
+  const pl = client();
+  await dm('POST', '/api/auth/login', { username: 'dm', password: 'adminpass123' });
+  await pl('POST', '/api/auth/register', { username: 'spellreader', password: 'password1' });
+  // looked up by exact name (players only get what they ask for); the GM lists them all
+  const hit = (await pl('GET', '/api/catalog/lookup?name=Pistolero')).body;
+  assert.equal(hit.kind, 'spell');
+  assert.equal(hit.entry.manaCost, '1');
+  assert.equal(hit.entry.overcharge, true);
+  assert.match(hit.entry.tags, /«.+» · ⚡ Sobrecarga/);
+  assert.equal((await pl('GET', '/api/catalog/lookup?name=Suplex')).body.entry.subtype, 'handToHand');
+  const all = (await dm('GET', '/api/catalog/all')).body;
+  assert.ok(all.spells.some((s) => s.name === 'Bola de Grasa' && s.homebrew));
+  assert.ok(all.weapons.some((s) => s.name === 'Rematar'));
+
+  const c = await pl('POST', '/api/characters', {
+    data: {
+      schema: 9,
+      name: 'Lector',
+      skills: [{ name: '', rank: '' }],
+      inventory: [
+        { id: 'b1', item: 'Libro de Hechizos: Pistolero', qty: '2', type: 'special', bonus: {} },
+        { id: 'b2', item: 'Libro de Hechizos: Hechizo Inventado', qty: '1', type: 'special', bonus: {} },
+        { id: 't1', item: 'Torch', qty: '1', type: 'consumable', bonus: {} },
+      ],
+    },
+  });
+  const id = c.body.id;
+  let r = await pl('POST', `/api/characters/${id}/read-book`, { itemId: 'b1' });
+  assert.deepEqual(r.body, { name: 'Pistolero', rank: 1, raised: false });
+  let data = (await pl('GET', `/api/characters/${id}`)).body.data;
+  const sk = data.skills.find((s) => s.name === 'Pistolero');
+  assert.equal(sk.category, 'spell');
+  assert.equal(sk.manaCost, '1');
+  assert.equal(sk.overcharge, true);
+  assert.match(sk.notes, /^N5:/);
+  assert.equal(data.skills.length, 1, 'the blank template row was used');
+  assert.equal(data.inventory.find((i) => i.id === 'b1').qty, '1');
+  // a second copy raises it a Level and the book is used up
+  r = await pl('POST', `/api/characters/${id}/read-book`, { itemId: 'b1' });
+  assert.equal(r.body.rank, 2);
+  data = (await pl('GET', `/api/characters/${id}`)).body.data;
+  assert.equal(
+    data.inventory.find((i) => i.id === 'b1'),
+    undefined,
+  );
+  assert.equal((await pl('POST', `/api/characters/${id}/read-book`, { itemId: 'b2' })).body.code, 'unknown_spell');
+  assert.equal((await pl('POST', `/api/characters/${id}/read-book`, { itemId: 't1' })).body.code, 'not_a_spellbook');
+
+  // an achievement teaches a skill; the player sees which only once claimed
+  await dm('PATCH', `/api/characters/${id}/party`, { inParty: true });
   const ach = await dm('POST', '/api/achievements', {
-    title: 'Caja',
-    reward: { boxes: [{ tier: 'bronze', kind: 'adventurer', items: [{ item: 'Torch', qty: '1' }] }] },
-    characterIds: [a.body.id],
+    title: 'Pelea de bar',
+    reward: { skills: ['Cabezazo de Bar', 'Pistolero'] },
+    characterIds: [id],
   });
-  const words = await dm('POST', '/api/achievements', {
-    title: 'Palabras',
-    reward: { note: 'Un aplauso' },
-    characterIds: [a.body.id],
-  });
-  const list = (await pl('GET', `/api/characters/${a.body.id}/awards`)).body;
-  assert.equal(list.inSaferoom, false);
-  const box = list.awards.find((w) => w.achievementId === ach.body.id);
-  const note = list.awards.find((w) => w.achievementId === words.body.id);
-  assert.equal((await pl('POST', `/api/awards/${box.id}/claim`)).body.code, 'not_in_saferoom');
-  assert.equal((await pl('POST', `/api/awards/${note.id}/claim`)).status, 200);
-  await dm('PATCH', `/api/characters/${a.body.id}/saferoom`, { saferoom: true });
-  assert.equal((await pl('GET', `/api/characters/${a.body.id}/awards`)).body.inSaferoom, true);
-  assert.equal((await pl('POST', `/api/awards/${box.id}/claim`)).status, 200);
+  const w = (await pl('GET', `/api/characters/${id}/awards`)).body.awards[0];
+  assert.deepEqual(w.reward.skills, []);
+  assert.equal(w.skillCount, 2);
+  const claim = await pl('POST', `/api/awards/${w.id}/claim`);
+  assert.deepEqual(claim.body.opened.skills, ['Cabezazo de Bar', 'Pistolero']);
+  data = (await pl('GET', `/api/characters/${id}`)).body.data;
+  assert.equal(data.skills.find((s) => s.name === 'Cabezazo de Bar').category, 'combat');
+  assert.equal(data.skills.find((s) => s.name === 'Pistolero').rank, '3');
+  const log = (await dm('GET', '/api/messages')).body.filter((m) => m.event?.type === 'learned');
+  assert.ok(log.some((m) => m.event.source === 'book' && m.event.name === 'Pistolero'));
+  assert.ok(log.some((m) => m.event.source === 'achievement' && m.event.name === 'Cabezazo de Bar'));
+  assert.ok(ach.body.id);
+
+  // a completed quest teaches too
+  const q = await dm('POST', '/api/quests', { title: 'Clases', reward: { skills: ['Rematar'] }, characterIds: [id] });
+  await dm('PUT', `/api/quests/${q.body.id}`, { ...q.body, status: 'completed' });
+  data = (await pl('GET', `/api/characters/${id}`)).body.data;
+  assert.equal(data.skills.find((s) => s.name === 'Rematar').subtype, 'damageEffect');
+});
+
+test('session import: achievements, quests (to the party), stat blocks, book stat blocks and stash; safe to repeat', async () => {
+  const dm = client();
+  const pl = client();
+  await dm('POST', '/api/auth/login', { username: 'dm', password: 'adminpass123' });
+  await pl('POST', '/api/auth/register', { username: 'importee', password: 'password1' });
+  const c = await pl('POST', '/api/characters', { data: { schema: 9, name: 'Party' } });
+  await dm('PATCH', `/api/characters/${c.body.id}/party`, { inParty: true });
+  const file = {
+    title: 'Sesión de prueba',
+    achievements: [
+      {
+        title: 'Importado',
+        description: '«Texto de la IA»',
+        gmNote: 'Quién: todos',
+        reward: {
+          boxes: [
+            {
+              label: 'Prueba',
+              kind: 'food',
+              tier: 'bronze',
+              items: [
+                { item: 'Torch', qty: '1' },
+                { item: 'Anillo A', oneOf: 'd4' },
+                { item: 'Anillo B', oneOf: 'd4' },
+              ],
+            },
+          ],
+        },
+      },
+    ],
+    quests: [{ title: 'Misión importada', assign: 'party', reward: { levels: 1 } }],
+    npcs: [{ name: 'Jefa Importada', kind: 'boss', attacks: [{ name: 'Golpe', toHit: '12+F', damage: '1d6' }] }],
+    bookNpcs: ['Goblin', 'Nadie Inventado'],
+    stash: [{ item: 'Corona de Prueba', type: 'equipment', fits: 'head', bonus: { cha: '2' } }],
+  };
+  assert.equal((await pl('POST', '/api/admin/import', file)).status, 403);
+  const r = (await dm('POST', '/api/admin/import', file)).body;
+  assert.deepEqual(r.achievements, [1, 0]);
+  assert.deepEqual(r.quests, [1, 0]);
+  assert.deepEqual(r.npcs, [1, 0]);
+  assert.equal(r.bookNpcs[0] + r.bookNpcs[1], 1);
+  assert.deepEqual(r.unknownBookNpcs, ['Nadie Inventado']);
+  assert.equal(r.stash, 1);
+  const again = (await dm('POST', '/api/admin/import', file)).body;
+  assert.deepEqual([again.achievements, again.quests, again.npcs, again.stash], [[0, 1], [0, 1], [0, 1], 0]);
+
+  const ach = (await dm('GET', '/api/achievements')).body.find((a) => a.title === 'Importado');
+  assert.equal(ach.gmNote, 'Quién: todos');
+  assert.equal(ach.reward.boxes[0].kind, 'food');
+  assert.equal(ach.reward.boxes[0].items[1].oneOf, 'd4');
+  assert.equal((await pl('GET', `/api/characters/${c.body.id}/quests`)).body.quests[0].title, 'Misión importada');
+  // the random group: only one of the rings comes out
+  await dm('POST', `/api/achievements/${ach.id}/awards`, { characterIds: [c.body.id] });
+  const w = (await pl('GET', `/api/characters/${c.body.id}/awards`)).body.awards[0];
+  assert.equal(w.gmNote, undefined, 'players never get the GM note');
+  await pl('POST', `/api/awards/${w.id}/claim`);
+  const box = (await pl('GET', `/api/characters/${c.body.id}/boxes`)).body.boxes[0];
+  const opened = (await dm('POST', `/api/boxes/${box.id}/open`)).body.opened;
+  assert.equal(opened.items.length, 2);
+  assert.equal(opened.items.filter((i) => i.item.startsWith('Anillo')).length, 1);
+  assert.equal(
+    opened.items.some((i) => 'oneOf' in i),
+    false,
+  );
+  const stash = (await dm('GET', '/api/loot-stash')).body.items;
+  assert.ok(stash.some((i) => i.item === 'Corona de Prueba' && i.bonus.cha === '2'));
 });

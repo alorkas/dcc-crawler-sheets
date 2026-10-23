@@ -2,10 +2,9 @@
 // what happens if it fails) to one or more crawlers or the whole party. Crawlers can't turn them down. The GM marks
 // a quest completed or failed. On completion the reward is given at once: the Levels go straight onto the sheet
 // (Core Rulebook: quests give Levels) and the loot boxes wait, sealed, until the crawler is in a Saferoom.
-import { addItems, ensureIds } from '../shared/items.js';
-import { cleanReward, fromBook, hideBoxCurses } from './rewards.js';
+import { cleanReward } from './rewards.js';
 import { levelUp } from './progress.js';
-import { inSaferoom } from './world.js';
+import { learnAll } from './learn.js';
 
 export const QUEST_STATUSES = ['active', 'completed', 'failed'];
 const clip = (v, n = 200) => String(v ?? '').slice(0, n);
@@ -36,9 +35,9 @@ export function cleanQuest(body) {
     hidden: !!b.hidden,
   };
 }
-const hasReward = (r) => !!(r && (r.boxes?.length || r.note || r.levels));
+const hasReward = (r) => !!(r && (r.boxes?.length || r.note || r.levels || r.skills?.length));
 
-export function mountQuests(app, { db, auth, adminOnly, loadChar, live }) {
+export function mountQuests(app, { db, auth, adminOnly, loadChar, live, boxes }) {
   db.exec(`
     CREATE TABLE IF NOT EXISTS quests (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -67,8 +66,19 @@ export function mountQuests(app, { db, auth, adminOnly, loadChar, live }) {
     db.exec('UPDATE quest_crawlers SET granted_at = claimed_at, reward = opened WHERE claimed_at IS NOT NULL');
   }
 
-  const kvGet = db.prepare(`SELECT value FROM kv WHERE key = 'rewards'`);
-  const claimLocked = () => !!JSON.parse(kvGet.get()?.value || '{}').claimLocked;
+  // quest boxes used to be opened from the quest: the sealed ones move to the Boxes tab
+  for (const l of db
+    .prepare(
+      'SELECT l.*, qu.data AS qdata FROM quest_crawlers l JOIN quests qu ON qu.id = l.quest_id WHERE l.granted_at IS NOT NULL AND l.claimed_at IS NULL',
+    )
+    .all()) {
+    const row = db.prepare('SELECT * FROM characters WHERE id = ?').get(l.character_id);
+    boxes.give(row, JSON.parse(l.reward || '{}').boxes, {
+      source: 'quest',
+      title: JSON.parse(l.qdata || '{}').title || '',
+    });
+    db.prepare(`UPDATE quest_crawlers SET claimed_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now') WHERE id = ?`).run(l.id);
+  }
   const q = {
     quest: db.prepare('SELECT * FROM quests WHERE id = ?'),
     all: db.prepare('SELECT * FROM quests ORDER BY updated_at DESC, id DESC'),
@@ -89,11 +99,7 @@ export function mountQuests(app, { db, auth, adminOnly, loadChar, live }) {
     delLink: db.prepare('DELETE FROM quest_crawlers WHERE id = ?'),
     grant: db.prepare(
       `UPDATE quest_crawlers SET granted_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now'), reward = ?,
-       claimed_at = CASE WHEN ? THEN strftime('%Y-%m-%dT%H:%M:%fZ', 'now') ELSE NULL END
-       WHERE id = ? AND granted_at IS NULL`,
-    ),
-    open: db.prepare(
-      `UPDATE quest_crawlers SET claimed_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now'), opened = ? WHERE id = ? AND claimed_at IS NULL`,
+       claimed_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now') WHERE id = ? AND granted_at IS NULL`,
     ),
     char: db.prepare('SELECT * FROM characters WHERE id = ?'),
     save: db.prepare(
@@ -127,8 +133,6 @@ export function mountQuests(app, { db, auth, adminOnly, loadChar, live }) {
       characterId: l.character_id,
       name: JSON.parse(l.cdata || '{}').name || '',
       grantedAt: l.granted_at,
-      boxes: l.reward ? JSON.parse(l.reward).boxes?.length || 0 : 0,
-      openedAt: l.granted_at && l.reward && JSON.parse(l.reward).boxes?.length ? l.claimed_at : null,
     })),
   });
   const saveChar = (row, before, data, actorId) => {
@@ -137,22 +141,27 @@ export function mountQuests(app, { db, auth, adminOnly, loadChar, live }) {
   };
 
   /**
-   * Hand out the reward of a completed quest to one crawler, once: Levels onto the sheet now, the reward is kept
-   * with the crawler (boxes sealed until a Saferoom; later edits of the quest don't change it).
+   * Hand out the reward of a completed quest to one crawler, once: Levels onto the sheet now, the boxes sealed to
+   * their Boxes tab (opened in a Saferoom). The reward is kept as given (later edits of the quest don't change it).
    */
   const grant = (link, d, actorId) => {
     const row = q.char.get(link.character_id);
     if (!row || link.granted_at) return;
     const reward = d.reward || { boxes: [], note: '', levels: 0 };
-    const noBoxes = !reward.boxes?.length;
-    if (q.grant.run(JSON.stringify(reward), noBoxes ? 1 : 0, link.id).changes !== 1) return;
+    if (q.grant.run(JSON.stringify(reward), link.id).changes !== 1) return;
+    boxes.give(row, reward.boxes, { source: 'quest', title: d.title || '' });
+    // Levels and the skills/spells it teaches go onto the sheet now (one save)
     let levelEntry = null;
+    const before = JSON.parse(row.data || '{}');
+    let data = before;
     if (reward.levels) {
-      const before = JSON.parse(row.data || '{}');
-      const r = levelUp(before, reward.levels, 'quest', d.title || '');
-      saveChar(row, before, r.data, actorId);
+      const r = levelUp(data, reward.levels, 'quest', d.title || '');
+      data = r.data;
       levelEntry = r.entry;
     }
+    const taught = learnAll(data, reward.skills);
+    data = taught.data;
+    if (data !== before) saveChar(row, before, data, actorId);
     post(row, {
       type: 'quest',
       action: 'completed',
@@ -162,6 +171,7 @@ export function mountQuests(app, { db, auth, adminOnly, loadChar, live }) {
       note: reward.note || '',
     });
     if (levelEntry) post(row, { type: 'level', ...levelEntry });
+    for (const l of taught.learned) post(row, { type: 'learned', ...l, source: 'quest', title: d.title || '' });
   };
   const assign = (questId, data, charIds, actorId) => {
     const given = [];
@@ -249,7 +259,6 @@ export function mountQuests(app, { db, auth, adminOnly, loadChar, live }) {
       .map(({ l, d }) => {
         // once completed, what this crawler got; before that, what's on offer
         const reward = (l.reward ? JSON.parse(l.reward) : d.reward) || { boxes: [], note: '', levels: 0 };
-        const opened = l.opened ? JSON.parse(l.opened) : null;
         return {
           linkId: l.id,
           questId: l.quest_id,
@@ -264,20 +273,19 @@ export function mountQuests(app, { db, auth, adminOnly, loadChar, live }) {
           assignedAt: l.created_at,
           updatedAt: l.qupdated,
           grantedAt: l.granted_at,
-          openedAt: reward.boxes?.length ? l.claimed_at : null,
           hasReward: hasReward(reward),
-          // the boxes' contents stay secret until opened (the GM sees them); Levels and notes are known
+          // the boxes' contents stay secret (opened from the Boxes tab; the GM sees them); Levels and notes are known
           reward: admin
             ? reward
             : {
                 boxes: (reward.boxes || []).map(({ tier, kind, label }) => ({ tier, kind, label, items: [] })),
                 note: reward.note || '',
                 levels: reward.levels || 0,
+                skills: reward.skills || [],
               },
-          opened: admin ? opened : hideBoxCurses(opened),
         };
       });
-    res.json({ claimLocked: claimLocked(), inSaferoom: inSaferoom(db, req.char), quests: list });
+    res.json({ quests: list });
   });
 
   const loadLink = (req, res, next) => {
@@ -304,34 +312,26 @@ export function mountQuests(app, { db, auth, adminOnly, loadChar, live }) {
     res.json({ ok: true });
   });
 
-  // open the loot boxes of a completed quest: once, in a Saferoom
-  app.post('/api/quest-crawlers/:linkId/open', auth, loadLink, (req, res) => {
-    const l = req.link;
-    if (!l.granted_at)
-      return res.status(409).json({ error: 'The quest is not completed', code: 'quest_not_completed' });
-    const reward = JSON.parse(l.reward || '{}');
-    if (!reward.boxes?.length) return res.status(400).json({ error: 'No boxes to open', code: 'no_reward' });
-    if (l.claimed_at) return res.status(409).json({ error: 'Already opened', code: 'already_claimed' });
-    if (!req.user.is_admin && claimLocked())
-      return res.status(423).json({ error: 'The GM has locked reward claiming', code: 'claim_locked' });
-    if (!req.user.is_admin && !inSaferoom(db, req.row))
-      return res.status(423).json({ error: 'Loot boxes can only be opened in a Saferoom', code: 'not_in_saferoom' });
-    const opened = {
-      boxes: reward.boxes.map((b) => ({ ...b, items: b.items.map(fromBook) })),
-      note: reward.note || '',
-      levels: reward.levels || 0,
-    };
-    if (q.open.run(JSON.stringify(opened), l.id).changes !== 1)
-      return res.status(409).json({ error: 'Already opened', code: 'already_claimed' });
-    const row = req.row;
-    const items = opened.boxes.flatMap((b) => b.items).map(({ special, ...it }) => it); // eslint-disable-line no-unused-vars
-    if (items.length) {
-      const before = JSON.parse(row.data || '{}');
-      const inv = ensureIds(Array.isArray(before.inventory) ? before.inventory : []);
-      saveChar(row, before, { ...before, inventory: addItems(inv, items) }, req.user.id);
-    }
-    post(row, { type: 'quest', action: 'claimed', title: req.questData.title || '', boxes: boxInfo(opened.boxes) });
-    notify([row.id]);
-    res.json({ opened: req.user.is_admin ? opened : hideBoxCurses(opened) });
-  });
+  // for the session importer
+  return {
+    /** Create a quest unless one with that title exists; `party` assigns it to the active party. */
+    addQuest(body, actorId) {
+      const data = cleanQuest(body);
+      if (!data.title) return false;
+      const exists = q.all
+        .all()
+        .some((r) => JSON.parse(r.data || '{}').title?.toLowerCase() === data.title.toLowerCase());
+      if (exists) return false;
+      const r = q.ins.run(JSON.stringify(data));
+      const party =
+        body?.assign === 'party'
+          ? db
+              .prepare('SELECT id FROM characters WHERE party_since IS NOT NULL')
+              .all()
+              .map((c) => c.id)
+          : [];
+      assign(Number(r.lastInsertRowid), data, party, actorId);
+      return true;
+    },
+  };
 }

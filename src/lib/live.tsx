@@ -38,6 +38,8 @@ type LiveState = {
   awardsTick: number;
   /** Goes up whenever a quest (or who is on it) changes. */
   questsTick: number;
+  /** Goes up whenever a crawler's loot boxes (or Saferoom state) change. */
+  boxesTick: number;
   /** Goes up whenever a map changes. */
   mapsTick: number;
 };
@@ -58,6 +60,7 @@ export function LiveProvider({ children }: { children: ReactNode }) {
   const [awardsTick, setAwardsTick] = useState(0);
   const [mapsTick, setMapsTick] = useState(0);
   const [questsTick, setQuestsTick] = useState(0);
+  const [boxesTick, setBoxesTick] = useState(0);
   const loadWorld = useCallback(() => {
     api
       .world()
@@ -150,6 +153,7 @@ export function LiveProvider({ children }: { children: ReactNode }) {
     es.addEventListener('awards', () => setAwardsTick((n) => n + 1));
     es.addEventListener('maps', () => setMapsTick((n) => n + 1));
     es.addEventListener('quests', () => setQuestsTick((n) => n + 1));
+    es.addEventListener('boxes', () => setBoxesTick((n) => n + 1));
     es.addEventListener('character', (e) => {
       const ev = JSON.parse((e as MessageEvent).data);
       charListeners.current.forEach((fn) => fn(ev));
@@ -209,6 +213,7 @@ export function LiveProvider({ children }: { children: ReactNode }) {
       onCharacter,
       awardsTick,
       questsTick,
+      boxesTick,
       mapsTick,
     }),
     [
@@ -227,6 +232,7 @@ export function LiveProvider({ children }: { children: ReactNode }) {
       onCharacter,
       awardsTick,
       questsTick,
+      boxesTick,
       mapsTick,
     ],
   );

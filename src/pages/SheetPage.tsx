@@ -21,6 +21,7 @@ import { isPlayPath, onlyPlayChanges } from '../../shared/lockRules.js';
 import { PartyToggle } from '../components/LivePanels';
 import { AchievementsTab, useAwards } from '../components/Achievements';
 import { QuestsTab, questsPending, useQuests } from '../components/Quests';
+import { BoxesTab, useBoxes } from '../components/Boxes';
 
 const TABS = [
   { id: 'core', label: 'tab.core', el: CoreTab },
@@ -28,6 +29,7 @@ const TABS = [
   { id: 'skills', label: 'tab.skills', el: SkillsTab },
   { id: 'equipment', label: 'tab.equipment', el: EquipmentTab },
   { id: 'inventory', label: 'tab.inventory', el: InventoryTab },
+  { id: 'boxes', label: 'tab.boxes', el: BoxesTab },
   { id: 'companions', label: 'tab.companions', el: CompanionsTab },
   { id: 'abilities', label: 'tab.abilities', el: AbilitiesTab },
   { id: 'quests', label: 'tab.quests', el: QuestsTab },
@@ -222,6 +224,9 @@ export default function SheetPage() {
   // new quest offers and quest rewards to claim: a badge on the Quests tab
   const { state: questsState } = useQuests(Number.isFinite(charId) ? charId : undefined);
   const questBadge = questsPending(questsState?.quests);
+  // sealed loot boxes: a badge on the Boxes tab
+  const { state: boxesState } = useBoxes(Number.isFinite(charId) ? charId : undefined);
+  const sealedBoxes = boxesState?.boxes.filter((b) => !b.openedAt).length ?? 0;
   const ctx = useMemo(
     () =>
       data && der
@@ -447,6 +452,9 @@ export default function SheetPage() {
               {t(x.label)}
               {x.id === 'achievements' && unclaimed > 0 && <span className="tab-badge">{unclaimed}</span>}
               {x.id === 'quests' && questBadge > 0 && <span className="tab-badge">{questBadge}</span>}
+              {x.id === 'boxes' && sealedBoxes > 0 && (
+                <span className={`tab-badge ${boxesState?.inSaferoom ? '' : 'muted'}`}>{sealedBoxes}</span>
+              )}
             </button>
           ))}
         </nav>

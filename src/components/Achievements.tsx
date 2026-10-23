@@ -12,8 +12,10 @@ import { useNamesEs } from '../lib/namesEs';
 type T = ReturnType<typeof useI18n>['t'];
 
 /** "Gold Adventurer Box" / "Caja de Aventurero de Oro" (or the GM's own name for it). */
-export const boxName = (t: T, b: Pick<LootBox, 'tier' | 'kind' | 'label'>) =>
-  b.label || t('box.name', { kind: t(`box.kind.${b.kind}` as MsgKey), tier: t(`box.tierOf.${b.tier}` as MsgKey) });
+export const boxName = (t: T, b: Pick<LootBox, 'tier' | 'kind' | 'label'>) => {
+  const plain = t('box.name', { kind: t(`box.kind.${b.kind}` as MsgKey), tier: t(`box.tierOf.${b.tier}` as MsgKey) });
+  return b.label ? `«${b.label}» (${plain})` : plain;
+};
 
 /** Items that get the spotlight when a box opens. */
 export const isSpecial = (it: RewardItem) =>
@@ -39,7 +41,7 @@ const fmtDate = (iso: string | null, locale: string) =>
 export function useAwards(charId: number | undefined) {
   const live = useLiveOptional();
   const tick = live?.awardsTick ?? 0;
-  const [state, setState] = useState<{ claimLocked: boolean; inSaferoom: boolean; awards: Award[] } | null>(null);
+  const [state, setState] = useState<{ awards: Award[] } | null>(null);
   const [error, setError] = useState<unknown>(null);
   const load = useCallback(() => {
     if (!charId) return;
@@ -61,20 +63,19 @@ export function AchievementsTab() {
   const { user } = useAuth();
   const { charId, runServer } = useSheet();
   const { state, error, load } = useAwards(charId);
-  // loot boxes only open in a Saferoom (a reward in words can be claimed anywhere)
-  const needsSaferoom = (w: Award) => !admin && !state?.inSaferoom && w.reward.boxes.length > 0;
   const [busy, setBusy] = useState<number | null>(null);
   const [claimError, setClaimError] = useState<unknown>(null);
   const [opening, setOpening] = useState<{ title: string; reward: Reward; replay: boolean } | null>(null);
+  const [claimed, setClaimed] = useState<{ title: string; boxes: number; note: string; skills: string[] } | null>(null);
   const admin = !!user?.isAdmin;
-  const blocked = !!state?.claimLocked && !admin;
 
+  // claiming works anywhere: the note shows and the boxes go sealed to the Boxes tab (opened in a Saferoom)
   async function claim(w: Award) {
     setBusy(w.id);
     setClaimError(null);
     try {
       const r = await runServer(() => api.claimAward(w.id));
-      setOpening({ title: w.title, reward: r.opened, replay: false });
+      setClaimed({ title: w.title, boxes: r.opened.boxes.length, note: r.opened.note, skills: r.opened.skills ?? [] });
       load();
     } catch (e) {
       setClaimError(e);
@@ -95,7 +96,32 @@ export function AchievementsTab() {
         ) : undefined
       }
     >
-      {state?.claimLocked && <div className="ach-locked">🔒 {t('ach.lockedMsg')}</div>}
+      {claimed && (
+        <div className="claimed-note" role="status">
+          <strong>✓ {t('ach.claimedMsg', { title: claimed.title })}</strong>
+          {claimed.boxes > 0 && (
+            <span>
+              {' '}
+              {t('ach.boxesToTab', { n: claimed.boxes })}{' '}
+              <Link to={`/sheet/${charId}?tab=boxes`} onClick={() => setClaimed(null)}>
+                {t('boxes.goto')}
+              </Link>
+            </span>
+          )}
+          {claimed.skills.length > 0 && (
+            <p className="claimed-skills">🎓 {t('teach.learned', { list: claimed.skills.join(', ') })}</p>
+          )}
+          {claimed.note && <p className="ach-note">{claimed.note}</p>}
+          <button
+            type="button"
+            className="icon-btn tiny-btn"
+            aria-label={t('common.close')}
+            onClick={() => setClaimed(null)}
+          >
+            ×
+          </button>
+        </div>
+      )}
       {!!error && <p className="error">{err(error)}</p>}
       {!!claimError && <p className="error">{err(claimError)}</p>}
       {!state && !error && <p className="dim">{t('common.loading')}</p>}
@@ -121,7 +147,18 @@ export function AchievementsTab() {
                       {contents.boxes.map((b, i) => (
                         <BoxChip key={i} box={b} sealed={!w.claimedAt} />
                       ))}
-                      {!contents.boxes.length && !w.claimedAt && <span className="dim small">{t('ach.surprise')}</span>}
+                      {/* what it teaches shows once claimed; before that, how many */}
+                      {(contents.skills?.length ? contents.skills : (w.reward.skills ?? [])).map((n) => (
+                        <span key={n} className="pill teach-chip">
+                          🎓 {n}
+                        </span>
+                      ))}
+                      {!w.claimedAt && !w.reward.skills?.length && !!w.skillCount && (
+                        <span className="pill teach-chip">🎓 {t('teach.secret', { n: w.skillCount })}</span>
+                      )}
+                      {!contents.boxes.length && !w.skillCount && !w.claimedAt && (
+                        <span className="dim small">{t('ach.surprise')}</span>
+                      )}
                     </div>
                     {w.claimedAt && contents.note && <p className="ach-note">{contents.note}</p>}
                     {admin && !w.claimedAt && <RewardPreview reward={w.reward} />}
@@ -132,15 +169,12 @@ export function AchievementsTab() {
                     <>
                       <button
                         type="button"
-                        className={`btn primary ${blocked || needsSaferoom(w) ? '' : 'claim-btn'}`}
-                        disabled={blocked || needsSaferoom(w) || busy !== null}
+                        className="btn primary claim-btn"
+                        disabled={busy !== null}
                         onClick={() => claim(w)}
-                        title={blocked ? t('ach.lockedMsg') : needsSaferoom(w) ? t('saferoom.only') : undefined}
                       >
                         {busy === w.id ? t('ach.opening') : t('ach.claim')}
                       </button>
-                      {blocked && <span className="dim small">{t('ach.lockedMsg')}</span>}
-                      {!blocked && needsSaferoom(w) && <span className="dim small">🔒 {t('saferoom.only')}</span>}
                     </>
                   )}
                   {w.claimedAt && (
@@ -148,7 +182,8 @@ export function AchievementsTab() {
                       <span className="ach-claimed">
                         ✓ {t('ach.claimedOn', { date: fmtDate(w.claimedAt, locale) })}
                       </span>
-                      {(contents.boxes.length > 0 || contents.note) && (
+                      {/* rewards claimed before the Boxes tab were opened right here */}
+                      {contents.boxes.some((b) => b.items?.length) ? (
                         <button
                           type="button"
                           className="btn small ghost"
@@ -156,6 +191,12 @@ export function AchievementsTab() {
                         >
                           {t('ach.seeContents')}
                         </button>
+                      ) : (
+                        contents.boxes.length > 0 && (
+                          <Link className="btn small ghost" to={`/sheet/${charId}?tab=boxes`}>
+                            ▣ {t('boxes.goto')}
+                          </Link>
+                        )
                       )}
                     </>
                   )}
@@ -266,7 +307,12 @@ export function LootBoxOpening({
             {!open && <p className="dim small center">{t('ach.tapToOpen')}</p>}
             {open && (
               <div className="loot-contents">
-                {box.items.length === 0 && <p className="dim center">{t('ach.emptyBox')}</p>}
+                {box.items.length === 0 && !box.gold && <p className="dim center">{t('ach.emptyBox')}</p>}
+                {!!box.gold && (
+                  <div className="loot-gold" style={{ animationDelay: instant ? '0ms' : '250ms' }}>
+                    🪙 {t('wallet.plusGold', { n: box.gold.toLocaleString() })}
+                  </div>
+                )}
                 {special.map((it, i) => (
                   <div
                     key={`s${i}`}
@@ -315,7 +361,9 @@ export function LootBoxOpening({
                     ))}
                   </ul>
                 )}
-                {box.items.length > 0 && !instant && <p className="ok small center">{t('ach.added')}</p>}
+                {(box.items.length > 0 || !!box.gold) && !instant && (
+                  <p className="ok small center">{t('ach.added')}</p>
+                )}
               </div>
             )}
           </>

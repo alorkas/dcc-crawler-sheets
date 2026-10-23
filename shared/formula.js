@@ -41,7 +41,9 @@ export function damageDice(text, floor, mods = {}) {
   return /\d*d\d+/i.test(expr) ? expr : null;
 }
 
-const AREA_RE = /\b(cone|blast|burst|line|splash|radius|area|aoe)\b/i;
+// English and Spanish ("Cono de 15 ft", "Explosión de 20 ft", "ataque de área")
+const AREA_RE =
+  /(?:^|[^\p{L}])(cone|blast|burst|line|splash|radius|area|aoe|cono|explosi[oó]n|r[aá]faga|l[ií]nea|salpicadura|radio|[aá]rea)(?=$|[^\p{L}])/iu;
 /** Area Attacks (Cone, Blast, Burst, Line, Splash…), from the stat block's range/damage/effect text. */
 export function isAreaAttack(attack) {
   const a = attack || {};
@@ -50,7 +52,9 @@ export function isAreaAttack(attack) {
 /** Area Attacks with a Splash zone (half damage out there). */
 export function hasSplash(attack) {
   const a = attack || {};
-  return /\bsplash\b/i.test(`${a.range ?? ''} ${a.damage ?? ''} ${a.effect ?? ''}`);
+  return /(?:^|[^\p{L}])(splash|salpicadura)(?=$|[^\p{L}])/iu.test(
+    `${a.range ?? ''} ${a.damage ?? ''} ${a.effect ?? ''}`,
+  );
 }
 /**
  * Share of a declared attack's damage a target takes (Core Rulebook p. 83): a successful Evade avoids a normal

@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState } from 'react';
-import { api, type AdminUser } from '../lib/api';
+import { api, type AdminUser, type ImportResult } from '../lib/api';
 import { useAuth } from '../lib/auth';
 import { useI18n } from '../lib/i18n';
 
@@ -111,6 +111,7 @@ export default function PlayersPage() {
           </table>
         </div>
       )}
+      <ImportCard />
       <BackupsCard />
     </div>
   );
@@ -169,6 +170,73 @@ function BackupsCard() {
               {msg && <span className="dim small">{msg}</span>}
             </div>
           </>
+        )}
+      </div>
+    </div>
+  );
+}
+
+/**
+ * Load a session's prep from a JSON file: achievements (to give during play), quests, stat blocks and loot for
+ * the stash. Things already there are skipped, so the same file can be imported twice.
+ */
+function ImportCard() {
+  const { t, err } = useI18n();
+  const [busy, setBusy] = useState(false);
+  const [result, setResult] = useState<{ file: string; title: string; r: ImportResult } | null>(null);
+  const [error, setError] = useState('');
+  const load = async (file: File | undefined) => {
+    if (!file) return;
+    setError('');
+    setResult(null);
+    setBusy(true);
+    try {
+      const json = JSON.parse(await file.text());
+      const r = await api.importSession(json);
+      setResult({ file: file.name, title: String(json?.title ?? ''), r });
+    } catch (e) {
+      setError(e instanceof SyntaxError ? t('import.badJson') : err(e));
+    } finally {
+      setBusy(false);
+    }
+  };
+  const line = (key: 'achievements' | 'quests' | 'npcs' | 'bookNpcs') =>
+    result && (result.r[key][0] || result.r[key][1])
+      ? t(`import.${key}`, { n: result.r[key][0], skip: result.r[key][1] })
+      : null;
+  return (
+    <div className="card import-card">
+      <div className="card-body">
+        <h2>{t('import.title')}</h2>
+        <p className="dim small">{t('import.hint')}</p>
+        <label className={`btn ${busy ? 'disabled' : ''}`}>
+          📥 {busy ? t('common.loading') : t('import.pick')}
+          <input
+            type="file"
+            accept=".json,application/json"
+            hidden
+            disabled={busy}
+            onChange={(e) => {
+              load(e.target.files?.[0]);
+              e.target.value = '';
+            }}
+          />
+        </label>
+        {error && <p className="error">{error}</p>}
+        {result && (
+          <div className="import-result">
+            <strong>✓ {result.title || result.file}</strong>
+            <ul>
+              {(['achievements', 'quests', 'npcs', 'bookNpcs'] as const).map((k) => {
+                const l = line(k);
+                return l ? <li key={k}>{l}</li> : null;
+              })}
+              {result.r.stash > 0 && <li>{t('import.stash', { n: result.r.stash })}</li>}
+              {result.r.unknownBookNpcs.length > 0 && (
+                <li className="error">{t('import.unknown', { list: result.r.unknownBookNpcs.join(', ') })}</li>
+              )}
+            </ul>
+          </div>
         )}
       </div>
     </div>

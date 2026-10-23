@@ -11,6 +11,7 @@ import { ActionPips, AllyInterrupts, CombatHeader, Declarations, Opponents, Targ
 import { QuickItems } from './QuickItems';
 import { MiniMap } from './MapView';
 import { BoxChip } from './Achievements';
+import { boxSource } from './Boxes';
 import { rarityClass } from './Inventory';
 import { DegreeBadge, StatusChips } from './Status';
 
@@ -440,6 +441,9 @@ function MessageList({ filter }: { filter: Filter }) {
           'item',
           'gift',
           'cursed',
+          'boxes',
+          'box',
+          'learned',
           'quest',
         ].includes(m.event?.type ?? '')
       : m.kind === filter,
@@ -929,12 +933,63 @@ function EventEntry({ m, ev, time }: { m: Message; ev: LogEvent; time: string })
         </>
       );
       break;
+    case 'boxes':
+      icon = '▣';
+      tone = 'good';
+      body = (
+        <>
+          <strong>{who}</strong> {t('log.ev.boxesGot', { from: boxSource(t, ev) })}{' '}
+          {ev.boxes.map((b, i) => (
+            <BoxChip key={i} box={b} sealed />
+          ))}
+        </>
+      );
+      break;
+    case 'box':
+      icon = '▣';
+      tone = 'good';
+      body = (
+        <>
+          <strong>{who}</strong> {t('log.ev.boxOpened')} <BoxChip box={ev.box} />
+          <span className="dim"> ({boxSource(t, ev)})</span>
+          {(ev.items.length > 0 || ev.gold > 0) && (
+            <div className="log-items">
+              {[
+                ...ev.items.map((it) => `${it.item}${Number(it.qty) > 1 ? ` ×${it.qty}` : ''}`),
+                ev.gold ? `🪙 ${t('wallet.goldN', { n: ev.gold })}` : '',
+              ]
+                .filter(Boolean)
+                .join(', ')}
+            </div>
+          )}
+        </>
+      );
+      break;
+    case 'gold':
+      icon = '🪙';
+      tone = ev.to >= ev.from ? 'good' : 'bad';
+      body = (
+        <>
+          <strong>{who}</strong> {t('log.ev.gold', { from: ev.from.toLocaleString(), to: ev.to.toLocaleString() })}
+        </>
+      );
+      break;
     case 'cursed':
       icon = '☠';
       tone = 'bad';
       body = (
         <>
           <strong>{who}</strong> {t('log.ev.cursed', { item: ev.item })}
+        </>
+      );
+      break;
+    case 'learned':
+      icon = ev.source === 'book' ? '📖' : '🎓';
+      tone = 'good';
+      body = (
+        <>
+          <strong>{who}</strong> {t(ev.raised ? 'log.ev.learnedUp' : 'log.ev.learned', { name: ev.name, n: ev.rank })}
+          {ev.title && <span className="dim"> · {ev.title}</span>}
         </>
       );
       break;

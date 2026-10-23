@@ -6,7 +6,18 @@ export type SkillCategory = 'combat' | 'utility' | 'spell';
 export const SKILL_CATEGORIES: { id: SkillCategory; subtypes: string[] }[] = [
   {
     id: 'combat',
-    subtypes: ['bashing', 'edged', 'handToHand', 'damageEffect', 'ranged', 'reach', 'explosives', 'animal'],
+    subtypes: [
+      'bashing',
+      'edged',
+      'handToHand',
+      'technique',
+      'damageEffect',
+      'passive',
+      'ranged',
+      'reach',
+      'explosives',
+      'animal',
+    ],
   },
   { id: 'utility', subtypes: ['opposed', 'unopposed', 'passive'] },
   { id: 'spell', subtypes: ['attack', 'passive'] },
@@ -24,7 +35,8 @@ export function defaultCheckType(
   category: string,
   subtype: string,
 ): 'evade' | 'opposed' | 'unopposed' | 'passive' | '' {
-  if (category === 'combat') return subtype === 'damageEffect' ? 'passive' : subtype ? 'evade' : '';
+  if (category === 'combat')
+    return subtype === 'damageEffect' || subtype === 'passive' ? 'passive' : subtype ? 'evade' : '';
   if (category === 'spell') return subtype === 'attack' ? 'evade' : subtype === 'passive' ? 'passive' : '';
   if (category === 'utility') return (subtype as 'opposed' | 'unopposed' | 'passive') || '';
   return '';

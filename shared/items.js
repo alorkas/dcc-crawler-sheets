@@ -464,3 +464,43 @@ export function mergeCurses(stored, incoming, isAdmin) {
   }
   return { inventory: inv, revealed, changed };
 }
+
+/* ---------- gold: a currency in the crawler's wallet (`gold` on the sheet), not an inventory item ---------- */
+const GOLD_NAMES = new Set([
+  'oro',
+  'gold',
+  'gold coin',
+  'gold coins',
+  'monedas de oro',
+  'moneda de oro',
+  'piezas de oro',
+]);
+/** An item that is just gold (loot boxes, old sheets): it goes to the wallet instead of the inventory. */
+export const isGoldItem = (it) =>
+  !!it &&
+  GOLD_NAMES.has(
+    String(it.item ?? '')
+      .trim()
+      .toLowerCase(),
+  ) &&
+  ['', 'other'].includes(it.type ?? '');
+/** Split a list of items into the gold they carry and the rest. */
+export function splitGold(items) {
+  let gold = 0;
+  const rest = [];
+  for (const it of items || []) {
+    if (isGoldItem(it)) gold += Math.max(0, Math.floor(n(it.qty) || 0));
+    else rest.push(it);
+  }
+  return { gold, items: rest };
+}
+/** The wallet as a number. */
+export const goldOf = (data) => Math.max(0, Math.floor(n(data?.gold) || 0));
+
+/** "Libro de Hechizos: Pistolero" / "Spellbook: Fireball" → the spell's name ('' for any other item). */
+export function spellBookSpell(itemName) {
+  const m = String(itemName ?? '').match(
+    /^\s*(?:libro de hechizos?|spell\s*book|tomo de hechizos?)\s*[:\-–—]\s*(.+?)\s*$/i,
+  );
+  return m ? m[1] : '';
+}

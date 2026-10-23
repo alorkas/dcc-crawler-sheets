@@ -19,6 +19,7 @@ export const PLAY_PATHS = [
   ['hotlist'],
   ['hotSlots'],
   ['slotCounts'], // GM only (the server keeps a player's change out), and allowed on locked sheets
+  ['gold'], // the wallet: GM only too (boxes add to it on the server)
   ['effects'], // status effects come and go during play
 ];
 

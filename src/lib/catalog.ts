@@ -60,6 +60,7 @@ export function fillSkill(s: Skill, hit: CatalogHit): Partial<Skill> {
     fill('description', e.tags);
     const notes = [e.upgrades, e.page ? `Core Rulebook p. ${e.page}` : ''].filter(Boolean).join('\n');
     fill('notes', notes);
+    if (e.overcharge && !s.overcharge) out.overcharge = true;
   }
   return out;
 }

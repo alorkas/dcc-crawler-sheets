@@ -194,15 +194,7 @@ export default function QuestsPage() {
                   {q.crawlers.map((c) => (
                     <span key={c.id} className={`recipient ${c.grantedAt ? 'claimed' : ''}`}>
                       <Link to={`/sheet/${c.characterId}?tab=quests`}>{c.name || '?'}</Link>
-                      {c.grantedAt && (
-                        <span className="dim tiny">
-                          {c.boxes === 0
-                            ? `✓ ${t('questPage.rewarded')}`
-                            : c.openedAt
-                              ? `✓ ${t('questPage.boxesOpened')}`
-                              : `▣ ${t('questPage.boxesSealed', { n: c.boxes })}`}
-                        </span>
-                      )}
+                      {c.grantedAt && <span className="dim tiny">✓ {t('questPage.rewarded')}</span>}
                       <button
                         type="button"
                         className="icon-btn tiny-btn"
@@ -290,7 +282,7 @@ export default function QuestsPage() {
 /** "Reward: ▣ Gold box · +2 Levels · a favour from the Gnoll King" */
 export function RewardLine({ reward, gm, sealed }: { reward: QuestReward; gm?: boolean; sealed?: boolean }) {
   const { t } = useI18n();
-  const empty = !reward.boxes.length && !reward.note && !reward.levels;
+  const empty = !reward.boxes.length && !reward.note && !reward.levels && !reward.skills?.length;
   return (
     <div className="ach-reward quest-reward">
       <span className="lbl">{t('ach.reward')}</span>
@@ -301,6 +293,11 @@ export function RewardLine({ reward, gm, sealed }: { reward: QuestReward; gm?: b
           {reward.levels > 0 && <span className="pill level-pill">{t('quest.levels', { n: reward.levels })}</span>}
           {reward.boxes.map((b, i) => (
             <BoxChip key={i} box={b} sealed={sealed} />
+          ))}
+          {reward.skills?.map((n) => (
+            <span key={n} className="pill teach-chip">
+              🎓 {n}
+            </span>
           ))}
         </div>
       )}

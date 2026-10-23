@@ -45,6 +45,8 @@ export type Skill = {
   description: string;
   effect: string;
   baseDamage: string;
+  /** Cheap spells that take extra Mana: one more damage die per extra point, up to the spell's level. */
+  overcharge?: boolean;
 };
 import { emptyItem as newItem, SLOT_KEYS, type Item } from '../../shared/items.js';
 export type { Item, GearSlot, ItemType, Rarity } from '../../shared/items.js';
@@ -92,6 +94,8 @@ export type SheetData = {
   hotSlots: string[];
   /** Equipment/Accessory slot counts by kind ('eq.head', 'acc.finger'…; '' = the default). Only the GM changes them. */
   slotCounts: Record<string, string>;
+  /** Gold in the wallet (a currency, not an item). Only the GM changes it; opened boxes add to it. */
+  gold: string;
   /** Legacy (≤ v5) free-text gear slots; since v6 gear is equipped inventory items (Item.slot). */
   gear: { head: string; torso: string; arms: string; hands: string; legs: string; feet: string; accessories: string };
   popularity: string;
@@ -188,6 +192,7 @@ export const emptySkill = (): Skill => ({
   description: '',
   effect: '',
   baseDamage: '',
+  overcharge: false,
 });
 export const emptyItem = (): Item => newItem();
 
@@ -218,6 +223,7 @@ export function emptySheet(): SheetData {
     hotlist: Array(10).fill(''),
     hotSlots: Array(10).fill(''),
     slotCounts: Object.fromEntries(SLOT_KEYS.map((k) => [k, ''])),
+    gold: '',
     gear: { head: '', torso: '', arms: '', hands: '', legs: '', feet: '', accessories: '' },
     popularity: '',
     pastTrauma: '',

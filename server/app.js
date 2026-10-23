@@ -10,6 +10,9 @@ import { mountGame } from './game.js';
 import { mountWorld } from './world.js';
 import { mountRewards } from './rewards.js';
 import { mountQuests } from './quests.js';
+import { mountBoxes } from './boxes.js';
+import { mountLearning } from './learn.js';
+import { mountImporter } from './importer.js';
 import { mountMaps } from './maps.js';
 import { backupNow, listBackups } from './backup.js';
 import { applyPlay } from '../shared/lockRules.js';
@@ -133,8 +136,13 @@ export function createApp({
     if (now - a.t > 15 * 60 * 1000) Object.assign(a, { n: 0, t: now });
     if (a.n >= 20)
       return res.status(429).json({ error: 'Too many attempts, try again later', code: 'too_many_attempts' });
-    a.n++;
-    attempts.set(key, a);
+    // only failed attempts count (a whole table logging in from the same network is fine)
+    res.on('finish', () => {
+      if (res.statusCode >= 400) {
+        a.n++;
+        attempts.set(key, a);
+      }
+    });
     next();
   }
 
@@ -268,9 +276,13 @@ export function createApp({
     // everything else is kept as stored. One-time format upgrades (higher schema) are saved whole.
     const stored = JSON.parse(req.char.data || '{}');
     let next = req.char.locked && !(Number(data.schema) > Number(stored.schema || 0)) ? applyPlay(stored, data) : data;
-    // only the GM changes how many Equipment/Accessory slots a crawler has
+    // only the GM changes how many Equipment/Accessory slots a crawler has, and the gold in their wallet
     if (!req.user.is_admin)
-      next = { ...next, slotCounts: stored.slotCounts ?? Object.fromEntries(SLOT_KEYS.map((k) => [k, ''])) };
+      next = {
+        ...next,
+        slotCounts: stored.slotCounts ?? Object.fromEntries(SLOT_KEYS.map((k) => [k, ''])),
+        gold: stored.gold ?? '',
+      };
     // curses stay with their items; equipping a cursed one reveals it, and a revealed one can't be taken off
     const cursed = mergeCurses(
       stored.inventory || [],
@@ -381,8 +393,11 @@ export function createApp({
   const game = mountGame(app, { db, auth, adminOnly, loadChar, live, hooks });
   const world = mountWorld(app, { db, auth, adminOnly, live, onFloor: (floor, sync) => game.setFloor(floor, sync) });
   hooks.onTimePassed = (h) => world.timePassed(h);
-  mountRewards(app, { db, auth, adminOnly, loadChar, live });
-  mountQuests(app, { db, auth, adminOnly, loadChar, live });
+  const boxes = mountBoxes(app, { db, auth, adminOnly, loadChar, live });
+  const rewards = mountRewards(app, { db, auth, adminOnly, loadChar, live, boxes });
+  const quests = mountQuests(app, { db, auth, adminOnly, loadChar, live, boxes });
+  mountImporter(app, { db, auth, adminOnly, live, rewards, quests });
+  mountLearning(app, { db, auth, loadChar, live });
   mountMaps(app, { db, auth, adminOnly, live });
 
   // ---------- book catalog ----------

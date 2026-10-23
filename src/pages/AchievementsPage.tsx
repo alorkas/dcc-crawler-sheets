@@ -2,6 +2,8 @@ import { useCallback, useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
 import {
   api,
+  type CatalogEntry,
+  type FullCatalog,
   type HomebrewItem,
   BOX_KINDS,
   BOX_TIERS,
@@ -18,7 +20,7 @@ import { ACCESSORY_FITS, BONUS_KEYS, EQUIP_FITS, ITEM_TYPES, RARITIES } from '..
 import { BoxChip } from '../components/Achievements';
 import { ItemNameList, rarityClass } from '../components/Inventory';
 import { generateBox, generateItem } from '../../shared/lootgen.js';
-import { goldItem, toRewardItem, useLootStash, useWorldFloor } from './GeneratorPage';
+import { toRewardItem, useLootStash, useWorldFloor } from './GeneratorPage';
 
 const newItem = (): RewardItem => ({
   item: '',
@@ -32,7 +34,7 @@ const newItem = (): RewardItem => ({
   upgrades: '',
   bonus: { damage: '', dr: '', evade: '', str: '', int: '', con: '', dex: '', cha: '' },
 });
-const newBox = (): LootBox => ({ tier: 'bronze', kind: 'adventurer', label: '', items: [newItem()] });
+export const newBox = (): LootBox => ({ tier: 'bronze', kind: 'adventurer', label: '', items: [newItem()] });
 export const emptyReward = (): Reward => ({ boxes: [], note: '' });
 const fmtDate = (iso: string | null, locale: string) =>
   iso ? new Date(iso).toLocaleDateString(locale, { day: 'numeric', month: 'short', year: 'numeric' }) : '';
@@ -40,15 +42,15 @@ const fmtDate = (iso: string | null, locale: string) =>
 export const tidy = (r: Reward): Reward => ({
   note: r.note,
   boxes: r.boxes.map((b) => ({ ...b, items: b.items.filter((it) => it.item.trim()) })),
+  skills: r.skills ?? [],
 });
 
-/** GM: create achievements, give them to crawlers, see who claimed, and lock claiming. */
+/** GM: create achievements, give them to crawlers and see who claimed. */
 export default function AchievementsPage() {
   const { t, err, locale } = useI18n();
   const { awardsTick } = useLive();
   const [list, setList] = useState<Achievement[] | null>(null);
   const [crawlers, setCrawlers] = useState<CharacterSummary[]>([]);
-  const [locked, setLocked] = useState(false);
   const [error, setError] = useState<unknown>(null);
   const [editing, setEditing] = useState<number | 'new' | null>(null);
   const [rewardFor, setRewardFor] = useState<{ id: number; name: string; reward: Reward } | null>(null);
@@ -58,10 +60,6 @@ export default function AchievementsPage() {
       .achievements()
       .then(setList)
       .catch((e) => setError(e ?? new Error()));
-    api
-      .rewardSettings()
-      .then((s) => setLocked(s.claimLocked))
-      .catch(() => {});
   }, []);
   useEffect(load, [load, awardsTick]);
   useEffect(() => {
@@ -92,18 +90,6 @@ export default function AchievementsPage() {
           <p className="dim">{t('achPage.sub')}</p>
         </div>
         <div className="page-actions">
-          <label className={`toggle-pill ${locked ? 'on' : ''}`}>
-            <input
-              type="checkbox"
-              checked={locked}
-              onChange={(e) => {
-                const v = e.target.checked;
-                setLocked(v);
-                run(() => api.setClaimLocked(v));
-              }}
-            />
-            🔒 {t('achPage.lockClaims')}
-          </label>
           {editing !== 'new' && (
             <button type="button" className="btn primary" onClick={() => setEditing('new')}>
               + {t('achPage.new')}
@@ -111,7 +97,6 @@ export default function AchievementsPage() {
           )}
         </div>
       </div>
-      {locked && <div className="ach-locked">{t('achPage.lockedNote')}</div>}
       {!!error && <p className="error">{err(error)}</p>}
 
       {editing === 'new' && (
@@ -145,12 +130,17 @@ export default function AchievementsPage() {
                 <span className="dim small">{fmtDate(a.createdAt, locale)}</span>
               </header>
               <div className="card-body">
+                {a.gmNote && (
+                  <p className="ach-gm-note">
+                    <span className="pill tiny-pill">{t('ach.gmPeek')}</span> {a.gmNote}
+                  </p>
+                )}
                 {a.description && <p className="ach-desc">{a.description}</p>}
                 <div className="box-chips">
                   {a.reward.boxes.map((b, i) => (
                     <BoxChip key={i} box={b} />
                   ))}
-                  {!a.reward.boxes.length && !a.reward.note && (
+                  {!a.reward.boxes.length && !a.reward.note && !a.reward.skills?.length && (
                     <span className="dim small">{t('achPage.noReward')}</span>
                   )}
                 </div>
@@ -158,8 +148,17 @@ export default function AchievementsPage() {
                   <div className="dim small">
                     {a.reward.boxes
                       .flatMap((b) => b.items)
-                      .map((it) => `${it.item}${Number(it.qty) > 1 ? ` ×${it.qty}` : ''}`)
+                      .map((it) => `${it.oneOf ? '🎲 ' : ''}${it.item}${Number(it.qty) > 1 ? ` ×${it.qty}` : ''}`)
                       .join(', ')}
+                  </div>
+                )}
+                {!!a.reward.skills?.length && (
+                  <div className="box-chips">
+                    {a.reward.skills.map((n) => (
+                      <span key={n} className="pill teach-chip">
+                        🎓 {n}
+                      </span>
+                    ))}
                   </div>
                 )}
                 {a.reward.note && <div className="ach-note">{a.reward.note}</div>}
@@ -324,6 +323,7 @@ function AchievementEditor({
   const { t } = useI18n();
   const [title, setTitle] = useState(initial?.title ?? '');
   const [description, setDescription] = useState(initial?.description ?? '');
+  const [gmNote, setGmNote] = useState(initial?.gmNote ?? '');
   const [reward, setReward] = useState<Reward>(initial?.reward ?? emptyReward());
   const [ids, setIds] = useState<number[]>([]);
   const party = crawlers.filter((c) => c.inParty);
@@ -353,6 +353,16 @@ function AchievementEditor({
             value={description}
             placeholder={t('achPage.fDescHint')}
             onChange={(e) => setDescription(e.target.value)}
+          />
+        </label>
+        <label className="field">
+          <span className="lbl">{t('achPage.fGmNote')}</span>
+          <input
+            className="in"
+            value={gmNote}
+            maxLength={1000}
+            placeholder={t('achPage.fGmNoteHint')}
+            onChange={(e) => setGmNote(e.target.value)}
           />
         </label>
         <div className="lbl">{t('ach.reward')}</div>
@@ -388,7 +398,7 @@ function AchievementEditor({
             type="button"
             className="btn primary"
             disabled={!title.trim()}
-            onClick={() => onSave({ title, description, reward: tidy(reward), characterIds: ids })}
+            onClick={() => onSave({ title, description, gmNote, reward: tidy(reward), characterIds: ids })}
           >
             {initial ? t('common.save') : ids.length ? t('achPage.createGive', { n: ids.length }) : t('achPage.create')}
           </button>
@@ -408,18 +418,39 @@ function bonusLine(h: HomebrewItem, t: ReturnType<typeof useI18n>['t']) {
 
 /** Loot boxes (tier, kind, items) plus any other reward in words. */
 /* the campaign's loot collection, fetched once per page load */
-let collectionCache: Promise<HomebrewItem[]> | null = null;
+let catalogCache: Promise<FullCatalog | null> | null = null;
+const fullCatalog = () => (catalogCache ??= api.fullCatalog().catch(() => null));
 function useCollection() {
   const [items, setItems] = useState<HomebrewItem[]>([]);
   useEffect(() => {
-    collectionCache ??= api
-      .fullCatalog()
-      .then((c) => c.homebrew ?? [])
-      .catch(() => []);
-    collectionCache.then(setItems);
+    fullCatalog().then((c) => setItems(c?.homebrew ?? []));
   }, []);
   return items;
 }
+/** Every spell (book and campaign) and combat skill, for spellbooks and rewards that teach. */
+function useTeachables() {
+  const [lists, setLists] = useState<{ spells: CatalogEntry[]; skills: CatalogEntry[] }>({ spells: [], skills: [] });
+  useEffect(() => {
+    fullCatalog().then((c) => {
+      const byMana = (a: CatalogEntry, b: CatalogEntry) =>
+        (Number(a.manaCost) || 0) - (Number(b.manaCost) || 0) || a.name.localeCompare(b.name);
+      setLists({ spells: [...(c?.spells ?? [])].sort(byMana), skills: c?.weapons ?? [] });
+    });
+  }, []);
+  return lists;
+}
+/** Spellbook tier by the spell's Mana cost (the cheap ones in Bronze boxes, the big ones in Legendary). */
+const bookTier = (mana: number) =>
+  mana <= 2 ? 'bronze' : mana <= 4 ? 'silver' : mana <= 6 ? 'gold' : mana <= 10 ? 'platinum' : 'legendary';
+const MANA_CAP: Record<string, number> = { bronze: 2, silver: 4, gold: 6, platinum: 10, legendary: 20, celestial: 999 };
+/** A spellbook as a loot box item: reading it teaches the spell (or raises it a Level). */
+export const spellBook = (e: CatalogEntry): RewardItem => ({
+  ...newItem(),
+  item: `Libro de Hechizos: ${e.name}`,
+  type: 'special',
+  rarity: bookTier(Number(e.manaCost) || 0) as RewardItem['rarity'],
+  notes: `Al leerlo aprendes «${e.name}» (o sube un nivel si ya lo conoces). Maná: ${Number(e.manaCost) || 0}.`,
+});
 const TIER_ORDER = ['bronze', 'silver', 'gold', 'platinum', 'legendary', 'celestial'];
 const fromCollection = (h: HomebrewItem, qty = '1'): RewardItem => ({
   ...newItem(),
@@ -438,19 +469,38 @@ const pick = <T,>(list: T[]) => list[Math.floor(Math.random() * list.length)];
  * A whole box from the loot generator (items that fit the box's kind, and gold); now and then the main item comes
  * from the campaign's collection instead.
  */
-function randomBox(tier: string, kind: string, floor: number, all: HomebrewItem[]): RewardItem[] {
+function randomBox(
+  tier: string,
+  kind: string,
+  floor: number,
+  all: HomebrewItem[],
+  spells: CatalogEntry[] = [],
+): { items: RewardItem[]; gold: number } {
   const rank = (r: string) => TIER_ORDER.indexOf(r);
   const box = generateBox({ tier, kind, floor });
   const items = box.items.map(toRewardItem);
   const gear = all.filter((h) => h.type !== 'consumable' && rank(h.rarity) === rank(tier));
   const first = items.findIndex((it) => it.type === 'equipment' || it.type === 'accessory');
   if (gear.length && first >= 0 && Math.random() < 0.4) items[first] = fromCollection(pick(gear));
-  return [...items, goldItem(box.gold)];
+  // now and then a spellbook whose Mana cost fits the box's tier
+  const fit = spells.filter((sp) => (Number(sp.manaCost) || 0) <= (MANA_CAP[tier] ?? 2) && sp.manaCost !== 'None');
+  if (fit.length && Math.random() < 0.3) items.push(spellBook(pick(fit)));
+  return { items, gold: box.gold };
 }
 
-export function RewardEditor({ value, onChange }: { value: Reward; onChange: (r: Reward) => void }) {
+export function RewardEditor({
+  value,
+  onChange,
+  noNote,
+}: {
+  value: Reward;
+  onChange: (r: Reward) => void;
+  /** Boxes only (no "other reward" text): sending boxes straight to a crawler. */
+  noNote?: boolean;
+}) {
   const { t } = useI18n();
   const collection = useCollection();
+  const teach = useTeachables();
   const stash = useLootStash();
   const worldFloor = useWorldFloor();
   const byName = new Map(collection.map((h) => [h.name.toLowerCase(), h]));
@@ -495,6 +545,17 @@ export function RewardEditor({ value, onChange }: { value: Reward; onChange: (r:
               placeholder={t('achPage.boxLabel')}
               onChange={(e) => setBox(bi, { ...b, label: e.target.value })}
             />
+            <label className="box-gold" title={t('wallet.boxGoldHint')}>
+              <span aria-hidden>🪙</span>
+              <input
+                className="in center"
+                inputMode="numeric"
+                value={b.gold ? String(b.gold) : ''}
+                placeholder={t('wallet.gold')}
+                aria-label={t('wallet.gold')}
+                onChange={(e) => setBox(bi, { ...b, gold: Number(e.target.value.replace(/\D/g, '')) || 0 })}
+              />
+            </label>
             <button
               type="button"
               className="icon-btn"
@@ -593,6 +654,15 @@ export function RewardEditor({ value, onChange }: { value: Reward; onChange: (r:
                   />
                   ★ {t('achPage.special')}
                 </label>
+                <input
+                  className="in center one-of-in"
+                  value={it.oneOf ?? ''}
+                  maxLength={20}
+                  placeholder={`🎲 ${t('oneOf.ph')}`}
+                  title={t('oneOf.hint')}
+                  aria-label={t('oneOf.hint')}
+                  onChange={(e) => setItem(bi, ii, { oneOf: e.target.value })}
+                />
                 {BONUS_KEYS.map((k) => (
                   <input
                     key={k}
@@ -628,9 +698,12 @@ export function RewardEditor({ value, onChange }: { value: Reward; onChange: (r:
                 value=""
                 aria-label={t('loot.fromCollection')}
                 onChange={(e) => {
-                  const h = collection.find((x) => x.name === e.target.value);
-                  if (!h) return;
+                  const v = e.target.value;
                   const items = b.items.filter((x) => x.item.trim());
+                  const sp = v.startsWith('spell:') ? teach.spells.find((x) => x.name === v.slice(6)) : null;
+                  if (sp) return setBox(bi, { ...b, items: [...items, spellBook(sp)] });
+                  const h = collection.find((x) => x.name === v);
+                  if (!h) return;
                   setBox(bi, { ...b, items: [...items, fromCollection(h)] });
                 }}
               >
@@ -647,12 +720,22 @@ export function RewardEditor({ value, onChange }: { value: Reward; onChange: (r:
                       ))}
                   </optgroup>
                 ))}
+                {teach.spells.length > 0 && (
+                  <optgroup label={t('book.group')}>
+                    {teach.spells.map((sp) => (
+                      <option key={sp.name} value={`spell:${sp.name}`}>
+                        📖 {sp.name} ({t('skill.sumMana', { n: Number(sp.manaCost) || 0 })}
+                        {sp.homebrew ? ` · ${t('book.campaign')}` : ''})
+                      </option>
+                    ))}
+                  </optgroup>
+                )}
               </select>
               <button
                 type="button"
                 className="btn small"
                 title={t('loot.randomHint')}
-                onClick={() => setBox(bi, { ...b, items: randomBox(b.tier, b.kind, worldFloor, collection) })}
+                onClick={() => setBox(bi, { ...b, ...randomBox(b.tier, b.kind, worldFloor, collection, teach.spells) })}
               >
                 🎲 {t('loot.random')}
               </button>
@@ -704,17 +787,77 @@ export function RewardEditor({ value, onChange }: { value: Reward; onChange: (r:
       >
         + {t('achPage.addBox')}
       </button>
-      <label className="field">
-        <span className="lbl">{t('achPage.otherReward')}</span>
-        <textarea
-          className="in area"
-          rows={2}
-          value={value.note}
-          placeholder={t('achPage.otherRewardHint')}
-          onChange={(e) => onChange({ ...value, note: e.target.value })}
-        />
-      </label>
+      {!noNote && <TeachPicker value={value.skills ?? []} onChange={(skills) => onChange({ ...value, skills })} />}
+      {!noNote && (
+        <label className="field">
+          <span className="lbl">{t('achPage.otherReward')}</span>
+          <textarea
+            className="in area"
+            rows={2}
+            value={value.note}
+            placeholder={t('achPage.otherRewardHint')}
+            onChange={(e) => onChange({ ...value, note: e.target.value })}
+          />
+        </label>
+      )}
       <p className="dim tiny">{t('achPage.bookHint')}</p>
+    </div>
+  );
+}
+
+/** Spells or skills a reward teaches (added to the sheet when it's claimed; known ones go up a Level). */
+function TeachPicker({ value, onChange }: { value: string[]; onChange: (v: string[]) => void }) {
+  const { t } = useI18n();
+  const teach = useTeachables();
+  const [name, setName] = useState('');
+  const add = () => {
+    const n = name.trim();
+    if (!n || value.includes(n) || value.length >= 5) return;
+    onChange([...value, n]);
+    setName('');
+  };
+  return (
+    <div className="field teach-picker">
+      <span className="lbl">{t('teach.label')}</span>
+      {value.length > 0 && (
+        <div className="box-chips">
+          {value.map((n) => (
+            <span key={n} className="pill teach-chip">
+              🎓 {n}
+              <button
+                type="button"
+                className="icon-btn tiny-btn"
+                aria-label={t('common.remove')}
+                onClick={() => onChange(value.filter((x) => x !== n))}
+              >
+                ×
+              </button>
+            </span>
+          ))}
+        </div>
+      )}
+      <div className="row-gap">
+        <input
+          className="in"
+          list="teach-names"
+          value={name}
+          placeholder={t('teach.placeholder')}
+          onChange={(e) => setName(e.target.value)}
+          onKeyDown={(e) => e.key === 'Enter' && (e.preventDefault(), add())}
+        />
+        <datalist id="teach-names">
+          {teach.skills.map((x) => (
+            <option key={`k${x.name}`} value={x.name} label={t('skillcat.combat')} />
+          ))}
+          {teach.spells.map((x) => (
+            <option key={`s${x.name}`} value={x.name} label={t('skillcat.spell')} />
+          ))}
+        </datalist>
+        <button type="button" className="btn small" disabled={!name.trim() || value.length >= 5} onClick={add}>
+          + {t('teach.add')}
+        </button>
+      </div>
+      <span className="dim tiny">{t('teach.hint')}</span>
     </div>
   );
 }

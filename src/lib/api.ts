@@ -56,6 +56,11 @@ export type CatalogEntry = {
   slot?: string;
   interrupt?: boolean;
   page?: number;
+  /** The campaign's own spells and skills (not from the book). */
+  homebrew?: boolean;
+  /** What the System AI says about it (campaign spells and skills). */
+  ai?: string;
+  overcharge?: boolean;
 };
 export type CatalogHit = { kind: 'weapon' | 'spell' | 'utility' | 'item'; entry: CatalogEntry };
 export type FullCatalog = {
@@ -181,6 +186,25 @@ export type LogEvent =
     }
   | { type: 'interrupt'; kind: 'catch'; ally: string; attack: string }
   | { type: 'reward'; title: string; boxes: Pick<LootBox, 'tier' | 'kind' | 'label'>[] }
+  | { type: 'boxes'; source: BoxSource; title: string; boxes: Pick<LootBox, 'tier' | 'kind' | 'label'>[] }
+  | {
+      type: 'box';
+      box: Pick<LootBox, 'tier' | 'kind' | 'label'>;
+      source: BoxSource;
+      title: string;
+      items: { item: string; rarity: string; qty: string }[];
+      gold: number;
+    }
+  | { type: 'gold'; from: number; to: number }
+  | {
+      type: 'learned';
+      name: string;
+      rank: number;
+      /** Already known: it went up a Level. */
+      raised: boolean;
+      source: 'book' | 'achievement' | 'quest';
+      title?: string;
+    }
   | { type: 'gift'; items: { item: string; rarity: string; qty: string }[] }
   | {
       type: 'quest';
@@ -423,7 +447,18 @@ async function request<T>(method: string, url: string, body?: unknown): Promise<
 
 /* ---------- achievements and rewards ---------- */
 export type BoxTier = 'bronze' | 'silver' | 'gold' | 'platinum' | 'legendary' | 'celestial';
-export type BoxKind = 'adventurer' | 'boss' | 'crafter' | 'assassin' | 'fan' | 'benefactor' | 'achievement' | 'custom';
+export type BoxKind =
+  | 'adventurer'
+  | 'boss'
+  | 'crafter'
+  | 'assassin'
+  | 'fan'
+  | 'benefactor'
+  | 'achievement'
+  | 'explosives'
+  | 'food'
+  | 'jerk'
+  | 'custom';
 export const BOX_TIERS: BoxTier[] = ['bronze', 'silver', 'gold', 'platinum', 'legendary', 'celestial'];
 export const BOX_KINDS: BoxKind[] = [
   'adventurer',
@@ -433,6 +468,9 @@ export const BOX_KINDS: BoxKind[] = [
   'fan',
   'benefactor',
   'achievement',
+  'explosives',
+  'food',
+  'jerk',
   'custom',
 ];
 /** An item inside a loot box (`special` gets the spotlight when it's opened). */
@@ -442,13 +480,34 @@ export type RewardItem = Pick<Item, 'item' | 'qty' | 'notes' | 'type' | 'rarity'
   > & {
     bonus: Item['bonus'];
     special: boolean;
+    /** Random group: only one item of each group comes out of the box ("1 al azar (1d4)"). */
+    oneOf?: string;
   };
-export type LootBox = { tier: BoxTier; kind: BoxKind; label: string; items: RewardItem[] };
-export type Reward = { boxes: LootBox[]; note: string };
+export type LootBox = { tier: BoxTier; kind: BoxKind; label: string; items: RewardItem[]; gold?: number };
+/** A box once opened: its items (gold taken out) and the gold that went to the wallet. */
+export type OpenedBox = Pick<LootBox, 'tier' | 'kind' | 'label' | 'items'> & { gold: number };
+export type BoxSource = 'achievement' | 'quest' | 'gm' | 'sponsor';
+/** A loot box a crawler holds (the Boxes tab). Items and gold are empty/0 for players until it's opened. */
+export type CrawlerBox = OpenedBox & {
+  id: number;
+  source: BoxSource;
+  /** The achievement or quest it came from, or the sponsor. */
+  title: string;
+  receivedAt: string;
+  openedAt: string | null;
+};
+export type Reward = {
+  boxes: LootBox[];
+  note: string;
+  /** Spells or skills the reward teaches (players see them once claimed). */
+  skills?: string[];
+};
 export type Achievement = {
   id: number;
   title: string;
   description: string;
+  /** For the GM: who gets it and when. */
+  gmNote?: string;
   reward: Reward;
   createdAt: string;
   awards: {
@@ -468,6 +527,8 @@ export type Award = {
   awardedAt: string;
   claimedAt: string | null;
   hasReward: boolean;
+  /** How many spells/skills it teaches (their names show once claimed). */
+  skillCount?: number;
   /** For players, the boxes' items are empty until claimed. */
   reward: Reward;
   opened: Reward | null;
@@ -532,9 +593,6 @@ export type Quest = {
     name: string;
     /** When they got the reward (the quest was completed). */
     grantedAt: string | null;
-    /** Loot boxes they got, and when they opened them. */
-    boxes: number;
-    openedAt: string | null;
   }[];
 };
 export type QuestInput = Omit<Quest, 'id' | 'createdAt' | 'updatedAt' | 'crawlers'> & { characterIds?: number[] };
@@ -554,14 +612,27 @@ export type CrawlerQuest = {
   updatedAt: string;
   /** Completed: Levels given, boxes kept sealed for a Saferoom. */
   grantedAt: string | null;
-  openedAt: string | null;
   hasReward: boolean;
   /** For players the boxes' items are empty until opened. */
   reward: QuestReward;
-  opened: QuestReward | null;
 };
 
-export type AchievementInput = { title: string; description: string; reward: Reward; characterIds?: number[] };
+export type AchievementInput = {
+  title: string;
+  description: string;
+  gmNote?: string;
+  reward: Reward;
+  characterIds?: number[];
+};
+/** What a session import added (and skipped: already there). */
+export type ImportResult = {
+  achievements: [number, number];
+  quests: [number, number];
+  npcs: [number, number];
+  bookNpcs: [number, number];
+  stash: number;
+  unknownBookNpcs: string[];
+};
 
 export const api = {
   config: () => request<{ allowRegistration: boolean }>('GET', '/api/config'),
@@ -701,9 +772,6 @@ export const api = {
   createMap: (m: MapPatch) => request<GameMap>('POST', '/api/maps', m),
   updateMap: (id: number, m: MapPatch) => request<GameMap>('PATCH', `/api/maps/${id}`, m),
   deleteMap: (id: number) => request('DELETE', `/api/maps/${id}`),
-  rewardSettings: () => request<{ claimLocked: boolean }>('GET', '/api/rewards/settings'),
-  setClaimLocked: (claimLocked: boolean) =>
-    request<{ claimLocked: boolean }>('PUT', '/api/rewards/settings', { claimLocked }),
   achievements: () => request<Achievement[]>('GET', '/api/achievements'),
   createAchievement: (a: AchievementInput) => request<Achievement>('POST', '/api/achievements', a),
   updateAchievement: (id: number, a: AchievementInput) => request<Achievement>('PUT', `/api/achievements/${id}`, a),
@@ -712,11 +780,7 @@ export const api = {
     request<Achievement>('POST', `/api/achievements/${id}/awards`, { characterIds }),
   revokeAward: (id: number) => request('DELETE', `/api/awards/${id}`),
   setAwardReward: (id: number, reward: Reward) => request('PUT', `/api/awards/${id}/reward`, { reward }),
-  awards: (characterId: number) =>
-    request<{ claimLocked: boolean; inSaferoom: boolean; awards: Award[] }>(
-      'GET',
-      `/api/characters/${characterId}/awards`,
-    ),
+  awards: (characterId: number) => request<{ awards: Award[] }>('GET', `/api/characters/${characterId}/awards`),
   quests: () => request<Quest[]>('GET', '/api/quests'),
   createQuest: (q: QuestInput) => request<Quest>('POST', '/api/quests', q),
   updateQuest: (id: number, q: QuestInput) => request<Quest>('PUT', `/api/quests/${id}`, q),
@@ -725,19 +789,25 @@ export const api = {
     request<Quest>('POST', `/api/quests/${id}/crawlers`, { characterIds }),
   removeFromQuest: (id: number, linkId: number) => request<Quest>('DELETE', `/api/quests/${id}/crawlers/${linkId}`),
   crawlerQuests: (characterId: number) =>
-    request<{ claimLocked: boolean; inSaferoom: boolean; quests: CrawlerQuest[] }>(
-      'GET',
-      `/api/characters/${characterId}/quests`,
-    ),
+    request<{ quests: CrawlerQuest[] }>('GET', `/api/characters/${characterId}/quests`),
   setSaferoom: (id: number, saferoom: boolean) =>
     request<{ id: number; saferoom: boolean; inSaferoom: boolean }>('PATCH', `/api/characters/${id}/saferoom`, {
       saferoom,
     }),
   tickObjective: (linkId: number, objId: string, done: boolean) =>
     request('POST', `/api/quest-crawlers/${linkId}/objectives/${encodeURIComponent(objId)}`, { done }),
-  openQuestBoxes: (linkId: number) =>
-    request<{ opened: QuestReward }>('POST', `/api/quest-crawlers/${linkId}/open`, {}),
   claimAward: (id: number) => request<{ id: number; opened: Reward }>('POST', `/api/awards/${id}/claim`, {}),
+  crawlerBoxes: (characterId: number) =>
+    request<{ inSaferoom: boolean; boxes: CrawlerBox[] }>('GET', `/api/characters/${characterId}/boxes`),
+  sendBoxes: (characterId: number, boxes: LootBox[], source: 'gm' | 'sponsor' = 'gm', title = '') =>
+    request<{ ok: true; count: number }>('POST', `/api/characters/${characterId}/boxes`, { boxes, source, title }),
+  openBox: (id: number) => request<{ opened: OpenedBox }>('POST', `/api/boxes/${id}/open`, {}),
+  deleteBox: (id: number) => request('DELETE', `/api/boxes/${id}`),
+  importSession: (data: unknown) => request<ImportResult>('POST', '/api/admin/import', data),
+  readBook: (characterId: number, itemId: string) =>
+    request<{ name: string; rank: number; raised: boolean }>('POST', `/api/characters/${characterId}/read-book`, {
+      itemId,
+    }),
   listUsers: () => request<AdminUser[]>('GET', '/api/users'),
   backups: () =>
     request<{ enabled: boolean; dir: string | null; keep: number; files: { name: string; size: number }[] }>(
