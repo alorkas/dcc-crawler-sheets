@@ -1,6 +1,6 @@
 # Node 24 LTS (supported until April 2028). The floating tag picks up Node and Debian security patches on every
 # rebuild; the publish workflow also rebuilds weekly so they land even without new commits.
-FROM node:24-slim
+FROM node:25-slim
 
 WORKDIR /app
 
