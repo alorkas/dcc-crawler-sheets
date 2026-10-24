@@ -48,7 +48,7 @@ export function QuestsTab() {
   const [showClosed, setShowClosed] = useState(false);
   const admin = !!user?.isAdmin;
 
-  // objectives tick at once (everyone on the quest sees it through the live update)
+  // the GM ticks objectives (everyone on the quest sees it through the live update)
   function tick(q: CrawlerQuest, objId: string, done: boolean) {
     setState(
       (s) =>
@@ -113,22 +113,34 @@ export function QuestsTab() {
                   <>
                     <div className="lbl">
                       {t('quest.objectives')}{' '}
-                      <span className="dim tiny">
-                        {done}/{q.objectives.length}
-                      </span>
+                      {/* players only get the steps unlocked so far, so a count would give the rest away */}
+                      {admin && (
+                        <span className="dim tiny">
+                          {done}/{q.objectives.length}
+                        </span>
+                      )}
                     </div>
                     <ul className="quest-objs">
                       {q.objectives.map((o) => (
                         <li key={o.id} className={o.done ? 'done' : ''}>
-                          <label>
-                            <input
-                              type="checkbox"
-                              checked={o.done}
-                              disabled={q.status !== 'active'}
-                              onChange={(e) => tick(q, o.id, e.target.checked)}
-                            />
-                            {o.text}
-                          </label>
+                          {admin ? (
+                            <label>
+                              <input
+                                type="checkbox"
+                                checked={o.done}
+                                disabled={q.status !== 'active'}
+                                onChange={(e) => tick(q, o.id, e.target.checked)}
+                              />
+                              {o.text}
+                            </label>
+                          ) : (
+                            <span className="quest-step">
+                              <span className="quest-step-mark" aria-hidden>
+                                {o.done ? '✔' : '▸'}
+                              </span>
+                              {o.text}
+                            </span>
+                          )}
                         </li>
                       ))}
                     </ul>

@@ -1,5 +1,6 @@
 import { useRef, type ReactNode } from 'react';
-import { useField, type Path } from './fields';
+import { useField, useSheet, type Path } from './fields';
+import { KillOverlay } from './Kills';
 import { useI18n } from '../lib/i18n';
 
 /** Dynamic list with add/remove controls (hidden when locked). */
@@ -67,6 +68,7 @@ async function resizeImage(file: File, max = 640): Promise<string> {
 
 export function Portrait() {
   const [value, setValue, locked] = useField<string>(['portrait']);
+  const { data } = useSheet();
   const { t } = useI18n();
   const fileRef = useRef<HTMLInputElement>(null);
   return (
@@ -76,6 +78,7 @@ export function Portrait() {
       ) : (
         <span className="portrait-empty">{t('portrait.label')}</span>
       )}
+      <KillOverlay kills={data.killCount} />
       {!locked && (
         <div className="portrait-actions">
           <button type="button" className="btn small" onClick={() => fileRef.current?.click()}>

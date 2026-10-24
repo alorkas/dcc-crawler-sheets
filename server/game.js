@@ -21,7 +21,10 @@ import {
   hotlistable,
   hotlistSpells,
   isSpellRef,
+  isStuck,
   isWorn,
+  itemCard,
+  newItemId,
   setHotSlot,
   spellRef,
   spendOne,
@@ -262,6 +265,53 @@ export function mountGame(app, { db, auth, adminOnly, loadChar, live, hooks = {}
   };
 
   /** Players see names and a Health percentage (the book's "let the players know what percentage…"). */
+  /**
+   * Count an attack for the AI Favor of "wimpy" Spells, weapons and Skills (Core Rulebook: used for a majority of your
+   * attacks in a combat that lasts at least three rounds). The rating comes from the Skill/Spell on the sheet.
+   */
+  const tallyAttack = (enc, cid, label, data, by) => {
+    enc.tally = enc.tally || {};
+    const t = (enc.tally[cid] = enc.tally[cid] || {});
+    const key = String(label || '').trim();
+    if (!key) return;
+    const e = (t[key] = t[key] || { n: 0, rating: 0, note: '' });
+    e.n = Math.max(0, e.n + by);
+    if (data) {
+      const sk = (Array.isArray(data.skills) ? data.skills : []).find(
+        (x) =>
+          String(x?.name ?? '')
+            .trim()
+            .toLowerCase() === key.toLowerCase(),
+      );
+      const raw = String(sk?.aiFavor ?? '');
+      e.rating = Math.max(0, Math.min(5, int(raw, 0)));
+      e.note = clip(raw.replace(/^\s*\d+\s*/, ''), 80);
+    }
+  };
+  /** At the end of a fight: crawlers who used one attack with an AI Favor rating for most of their attacks. */
+  const favorOffers = (enc) => {
+    if (enc.round < 3) return [];
+    const out = [];
+    for (const [cid, t] of Object.entries(enc.tally || {})) {
+      const list = Object.entries(t).filter(([, e]) => e.n > 0);
+      const total = list.reduce((sum, [, e]) => sum + e.n, 0);
+      const [attack, top] = list.sort((a, b) => b[1].n - a[1].n)[0] ?? [];
+      if (!top || !top.rating || top.n * 2 <= total) continue;
+      const row = charRow(Number(cid));
+      if (!row) continue;
+      out.push({
+        characterId: Number(cid),
+        name: clip(JSON.parse(row.data || '{}').name),
+        attack,
+        count: top.n,
+        total,
+        rating: top.rating,
+        note: top.note,
+        rounds: enc.round,
+      });
+    }
+    return out;
+  };
   const viewFor = (enc, admin, src = attackSource()) => ({
     links: enc.active ? linksView(enc, admin) : [],
     actions: enc.active ? actionsView(enc) : {},
@@ -277,6 +327,8 @@ export function mountGame(app, { db, auth, adminOnly, loadChar, live, hooks = {}
     declarations: (enc.declarations || [])
       .filter((d) => d.round === enc.round && (admin || revealed(enc)))
       .map((d) => declView(enc, d, admin)),
+    // AI Favor the GM can hand out after a fight (attacks with an AI Favor rating used for most of a crawler's attacks)
+    ...(admin ? { favorOffers: enc.favorOffers || [] } : {}),
     opponents: enc.opponents
       .filter((o) => admin || !o.hidden)
       .map((o) =>
@@ -341,6 +393,8 @@ export function mountGame(app, { db, auth, adminOnly, loadChar, live, hooks = {}
       enc.attacks = [];
       enc.links = [];
       enc.injuries = [];
+      enc.tally = {};
+      enc.favorOffers = [];
       combatEvent({ action: 'start', round: enc.round });
     } else if (action === 'next' && enc.active) {
       if (enc.round === 0 || enc.phase >= PHASES) {
@@ -365,6 +419,8 @@ export function mountGame(app, { db, auth, adminOnly, loadChar, live, hooks = {}
       }
     } else if (action === 'end' && enc.active) {
       combatEvent({ action: 'end', round: enc.round });
+      enc.favorOffers = favorOffers(enc);
+      enc.tally = {};
       // effects that last the fight end; Major/Critical Fails on Evade leave an Injury once the adrenaline wears off
       const injuries = enc.injuries || [];
       forParty((data) => endCombat(data));
@@ -967,6 +1023,8 @@ export function mountGame(app, { db, auth, adminOnly, loadChar, live, hooks = {}
         target: target.id !== req.char.id ? targetName : '',
         left,
         applied,
+        // what the item does, for everyone reading the log (hover the name for the whole card)
+        card: itemCard(it, lookupNotes(it.item)),
         ...(kept ? { kept: true, ability: clip(it.ability || it.notes, 200) } : {}),
         ...(spent?.charges ? { charges: spent.charges } : {}),
         // what Undo needs: the item as it was, where it sat, the Action and the effect on the target
@@ -990,6 +1048,59 @@ export function mountGame(app, { db, auth, adminOnly, loadChar, live, hooks = {}
       data: req.user.is_admin ? mine : hideCurses(mine),
       version: charRow(req.char.id).version,
     });
+  });
+
+  // Give an item to another crawler in the party ({ itemId, toId, qty }; qty defaults to the whole stack). It is
+  // taken off (and off the Hotlist) first; a cursed item that has revealed itself can't be taken off, so it stays.
+  app.post('/api/characters/:id/give-item', auth, loadChar, (req, res) => {
+    const data = JSON.parse(req.char.data || '{}');
+    const inv = Array.isArray(data.inventory) ? data.inventory : [];
+    const it = inv.find((x) => x && x.id === String(req.body?.itemId));
+    if (!it || !String(it.item || '').trim()) return res.status(404).json({ error: 'Not found', code: 'not_found' });
+    const to = charRow(Number(req.body?.toId));
+    if (!to || to.id === req.char.id || !to.party_since || (!req.char.party_since && !req.user.is_admin))
+      return res.status(409).json({ error: 'Only to another crawler in the party', code: 'trade_party_only' });
+    if (isStuck(it) && !req.user.is_admin)
+      return res.status(409).json({ error: 'A cursed item that is stuck to you', code: 'trade_stuck' });
+    const stack = String(it.qty ?? '').trim() === '' ? 1 : int(it.qty, 1);
+    const qty = Math.max(1, Math.min(stack, int(req.body?.qty, stack)));
+    const rest = stack - qty;
+    // the giver: what's left of the stack, or the row goes (off its slot and the Hotlist)
+    const hotSlots = Array.isArray(data.hotSlots) ? data.hotSlots : [];
+    const mine = {
+      ...data,
+      inventory: rest > 0 ? inv.map((x) => (x === it ? { ...x, qty: String(rest) } : x)) : inv.filter((x) => x !== it),
+      hotSlots: rest > 0 ? hotSlots : hotSlots.map((h) => (h === it.id ? '' : h)),
+    };
+    const given = { ...it, id: newItemId(), qty: String(qty), slot: '', hot: false };
+    const td = JSON.parse(to.data || '{}');
+    const theirs = { ...td, inventory: [...(Array.isArray(td.inventory) ? td.inventory : []), given] };
+    writeSheetWith(req.char, mine, req.user.id, {});
+    writeSheetWith(to, theirs, req.user.id, {});
+    live.postEvent({
+      ownerId: req.char.owner_id,
+      characterId: req.char.id,
+      charName: clip(data.name),
+      event: { type: 'trade', to: clip(td.name), toId: to.id, qty, card: itemCard(it, lookupNotes(it.item)) },
+      gmOnly: !req.char.party_since,
+    });
+    res.json({ ok: true, qty, left: rest });
+  });
+
+  // Show an item to the party in the chat: everyone can hover it to read what it does.
+  app.post('/api/characters/:id/show-item', auth, loadChar, (req, res) => {
+    const data = JSON.parse(req.char.data || '{}');
+    const inv = Array.isArray(data.inventory) ? data.inventory : [];
+    const it = inv.find((x) => x && x.id === String(req.body?.itemId));
+    if (!it || !String(it.item || '').trim()) return res.status(404).json({ error: 'Not found', code: 'not_found' });
+    const message = live.postEvent({
+      ownerId: req.char.owner_id,
+      characterId: req.char.id,
+      charName: clip(data.name),
+      event: { type: 'show', card: itemCard(it, lookupNotes(it.item)), qty: clip(it.qty, 8) },
+      gmOnly: !req.char.party_since,
+    });
+    res.json({ ok: true, messageId: message?.id ?? null });
   });
 
   // Put an item on a Hotlist slot ({ slot, itemId }; '' empties it). In combat this takes an Action and is logged,
@@ -1282,6 +1393,8 @@ export function mountGame(app, { db, auth, adminOnly, loadChar, live, hooks = {}
         slot: (data.hotSlots || []).indexOf(ammo.id),
       };
     enc.attacks = [...(enc.attacks || []), ...records];
+    // which attack each crawler uses, for the AI Favor of "wimpy" attacks at the end of the fight
+    tallyAttack(enc, cid, label, data, 1);
     const shown = opps.map((o) => (o.hidden ? '???' : o.name)).join(', ');
     const posted = live.postRoll({
       userId: req.user.id,
@@ -1289,7 +1402,7 @@ export function mountGame(app, { db, auth, adminOnly, loadChar, live, hooks = {}
       charName: name,
       roll: {
         ...r,
-        label: `${label}${area ? ' (Area)' : ''} → ${shown}`.slice(0, 120),
+        label: `${label}${b.aimed ? ' 🎯' : ''}${area ? ' (Area)' : ''} → ${shown}`.slice(0, 120),
         vs: area
           ? { dc: null, success: null, kind: 'attack' }
           : { dc: null, success: records[0].hit, kind: 'attack', degree: records[0].degree },
@@ -1315,11 +1428,40 @@ export function mountGame(app, { db, auth, adminOnly, loadChar, live, hooks = {}
     res.status(201).json(viewFor(enc, admin));
   });
 
+  // GM: hand out (or skip) the AI Favor suggested at the end of a fight
+  app.post('/api/encounter/favor-offers/:cid', auth, adminOnly, (req, res) => {
+    const enc = getEnc();
+    const cid = Number(req.params.cid);
+    const offer = (enc.favorOffers || []).find((o) => o.characterId === cid);
+    if (!offer) return res.status(404).json({ error: 'Not found', code: 'not_found' });
+    enc.favorOffers = enc.favorOffers.filter((o) => o !== offer);
+    const n = Math.max(0, Math.min(20, int(req.body?.n, offer.rating)));
+    const row = charRow(cid);
+    if (req.body?.accept && n && row) {
+      const data = JSON.parse(row.data || '{}');
+      const from = int(data.dr?.aiFavor, 0);
+      writeSheet(row, { ...data, dr: { ...(data.dr || {}), aiFavor: String(from + n) } }, req.user.id);
+      progressEvent(row, data, {
+        type: 'favor',
+        use: 'gain',
+        source: 'combat',
+        title: offer.attack,
+        n,
+        from,
+        to: from + n,
+      });
+    }
+    putEnc(enc);
+    res.json(viewFor(enc, true));
+  });
+
   // GM: undo a crawler's attack (e.g. wrong target); its Action is given back
   app.delete('/api/encounter/attacks/:id', auth, adminOnly, (req, res) => {
     const enc = getEnc();
     const atk = findAttack(enc, req.params.id);
     if (!atk) return res.status(404).json({ error: 'Not found', code: 'not_found' });
+    // an undone attack doesn't count for AI Favor (an Area Attack is one roll, so one tally)
+    tallyAttack(enc, atk.characterId, atk.label, null, -1);
     // an Area Attack is one roll (and one Action) against several opponents: undo all of it
     const removed = enc.attacks.filter((x) => x === atk || (atk.group && x.group === atk.group));
     enc.attacks = enc.attacks.filter((x) => !removed.includes(x));

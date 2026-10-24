@@ -289,14 +289,14 @@ describe('damageExpr', () => {
 });
 
 describe('assignStatPoints', () => {
-  it('raises Enhanced and Unenhanced and spends the points', () => {
+  it('raises the Unenhanced value (Enhanced follows, with gear) and spends the points', () => {
     const d = newSheet();
-    d.stats.str = { enhanced: '8', unenhanced: '6', mod: '' };
+    d.stats.str = { enhanced: '6', unenhanced: '6', mod: '' };
     d.stats.con = { enhanced: '5', unenhanced: '', mod: '' };
     d.statPoints = '6';
     const r = assignStatPoints(d, { str: 2, con: 1 })!;
-    expect(r.stats.str).toMatchObject({ enhanced: '10', unenhanced: '8' });
-    expect(r.stats.con.enhanced).toBe('6');
+    expect(r.stats.str).toMatchObject({ enhanced: '8', unenhanced: '8' });
+    expect(r.stats.con).toMatchObject({ enhanced: '6', unenhanced: '6' });
     expect(r.statPoints).toBe('3');
     expect(assignStatPoints(d, { str: 7 })).toBeNull();
     expect(assignStatPoints(d, {})).toBeNull();
@@ -513,6 +513,39 @@ describe('Stat bonuses from gear', () => {
     expect(der.modAuto.dex).toBe(
       derive(loadSheet({ stats: { dex: { enhanced: '6', unenhanced: '6', mod: '' } } })).modAuto.dex,
     );
+  });
+});
+
+describe('Enhanced = Unenhanced + gear (schema 10)', () => {
+  const ring = () => {
+    const r = {
+      ...emptyItem(),
+      id: 'r',
+      item: 'Anillo',
+      qty: '1',
+      type: 'accessory' as const,
+      fits: 'finger' as const,
+      slot: 'acc.finger.1',
+    };
+    r.bonus = { ...r.bonus, con: '2' };
+    return r;
+  };
+  it('works the Enhanced score out from Unenhanced and equipped gear', () => {
+    const d = loadSheet({ stats: { con: { enhanced: '99', unenhanced: '5', mod: '' } }, inventory: [ring()] });
+    expect(derive(d).score.con).toBe(7);
+  });
+  it('v9 → v10: an empty Unenhanced takes the old Enhanced; a typed Mod equal to the automatic one goes', () => {
+    const d = loadSheet({
+      schema: 9,
+      stats: {
+        con: { enhanced: '5', unenhanced: '', mod: '+2' },
+        str: { enhanced: '6', unenhanced: '6', mod: '+9' },
+      },
+      inventory: [ring()],
+    });
+    expect(d.stats.con).toMatchObject({ unenhanced: '5', enhanced: '7', mod: '' });
+    expect(d.stats.str.mod).toBe('+9');
+    expect(derive(d).score.con).toBe(7);
   });
 });
 

@@ -30,7 +30,7 @@ import {
 } from './sheet';
 import { classifySkill } from './skillTypes';
 
-export const SCHEMA_VERSION = 9;
+export const SCHEMA_VERSION = 10;
 /** Default Move and Step in feet (Character Creation Step 7). */
 export const BASE_MOVE = 20;
 export const BASE_STEP = 10;
@@ -178,6 +178,14 @@ export type Derived = {
 
 const STAT_KEYS: StatKey[] = ['str', 'int', 'con', 'dex', 'cha'];
 
+/** A Stat's score without gear: the Unenhanced value (older sheets may only have the Enhanced one). */
+export const baseScore = (d: SheetData, k: StatKey) => num(d.stats[k].unenhanced) ?? num(d.stats[k].enhanced);
+/** A Stat's Enhanced score: Unenhanced + equipped gear. */
+export const enhancedScore = (d: SheetData, k: StatKey) => {
+  const b = baseScore(d, k);
+  return b === null ? null : b + gearBonus(d.inventory, k).total;
+};
+
 export function derive(d: SheetData): Derived {
   const modAuto = {} as Record<StatKey, number | null>;
   const mods = {} as Record<StatKey, number | null>;
@@ -186,7 +194,7 @@ export function derive(d: SheetData): Derived {
   const score = {} as Record<StatKey, number | null>;
   for (const k of STAT_KEYS) {
     gearStats[k] = gearBonus(d.inventory, k);
-    const base = num(d.stats[k].enhanced);
+    const base = baseScore(d, k);
     score[k] = base === null ? null : base + gearStats[k].total;
     modAuto[k] = statModFromScore(score[k]);
     mods[k] = d.stats[k].mod.trim() ? num(d.stats[k].mod) : modAuto[k];
@@ -321,7 +329,7 @@ export function rest(d: SheetData, kind: RestKind): SheetData {
     out = setMana(out, cur + 5, max);
   } else if (kind === 'short') {
     out = heal(out, 5);
-    const intScore = num(d.stats.int.enhanced) ?? 0;
+    const intScore = enhancedScore(d, 'int') ?? 0;
     out = setMana(out, cur + Math.floor(intScore / 2), max);
   } else {
     out = heal(out, HB_SLOTS);
@@ -463,6 +471,7 @@ export function migrate(d: SheetData): SheetData {
   if (out.schema < 7) out = migrateV6(out);
   if (out.schema < 8) out = migrateV7(out);
   if (out.schema < 9) out = migrateV8(out);
+  if (out.schema < 10) out = migrateV9(out);
   out.schema = SCHEMA_VERSION;
   return out;
 }
@@ -509,6 +518,26 @@ function migrateV6(d: SheetData): SheetData {
  * v8 → v9: Spells go on the Hotlist as Spells. A slot whose text starts with one of the crawler's Spells now holds
  * that Spell; the old "Heal (Interrupt)…" line goes (Heal is always available, from the Core tab).
  */
+/**
+ * v9 → v10: the Enhanced value is no longer typed in; it is Unenhanced + equipped gear. An empty Unenhanced takes the
+ * old Enhanced value, and a typed Stat Mod equal to the automatic one (with or without gear) goes back to automatic.
+ */
+function migrateV9(d: SheetData): SheetData {
+  const stats = { ...d.stats };
+  for (const k of STAT_KEYS) {
+    const s = { ...stats[k] };
+    if (!s.unenhanced.trim() && s.enhanced.trim()) s.unenhanced = s.enhanced;
+    const base = num(s.unenhanced);
+    const gear = gearBonus(d.inventory, k).total;
+    const typed = s.mod.trim() ? num(s.mod) : null;
+    if (typed !== null && base !== null && [statModFromScore(base), statModFromScore(base + gear)].includes(typed))
+      s.mod = '';
+    s.enhanced = base === null ? s.enhanced : String(base + gear);
+    stats[k] = s;
+  }
+  return { ...d, stats };
+}
+
 function migrateV8(d: SheetData): SheetData {
   const spells = hotlistSpells(d.skills);
   const hotSlots = [...d.hotSlots];
@@ -765,9 +794,14 @@ export function assignStatPoints(d: SheetData, alloc: Partial<Record<StatKey, nu
     const n = Math.max(0, Math.floor(alloc[k] ?? 0));
     if (!n) continue;
     const s = d.stats[k];
-    // an empty Enhanced value starts from the Unenhanced one (and vice versa)
-    const enh = s.enhanced.trim() ? s.enhanced : s.unenhanced || '0';
-    stats[k] = { ...s, enhanced: bump(enh, n), unenhanced: s.unenhanced.trim() ? bump(s.unenhanced, n) : s.unenhanced };
+    // points go to the Unenhanced value (an empty one starts from the old Enhanced value); Enhanced follows with gear
+    const unenh = bump(s.unenhanced.trim() ? s.unenhanced : s.enhanced || '0', n);
+    const enh = num(unenh);
+    stats[k] = {
+      ...s,
+      unenhanced: unenh,
+      enhanced: enh === null ? s.enhanced : String(enh + gearBonus(d.inventory, k).total),
+    };
   }
   return { ...d, stats, statPoints: String(have - spend) };
 }

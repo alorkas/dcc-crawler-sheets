@@ -1,5 +1,6 @@
 import type { Item, LevelEntry, SheetData } from './sheet';
 import type { Degree } from '../../shared/combat.js';
+import type { ItemCard } from '../../shared/items.js';
 
 export type User = {
   id: number;
@@ -89,7 +90,9 @@ export type PartyMember = {
   ownerId: number;
   ownerName: string;
   mine: boolean;
-  view: Partial<SheetData> & { portraitTag?: string };
+  /** The party leader (highest combined Stat total, or the GM's pick). */
+  leader?: boolean;
+  view: Partial<SheetData> & { portraitTag?: string; statTotal?: number };
 };
 
 export type RollPart = {
@@ -156,6 +159,15 @@ export type LogEvent =
   | { type: 'combat'; action: 'start' | 'round' | 'end'; round: number }
   | { type: 'opponent'; name: string; from: number; to: number; defeated: boolean; source: string }
   | { type: 'favor'; use: 'reroll' | 'action'; from: number; to: number }
+  | {
+      type: 'favor';
+      use: 'gain';
+      source: 'achievement' | 'quest' | 'combat';
+      title: string;
+      n: number;
+      from: number;
+      to: number;
+    }
   | { type: 'achievement'; title: string }
   | { type: 'expired'; names: string[] }
   | { type: 'injury'; debuff: string; source: string }
@@ -170,6 +182,8 @@ export type LogEvent =
       ability?: string;
       /** Charges left on the current one. */
       charges?: number;
+      /** The item as everyone sees it (description, bonuses). */
+      card?: ItemCard;
       /** Present when it can be undone from the log. */
       undo?: unknown;
       undone?: boolean;
@@ -205,7 +219,7 @@ export type LogEvent =
       source: 'book' | 'achievement' | 'quest';
       title?: string;
     }
-  | { type: 'gift'; items: { item: string; rarity: string; qty: string }[] }
+  | { type: 'gift'; items: { item: string; rarity: string; qty: string; card?: ItemCard }[] }
   | {
       type: 'quest';
       /** offered = assigned; accepted/declined only in entries from the first version. */
@@ -219,6 +233,10 @@ export type LogEvent =
   | { type: 'cursed'; item: string }
   | { type: 'world'; action: 'floor'; from: number; to: number; name: string; nameEs: string }
   | { type: 'world'; action: 'saferoom'; on: boolean }
+  | { type: 'world'; action: 'partyName'; name: string }
+  | { type: 'show'; card: ItemCard; qty: string }
+  | { type: 'trade'; to: string; toId: number; qty: number; card: ItemCard }
+  | { type: 'world'; action: 'leader'; id: number | null; name: string; auto: boolean }
   | {
       type: 'declare';
       round: number;
@@ -251,6 +269,10 @@ export type World = {
   autoClock: boolean;
   /** The party is in a Saferoom (loot boxes can be opened). */
   saferoom: boolean;
+  /** The party's name (the leader or the GM sets it). */
+  partyName: string;
+  /** The leader the GM picked; null when the crawler with the highest Stat total leads. */
+  leaderId: number | null;
 };
 export type WorldPatch = Partial<{
   floor: number;
@@ -260,6 +282,8 @@ export type WorldPatch = Partial<{
   addHours: number;
   autoClock: boolean;
   saferoom: boolean;
+  partyName: string;
+  leaderId: number | null;
   name: string;
   nameEs: string;
   ambience: string;
@@ -347,6 +371,19 @@ export type Encounter = {
   /** Crawler attacks this round (step 4 / surprise round). */
   attacks: CrawlerAttack[];
   links: Link[];
+  /** GM: AI Favor suggested at the end of the last fight (an attack with an AI Favor rating used most). */
+  favorOffers?: FavorOffer[];
+};
+export type FavorOffer = {
+  characterId: number;
+  name: string;
+  attack: string;
+  count: number;
+  total: number;
+  rating: number;
+  /** Conditions written next to the rating ("only if no Damage Effect is used"). */
+  note: string;
+  rounds: number;
 };
 /** A crawler's attack on an opponent: hit or miss against the Mob's Evade (`dc`, GM only). */
 export type CrawlerAttack = {
@@ -501,6 +538,8 @@ export type Reward = {
   note: string;
   /** Spells or skills the reward teaches (players see them once claimed). */
   skills?: string[];
+  /** AI Favor added to the sheet when it's claimed. */
+  aiFavor?: number;
 };
 export type Achievement = {
   id: number;
@@ -669,6 +708,8 @@ export const api = {
   rerollMessage: (id: number) => request<Message>('POST', `/api/messages/${id}/reroll`, {}),
 
   encounter: () => request<Encounter>('GET', '/api/encounter'),
+  favorOffer: (characterId: number, accept: boolean, n?: number) =>
+    request<Encounter>('POST', `/api/encounter/favor-offers/${characterId}`, { accept, n }),
   encounterAction: (action: 'start' | 'next' | 'prev' | 'end' | 'floor', extra: Record<string, unknown> = {}) =>
     request<Encounter>('POST', '/api/encounter', { action, ...extra }),
   addOpponents: (o: Record<string, unknown>) => request<Encounter>('POST', '/api/encounter/opponents', o),
@@ -707,6 +748,8 @@ export const api = {
     expr: string;
     damage?: string | null;
     label: string;
+    /** Aiming: shown in the log next to the attack. */
+    aimed?: boolean;
     /** A ranged weapon's Ammunition (inventory item id, on the Hotlist): one is spent. */
     ammoItemId?: string;
   }) => request<Encounter>('POST', '/api/encounter/attacks', a),
@@ -748,6 +791,11 @@ export const api = {
 
   world: () => request<World>('GET', '/api/world'),
   updateWorld: (p: WorldPatch) => request<World>('PATCH', '/api/world', p),
+  giveItem: (id: number, itemId: string, toId: number, qty?: number) =>
+    request<{ ok: true; qty: number; left: number }>('POST', `/api/characters/${id}/give-item`, { itemId, toId, qty }),
+  showItem: (id: number, itemId: string) =>
+    request<{ ok: true; messageId: number | null }>('POST', `/api/characters/${id}/show-item`, { itemId }),
+  renameParty: (name: string) => request<World>('PATCH', '/api/party/name', { name }),
 
   npcs: () => request<Npc[]>('GET', '/api/npcs'),
   npc: (id: number) => request<Npc>('GET', `/api/npcs/${id}`),

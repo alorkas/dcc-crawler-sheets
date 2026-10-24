@@ -5,6 +5,7 @@ import {
   api,
   type Declaration,
   type Encounter,
+  type FavorOffer,
   type LinkKind,
   type Npc,
   type NpcAttack,
@@ -53,6 +54,7 @@ export function CombatHeader({ wide = false }: { wide?: boolean }) {
     if (!gm) return null;
     return (
       <div className="combat-start">
+        <FavorOffers offers={encounter?.favorOffers ?? []} />
         <div className="combat-start-row">
           <button
             type="button"
@@ -1386,5 +1388,47 @@ function OpponentDetails({ o, floor }: { o: Opponent; floor: number }) {
         </blockquote>
       )}
     </details>
+  );
+}
+
+/**
+ * GM, after a fight: crawlers who used an attack with an AI Favor rating for most of their attacks in a fight of 3+
+ * rounds (Core Rulebook: low-damage Spells and weapons, Skills without Damage Effects). Give it or skip it.
+ */
+function FavorOffers({ offers }: { offers: FavorOffer[] }) {
+  const { t, err } = useI18n();
+  const { setEncounter } = useLive();
+  const [error, setError] = useState('');
+  if (!offers.length) return null;
+  const answer = async (o: FavorOffer, accept: boolean) => {
+    setError('');
+    try {
+      setEncounter(await api.favorOffer(o.characterId, accept, o.rating));
+    } catch (e) {
+      setError(err(e));
+    }
+  };
+  return (
+    <div className="favor-offers">
+      <div className="side-sub">✦ {t('favorOffer.title')}</div>
+      {offers.map((o) => (
+        <div key={o.characterId} className="favor-offer">
+          <div className="grow">
+            <strong>{o.name}</strong>{' '}
+            <span className="dim small">
+              {t('favorOffer.used', { attack: o.attack, n: o.count, total: o.total, rounds: o.rounds })}
+            </span>
+            {o.note && <div className="dim tiny">{o.note}</div>}
+          </div>
+          <button type="button" className="btn small primary" onClick={() => answer(o, true)}>
+            +{o.rating} {t('core.aiFavor')}
+          </button>
+          <button type="button" className="btn small ghost" onClick={() => answer(o, false)}>
+            {t('favorOffer.skip')}
+          </button>
+        </div>
+      ))}
+      {error && <p className="error tiny">{error}</p>}
+    </div>
   );
 }

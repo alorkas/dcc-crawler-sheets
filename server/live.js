@@ -1,6 +1,8 @@
 // Party dashboard, shared roll log / chat, and the Server-Sent Events stream that keeps them live.
 import crypto from 'node:crypto';
 import { rollDice } from './dice.js';
+import { statScores } from '../shared/items.js';
+import { partyLeader } from './world.js';
 
 const MAX_TEXT = 1000;
 const KEEP_MESSAGES = 2000;
@@ -17,9 +19,15 @@ const skillRank = (d, re) =>
 export function partyView(data, withMana) {
   const d = data || {};
   const stats = {};
+  // Enhanced = Unenhanced + equipped gear (worked out here: other players don't get the inventory)
+  const { scores, total } = statScores(d);
   for (const k of ['str', 'int', 'con', 'dex', 'cha']) {
     const s = d.stats?.[k] || {};
-    stats[k] = { enhanced: s.enhanced ?? '', unenhanced: s.unenhanced ?? '', mod: s.mod ?? '' };
+    stats[k] = {
+      enhanced: scores[k] === null ? (s.enhanced ?? '') : String(scores[k]),
+      unenhanced: s.unenhanced ?? '',
+      mod: s.mod ?? '',
+    };
   }
   const view = {
     schema: d.schema,
@@ -33,6 +41,9 @@ export function partyView(data, withMana) {
     // status chips (buffs, debuffs, Advantage/Disadvantage with their durations) are public, like debuffs
     effects: Array.isArray(d.effects) ? d.effects.slice(0, 30) : [],
     stats,
+    statTotal: total,
+    // kill counters (skulls and stars next to the name)
+    killCount: d.killCount && typeof d.killCount === 'object' ? d.killCount : {},
     // the portrait itself is served by /api/characters/:id/portrait; this tag changes when it does
     portraitTag: portraitTag(d.portrait),
   };
@@ -123,6 +134,7 @@ export function mountLive(app, { db, auth, adminOnly, loadChar }) {
 
   app.get('/api/party', auth, (req, res) => {
     const rows = partyRows.all();
+    const lead = partyLeader(db);
     res.json(
       rows.map((r) => {
         const mine = r.owner_id === req.user.id;
@@ -131,6 +143,7 @@ export function mountLive(app, { db, auth, adminOnly, loadChar }) {
           ownerId: r.owner_id,
           ownerName: r.owner_name,
           mine,
+          leader: r.id === lead.id,
           view: partyView(JSON.parse(r.data || '{}'), mine || !!req.user.is_admin),
         };
       }),
@@ -185,8 +198,9 @@ export function mountLive(app, { db, auth, adminOnly, loadChar }) {
     if (ptsB < ptsA) {
       const changes = {};
       for (const k of ['str', 'int', 'con', 'dex', 'cha']) {
-        const a = parseInt(oldData?.stats?.[k]?.enhanced, 10);
-        const b = parseInt(newData.stats?.[k]?.enhanced, 10);
+        const base = (d) => parseInt(d?.stats?.[k]?.unenhanced || d?.stats?.[k]?.enhanced, 10);
+        const a = base(oldData);
+        const b = base(newData);
         if (Number.isFinite(b) && b > (Number.isFinite(a) ? a : 0)) changes[k] = b - (Number.isFinite(a) ? a : 0);
       }
       if (Object.keys(changes).length) {

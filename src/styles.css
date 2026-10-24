@@ -592,6 +592,21 @@ main {
 .in[readonly] {
   cursor: default;
 }
+/* worked out by the sheet (e.g. Enhanced = Unenhanced + gear) */
+.in.computed {
+  background: transparent;
+  border-style: dashed;
+  font-weight: 600;
+}
+.in.computed.boosted {
+  color: var(--gold);
+}
+.in.computed:focus,
+.in.computed:hover {
+  box-shadow: none;
+  background: transparent;
+  border-color: var(--border);
+}
 .check {
   display: inline-grid;
   place-items: center;
@@ -6036,9 +6051,24 @@ ul.plain {
   margin-top: 0.2rem;
   accent-color: var(--green);
 }
-.quest-objs li.done label {
+.quest-objs li.done label,
+.quest-objs li.done .quest-step {
   color: var(--dim);
   text-decoration: line-through;
+}
+.quest-step {
+  display: flex;
+  align-items: flex-start;
+  gap: 0.5rem;
+}
+.quest-step-mark {
+  width: 1rem;
+  flex: none;
+  text-align: center;
+  color: var(--gold);
+}
+.quest-objs li.done .quest-step-mark {
+  color: var(--green);
 }
 .level-pill {
   color: var(--gold);
@@ -6457,4 +6487,252 @@ li.imp-exists {
     padding: 0.6rem 0.5rem;
     letter-spacing: 0.03em;
   }
+}
+
+/* ---------- Party name, leader, kill marks ---------- */
+.member-name-row {
+  display: flex;
+  align-items: center;
+  gap: 0.3rem;
+  min-width: 0;
+}
+.member-name-row .member-name {
+  min-width: 0;
+}
+.leader-crown {
+  font-size: 0.85rem;
+  line-height: 1;
+  flex: none;
+}
+.kill-marks {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.25rem;
+  flex: none;
+  font-size: 0.8rem;
+}
+.km {
+  display: inline-flex;
+  align-items: center;
+  gap: 1px;
+  color: #e6e6ee;
+  line-height: 1;
+}
+.km.gold {
+  color: var(--gold);
+  filter: drop-shadow(0 0 3px rgba(255, 196, 0, 0.45));
+}
+.km small {
+  font: 600 0.7rem/1 var(--font-label);
+  margin-left: 1px;
+}
+.kill-overlay {
+  position: absolute;
+  top: 6px;
+  z-index: 2;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.25rem;
+  max-width: 48%;
+  padding: 3px 5px;
+  border-radius: 7px;
+  background: rgba(10, 10, 12, 0.72);
+  font-size: 1rem;
+  pointer-events: auto;
+}
+.kill-overlay.left {
+  left: 6px;
+}
+.kill-overlay.right {
+  right: 6px;
+  justify-content: flex-end;
+}
+.kill-counters {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+.kill-counter {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+.kill-counter .km {
+  font-size: 1.2rem;
+  width: 1.4rem;
+  justify-content: center;
+}
+.kill-counter-lbl {
+  flex: 1;
+  font-size: 0.9rem;
+}
+.kill-counter-ctrl {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.25rem;
+}
+.kill-counter-ctrl .tiny-in {
+  width: 3.2rem;
+}
+.kill-counter-n {
+  font: 1.3rem/1 var(--font-head);
+  min-width: 2rem;
+  text-align: right;
+}
+.party-name-bar {
+  display: flex;
+  flex-direction: column;
+  gap: 0.2rem;
+  margin-bottom: 0.6rem;
+}
+.party-name-row {
+  display: flex;
+  align-items: center;
+  gap: 0.35rem;
+}
+.party-name {
+  font: 1.25rem/1.1 var(--font-head);
+  letter-spacing: 0.05em;
+  color: var(--gold);
+  overflow-wrap: anywhere;
+}
+.party-name.dim {
+  color: var(--dim);
+}
+.party-rename {
+  display: flex;
+  gap: 0.35rem;
+  align-items: center;
+}
+.party-rename .in {
+  flex: 1;
+  min-width: 0;
+}
+.party-tile .party-name-bar {
+  margin: 0.3rem 0 0;
+}
+
+/* ---------- Item cards in the log (hover a name) ---------- */
+.item-pill {
+  cursor: help;
+  font: inherit;
+  font-size: 0.72rem;
+}
+.item-pill:focus-visible {
+  outline: 2px solid var(--focus);
+  outline-offset: 1px;
+}
+.item-tip {
+  position: fixed;
+  z-index: 1000;
+  width: min(320px, calc(100vw - 16px));
+  padding: 0.65rem 0.75rem;
+  border-radius: 9px;
+  border: 1px solid var(--border-2);
+  border-top: 3px solid var(--rar, var(--border-2));
+  background: #15151a;
+  box-shadow: 0 10px 30px rgba(0, 0, 0, 0.55);
+  font-size: 0.85rem;
+  line-height: 1.4;
+  pointer-events: none;
+  display: flex;
+  flex-direction: column;
+  gap: 0.3rem;
+}
+.item-tip p {
+  margin: 0;
+  white-space: pre-wrap;
+}
+.item-tip-head {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  flex-wrap: wrap;
+}
+.item-tip-head strong {
+  font-size: 0.95rem;
+}
+.item-tip-bonus {
+  color: var(--gold);
+  font-weight: 600;
+  font-size: 0.8rem;
+}
+.item-tip-curse {
+  color: #ff8a80;
+}
+.item-tip .lbl {
+  font-size: 0.62rem;
+}
+.ev-desc {
+  margin-top: 0.2rem;
+  padding-left: 0.6rem;
+  border-left: 2px solid var(--border-2);
+  color: var(--dim);
+  font-size: 0.8rem;
+  white-space: pre-wrap;
+}
+.share-item {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.5rem;
+  margin-top: 0.8rem;
+  padding-top: 0.7rem;
+  border-top: 1px solid var(--border);
+}
+.share-give {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  flex-wrap: wrap;
+}
+.share-give .tiny-in {
+  width: 3.2rem;
+}
+
+/* ---------- AI Favor: reward chips, the GM's offers after a fight ---------- */
+.favor-chip {
+  color: #b9a6ff;
+  border-color: color-mix(in srgb, #b9a6ff 55%, transparent);
+  background: color-mix(in srgb, #b9a6ff 12%, transparent);
+}
+.reward-favor {
+  flex-direction: row;
+  align-items: center;
+  gap: 0.6rem;
+}
+.reward-favor .tiny-in {
+  width: 4rem;
+}
+.favor-offers {
+  display: flex;
+  flex-direction: column;
+  gap: 0.4rem;
+  margin-bottom: 0.7rem;
+  padding: 0.5rem 0.6rem;
+  border: 1px solid color-mix(in srgb, #b9a6ff 45%, transparent);
+  border-radius: 9px;
+  background: color-mix(in srgb, #b9a6ff 7%, transparent);
+}
+.favor-offer {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  flex-wrap: wrap;
+}
+.favor-offer .grow {
+  flex: 1;
+  min-width: 10rem;
+}
+
+/* Aiming toggle on ranged attacks */
+.aim-toggle {
+  margin-top: 0.25rem;
+  font-size: 0.72rem;
+  padding: 0.15rem 0.45rem;
+}
+.aim-toggle.on {
+  color: var(--gold);
+  border-color: var(--gold);
+  background: rgba(255, 196, 0, 0.1);
 }

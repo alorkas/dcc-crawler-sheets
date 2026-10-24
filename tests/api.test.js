@@ -1634,11 +1634,22 @@ test('quests: assigned (no declining), shared objectives, completion gives Level
   assert.equal((await other('GET', `/api/characters/${a.body.id}/quests`)).status, 404);
   assert.equal((await pl('POST', `/api/quest-crawlers/${link.linkId}/answer`, { answer: 'declined' })).status, 404);
 
-  // objectives are shared by everyone on it
-  assert.equal((await other('POST', `/api/quest-crawlers/${link.linkId}/objectives/a`, { done: true })).status, 404);
-  assert.equal((await pl('POST', `/api/quest-crawlers/${link.linkId}/objectives/a`, { done: true })).status, 200);
+  // players only see the steps unlocked so far: the first one, until it's done
+  assert.deepEqual(
+    link.objectives.map((o) => o.id),
+    ['a'],
+  );
+  // only the GM ticks steps (the System AI decides); they're shared by everyone on the quest
+  assert.equal((await other('POST', `/api/quest-crawlers/${link.linkId}/objectives/a`, { done: true })).status, 403);
+  assert.equal((await pl('POST', `/api/quest-crawlers/${link.linkId}/objectives/a`, { done: true })).status, 403);
+  assert.equal((await dm('POST', `/api/quest-crawlers/${link.linkId}/objectives/a`, { done: true })).status, 200);
   const bl = (await other('GET', `/api/characters/${b.body.id}/quests`)).body.quests[0];
   assert.equal(bl.objectives[0].done, true);
+  // the next step shows up once the one before is done
+  assert.deepEqual(
+    bl.objectives.map((o) => o.id),
+    ['a', 'b'],
+  );
 
   // completed: the Levels go onto the sheets at once (every crawler on it), the boxes to their Boxes tab
   const full = (await dm('GET', '/api/quests')).body.find((x) => x.id === q.body.id);
@@ -1970,4 +1981,143 @@ test('session import: achievements, quests (to the party), stat blocks, book sta
   );
   const stash = (await dm('GET', '/api/loot-stash')).body.items;
   assert.ok(stash.some((i) => i.item === 'Corona de Prueba' && i.bonus.cha === '2'));
+});
+
+test('party name and leader, kill counters, giving and showing items, AI Favor from rewards and fights', async () => {
+  const dm = client();
+  const p1 = client();
+  const p2 = client();
+  await dm('POST', '/api/auth/login', { username: 'dm', password: 'adminpass123' });
+  await p1('POST', '/api/auth/register', { username: 'leadp1', password: 'password1' });
+  await p2('POST', '/api/auth/register', { username: 'leadp2', password: 'password1' });
+  // clear whoever earlier tests left in the party
+  for (const m of (await dm('GET', '/api/party')).body)
+    await dm('PATCH', `/api/characters/${m.id}/party`, { inParty: false });
+  const ring = {
+    id: 'r1',
+    item: 'Anillo del Fogonero',
+    qty: '1',
+    type: 'accessory',
+    fits: 'finger',
+    slot: 'acc.finger.1',
+  };
+  ring.bonus = { con: '2' };
+  const stats = (v) => ({
+    str: { unenhanced: v },
+    int: { unenhanced: v },
+    con: { unenhanced: v },
+    dex: { unenhanced: v },
+  });
+  const a = await p1('POST', '/api/characters', {
+    data: {
+      schema: 10,
+      name: 'Fuerte',
+      stats: { ...stats('5'), cha: { unenhanced: '5' } },
+      inventory: [ring, { id: 'p1', item: 'Healing Potion', qty: '3', type: 'consumable', notes: 'Cura 2 casillas' }],
+      skills: [{ name: 'Dirt Clod', category: 'spell', aiFavor: '2' }],
+    },
+  });
+  const b = await p2('POST', '/api/characters', { data: { schema: 10, name: 'Flojo', stats: stats('3') } });
+  await dm('PATCH', `/api/characters/${a.body.id}/party`, { inParty: true });
+  await dm('PATCH', `/api/characters/${b.body.id}/party`, { inParty: true });
+
+  // the leader is the crawler with the highest Stat total (gear included: 25 + 2); Enhanced = Unenhanced + gear
+  let party = (await p2('GET', '/api/party')).body;
+  const lead = party.find((m) => m.leader);
+  assert.equal(lead.id, a.body.id);
+  assert.equal(lead.view.statTotal, 27);
+  assert.equal(lead.view.stats.con.enhanced, '7');
+  // only the leader (or the GM) renames the party
+  assert.equal((await p2('PATCH', '/api/party/name', { name: 'Los Flojos' })).status, 403);
+  assert.equal((await p1('PATCH', '/api/party/name', { name: 'Los Fogoneros' })).body.partyName, 'Los Fogoneros');
+  // the GM can name another leader, then go back to automatic
+  await dm('PATCH', '/api/world', { leaderId: b.body.id });
+  party = (await p1('GET', '/api/party')).body;
+  assert.equal(party.find((m) => m.leader).id, b.body.id);
+  assert.equal((await p1('PATCH', '/api/party/name', { name: 'Otro' })).status, 403);
+  await dm('PATCH', '/api/world', { leaderId: null });
+  assert.equal((await dm('GET', '/api/world')).body.leaderId, null);
+
+  // kill counters: GM only
+  const sheetA = (await p1('GET', `/api/characters/${a.body.id}`)).body;
+  await p1('PUT', `/api/characters/${a.body.id}`, {
+    data: { ...sheetA.data, killCount: { crawlers: '9' } },
+    version: sheetA.version,
+  });
+  assert.equal((await p1('GET', `/api/characters/${a.body.id}`)).body.data.killCount?.crawlers || '', '');
+  const gmA = (await dm('GET', `/api/characters/${a.body.id}`)).body;
+  await dm('PUT', `/api/characters/${a.body.id}`, {
+    data: { ...gmA.data, killCount: { crawlers: '2', top10: '1', bosses: '1', cityBosses: '' } },
+    version: gmA.version,
+  });
+  party = (await p2('GET', '/api/party')).body;
+  assert.equal(party.find((m) => m.id === a.body.id).view.killCount.crawlers, '2');
+
+  // giving: only to another crawler in the party; the stack splits and the log carries the item card
+  assert.equal(
+    (await p2('POST', `/api/characters/${a.body.id}/give-item`, { itemId: 'p1', toId: b.body.id })).status,
+    404,
+  );
+  const gave = await p1('POST', `/api/characters/${a.body.id}/give-item`, { itemId: 'p1', toId: b.body.id, qty: 2 });
+  assert.equal(gave.status, 200);
+  assert.equal(gave.body.left, 1);
+  const invB = (await p2('GET', `/api/characters/${b.body.id}`)).body.data.inventory;
+  assert.equal(invB.find((i) => i.item === 'Healing Potion').qty, '2');
+  // an equipped item comes off when given
+  await p1('POST', `/api/characters/${a.body.id}/give-item`, { itemId: 'r1', toId: b.body.id });
+  const ringB = (await p2('GET', `/api/characters/${b.body.id}`)).body.data.inventory.find((i) => i.item === ring.item);
+  assert.equal(ringB.slot, '');
+  const log = (await p2('GET', '/api/messages')).body;
+  const msgs = log.messages ?? log;
+  const trade = msgs.filter((m) => m.event?.type === 'trade').at(-1);
+  assert.equal(trade.event.to, 'Flojo');
+  assert.equal(trade.event.card.bonus.con, '2');
+  // showing an item in the chat
+  const shown = await p2('POST', `/api/characters/${b.body.id}/show-item`, { itemId: ringB.id });
+  assert.equal(shown.status, 200);
+  const after = (await p1('GET', '/api/messages')).body;
+  const show = (after.messages ?? after).filter((m) => m.event?.type === 'show').at(-1);
+  assert.equal(show.event.card.item, ring.item);
+
+  // AI Favor from an achievement: its own field, or "+1 Favor de la IA" in the note
+  const before = Number((await p1('GET', `/api/characters/${a.body.id}`)).body.data.dr?.aiFavor) || 0;
+  for (const reward of [{ aiFavor: 2 }, { note: '+1 Favor de la IA' }]) {
+    const ach = await dm('POST', '/api/achievements', {
+      title: `Favor ${JSON.stringify(reward)}`,
+      reward,
+      characterIds: [a.body.id],
+    });
+    assert.equal(ach.status, 201);
+    const w = (await p1('GET', `/api/characters/${a.body.id}/awards`)).body.awards.find(
+      (x) => x.achievementId === ach.body.id,
+    );
+    assert.equal((await p1('POST', `/api/awards/${w.id}/claim`)).status, 200);
+  }
+  assert.equal(Number((await p1('GET', `/api/characters/${a.body.id}`)).body.data.dr.aiFavor), before + 3);
+
+  // a fight of 3+ rounds where most attacks were a Spell with an AI Favor rating: the GM gets an offer
+  await dm('POST', '/api/encounter', { action: 'start' });
+  const opp = await dm('POST', '/api/encounter/opponents', { name: 'Rata', slots: 10, evade: '5' });
+  const oid = (opp.body.opponents ?? []).find((o) => o.name.startsWith('Rata'))?.id;
+  for (let r = 0; r < 3; r++) {
+    await dm('POST', '/api/encounter/attacks', {
+      characterId: a.body.id,
+      opponentId: oid,
+      expr: 'd20+3',
+      label: 'Dirt Clod',
+    });
+    await dm('POST', '/api/encounter', { action: 'next' });
+    await dm('POST', '/api/encounter', { action: 'next' });
+    await dm('POST', '/api/encounter', { action: 'next' });
+    await dm('POST', '/api/encounter', { action: 'next' });
+    await dm('POST', '/api/encounter', { action: 'next' });
+  }
+  const ended = (await dm('POST', '/api/encounter', { action: 'end' })).body;
+  const offer = ended.favorOffers.find((o) => o.characterId === a.body.id);
+  assert.equal(offer.attack, 'Dirt Clod');
+  assert.equal(offer.rating, 2);
+  assert.equal((await p1('GET', '/api/encounter')).body.favorOffers, undefined, 'players never see the offers');
+  const given = (await dm('POST', `/api/encounter/favor-offers/${a.body.id}`, { accept: true })).body;
+  assert.equal(given.favorOffers.length, 0);
+  assert.equal(Number((await p1('GET', `/api/characters/${a.body.id}`)).body.data.dr.aiFavor), before + 5);
 });

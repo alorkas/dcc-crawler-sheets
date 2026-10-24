@@ -66,7 +66,13 @@ export function AchievementsTab() {
   const [busy, setBusy] = useState<number | null>(null);
   const [claimError, setClaimError] = useState<unknown>(null);
   const [opening, setOpening] = useState<{ title: string; reward: Reward; replay: boolean } | null>(null);
-  const [claimed, setClaimed] = useState<{ title: string; boxes: number; note: string; skills: string[] } | null>(null);
+  const [claimed, setClaimed] = useState<{
+    title: string;
+    boxes: number;
+    note: string;
+    skills: string[];
+    aiFavor: number;
+  } | null>(null);
   const admin = !!user?.isAdmin;
 
   // claiming works anywhere: the note shows and the boxes go sealed to the Boxes tab (opened in a Saferoom)
@@ -75,7 +81,13 @@ export function AchievementsTab() {
     setClaimError(null);
     try {
       const r = await runServer(() => api.claimAward(w.id));
-      setClaimed({ title: w.title, boxes: r.opened.boxes.length, note: r.opened.note, skills: r.opened.skills ?? [] });
+      setClaimed({
+        title: w.title,
+        boxes: r.opened.boxes.length,
+        note: r.opened.note,
+        skills: r.opened.skills ?? [],
+        aiFavor: r.opened.aiFavor ?? 0,
+      });
       load();
     } catch (e) {
       setClaimError(e);
@@ -111,6 +123,7 @@ export function AchievementsTab() {
           {claimed.skills.length > 0 && (
             <p className="claimed-skills">🎓 {t('teach.learned', { list: claimed.skills.join(', ') })}</p>
           )}
+          {claimed.aiFavor > 0 && <p className="claimed-skills">✦ {t('favor.added', { n: claimed.aiFavor })}</p>}
           {claimed.note && <p className="ach-note">{claimed.note}</p>}
           <button
             type="button"
@@ -153,6 +166,11 @@ export function AchievementsTab() {
                           🎓 {n}
                         </span>
                       ))}
+                      {!!(contents.aiFavor || (w.claimedAt && w.reward.aiFavor)) && (
+                        <span className="pill favor-chip">
+                          ✦ {t('favor.plus', { n: contents.aiFavor || w.reward.aiFavor || 0 })}
+                        </span>
+                      )}
                       {!w.claimedAt && !w.reward.skills?.length && !!w.skillCount && (
                         <span className="pill teach-chip">🎓 {t('teach.secret', { n: w.skillCount })}</span>
                       )}

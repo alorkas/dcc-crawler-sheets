@@ -41,6 +41,7 @@ const fmtDate = (iso: string | null, locale: string) =>
 /** Drop empty item rows before saving. */
 export const tidy = (r: Reward): Reward => ({
   note: r.note,
+  ...(r.aiFavor ? { aiFavor: r.aiFavor } : {}),
   boxes: r.boxes.map((b) => ({ ...b, items: b.items.filter((it) => it.item.trim()) })),
   skills: r.skills ?? [],
 });
@@ -788,6 +789,22 @@ export function RewardEditor({
         + {t('achPage.addBox')}
       </button>
       {!noNote && <TeachPicker value={value.skills ?? []} onChange={(skills) => onChange({ ...value, skills })} />}
+      {!noNote && (
+        <label className="field reward-favor" title={t('achPage.aiFavorHint')}>
+          <span className="lbl">✦ {t('achPage.aiFavor')}</span>
+          <input
+            className="in center tiny-in"
+            type="number"
+            min={0}
+            max={20}
+            value={value.aiFavor || ''}
+            placeholder="0"
+            onChange={(e) =>
+              onChange({ ...value, aiFavor: Math.max(0, Math.min(20, Math.floor(Number(e.target.value) || 0))) })
+            }
+          />
+        </label>
+      )}
       {!noNote && (
         <label className="field">
           <span className="lbl">{t('achPage.otherReward')}</span>

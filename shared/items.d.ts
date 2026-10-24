@@ -106,3 +106,24 @@ export function isGoldItem(it: Partial<Item> | undefined | null): boolean;
 export function splitGold<T extends Partial<Item>>(items: T[]): { gold: number; items: T[] };
 export function goldOf(data: { gold?: string | number } | null | undefined): number;
 export function spellBookSpell(itemName: string | undefined | null): string;
+
+export function statScores(data: unknown): {
+  scores: Record<'str' | 'int' | 'con' | 'dex' | 'cha', number | null>;
+  total: number;
+};
+
+/** An item as shown to other players in the log. */
+export type ItemCard = {
+  item: string;
+  type: string;
+  rarity: string;
+  fits: string;
+  notes: string;
+  ability: string;
+  bonus: Partial<Record<BonusKey, string>>;
+  ranged?: boolean;
+  twoHanded?: boolean;
+  charges?: string;
+  curse?: string;
+};
+export function itemCard(it: Partial<Item> | undefined, fallbackNotes?: string): ItemCard;

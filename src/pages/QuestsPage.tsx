@@ -282,7 +282,7 @@ export default function QuestsPage() {
 /** "Reward: ▣ Gold box · +2 Levels · a favour from the Gnoll King" */
 export function RewardLine({ reward, gm, sealed }: { reward: QuestReward; gm?: boolean; sealed?: boolean }) {
   const { t } = useI18n();
-  const empty = !reward.boxes.length && !reward.note && !reward.levels && !reward.skills?.length;
+  const empty = !reward.boxes.length && !reward.note && !reward.levels && !reward.skills?.length && !reward.aiFavor;
   return (
     <div className="ach-reward quest-reward">
       <span className="lbl">{t('ach.reward')}</span>
@@ -291,6 +291,7 @@ export function RewardLine({ reward, gm, sealed }: { reward: QuestReward; gm?: b
       ) : (
         <div className="box-chips">
           {reward.levels > 0 && <span className="pill level-pill">{t('quest.levels', { n: reward.levels })}</span>}
+          {!!reward.aiFavor && <span className="pill favor-chip">✦ {t('favor.plus', { n: reward.aiFavor })}</span>}
           {reward.boxes.map((b, i) => (
             <BoxChip key={i} box={b} sealed={sealed} />
           ))}

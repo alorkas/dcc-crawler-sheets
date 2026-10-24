@@ -264,6 +264,28 @@ export function gearBonus(inventory, key) {
   return { total, from };
 }
 
+const STAT_KEYS = ['str', 'int', 'con', 'dex', 'cha'];
+/**
+ * A crawler's Stat scores: Unenhanced (older sheets may only have the Enhanced value) + equipped gear = Enhanced.
+ * `total` adds up the Enhanced scores (the party leader is the crawler with the highest one).
+ */
+export function statScores(data) {
+  const d = data || {};
+  const inv = Array.isArray(d.inventory) ? d.inventory : [];
+  const scores = {};
+  let total = 0;
+  for (const k of STAT_KEYS) {
+    const s = d.stats?.[k] || {};
+    const raw = String(s.unenhanced ?? '').trim() ? s.unenhanced : s.enhanced;
+    const base = parseInt(String(raw ?? '').replace(/[^\d-]/g, ''), 10);
+    const b = Number.isFinite(base) ? base : null;
+    const score = b === null ? null : b + gearBonus(inv, k).total;
+    scores[k] = score;
+    total += score ?? 0;
+  }
+  return { scores, total };
+}
+
 /**
  * Damage bonus from equipped gear for an attack skill: items tied to that skill (by name), plus weapons
  * held in the hands without a skill set (they count for every weapon attack, not for spells).
@@ -410,6 +432,30 @@ export function removeCurse(it) {
   return { ...it, bonus, notes, curse: null };
 }
 /** Is this item stuck on its wearer (a revealed curse, equipped)? */
+/**
+ * What other players see of an item in the log (shown in chat, used, traded, gifted): name, type, rarity, bonuses and
+ * description. A curse only shows once it has revealed itself.
+ */
+export function itemCard(it, fallbackNotes = '') {
+  const c = (v, n) => String(v ?? '').slice(0, n);
+  const bonus = {};
+  for (const k of BONUS_KEYS) if (String(it?.bonus?.[k] ?? '').trim()) bonus[k] = c(it.bonus[k], 12);
+  const card = {
+    item: c(it?.item, 120),
+    type: c(it?.type, 20),
+    rarity: c(it?.rarity, 20),
+    fits: c(it?.fits, 20),
+    notes: c(String(it?.notes ?? '').trim() || fallbackNotes, 600),
+    ability: c(it?.ability, 300),
+    bonus,
+  };
+  if (it?.ranged) card.ranged = true;
+  if (it?.twoHanded) card.twoHanded = true;
+  if (String(it?.maxCharges ?? '').trim()) card.charges = `${c(it.charges, 6)}/${c(it.maxCharges, 6)}`;
+  if (it?.curse?.revealed) card.curse = c(it.curse.text, 300);
+  return card;
+}
+
 export const isStuck = (it) => !!(it?.curse?.revealed && it.slot);
 
 /** A sheet as a player sees it: curses not yet revealed are invisible. */

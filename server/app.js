@@ -276,12 +276,13 @@ export function createApp({
     // everything else is kept as stored. One-time format upgrades (higher schema) are saved whole.
     const stored = JSON.parse(req.char.data || '{}');
     let next = req.char.locked && !(Number(data.schema) > Number(stored.schema || 0)) ? applyPlay(stored, data) : data;
-    // only the GM changes how many Equipment/Accessory slots a crawler has, and the gold in their wallet
+    // only the GM changes how many Equipment/Accessory slots a crawler has, the gold in their wallet and the kill counters
     if (!req.user.is_admin)
       next = {
         ...next,
         slotCounts: stored.slotCounts ?? Object.fromEntries(SLOT_KEYS.map((k) => [k, ''])),
         gold: stored.gold ?? '',
+        killCount: stored.killCount ?? { crawlers: '', top10: '', bosses: '', cityBosses: '' },
       };
     // curses stay with their items; equipping a cursed one reveals it, and a revealed one can't be taken off
     const cursed = mergeCurses(

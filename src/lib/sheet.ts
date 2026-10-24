@@ -3,6 +3,8 @@ import type { Effect } from '../../shared/combat.js';
 
 export type HealthBox = { a: string; b: string; hit: boolean };
 export type Stat = { enhanced: string; unenhanced: string; mod: string };
+export type Kills = { crawlers: string; top10: string; bosses: string; cityBosses: string };
+export const KILL_KINDS = ['crawlers', 'top10', 'bosses', 'cityBosses'] as const;
 export type StatKey = 'str' | 'int' | 'con' | 'dex' | 'cha';
 /** Stat used by a skill/attack: '' = not chosen (legacy free text), 'none' = no stat (passive). */
 export type StatSel = StatKey | 'none' | '';
@@ -96,6 +98,8 @@ export type SheetData = {
   slotCounts: Record<string, string>;
   /** Gold in the wallet (a currency, not an item). Only the GM changes it; opened boxes add to it. */
   gold: string;
+  /** Kill counters (GM only): crawlers, leaderboard (Top 10) crawlers, Bosses, and City Bosses or bigger. */
+  killCount: Kills;
   /** Legacy (≤ v5) free-text gear slots; since v6 gear is equipped inventory items (Item.slot). */
   gear: { head: string; torso: string; arms: string; hands: string; legs: string; feet: string; accessories: string };
   popularity: string;
@@ -224,6 +228,7 @@ export function emptySheet(): SheetData {
     hotSlots: Array(10).fill(''),
     slotCounts: Object.fromEntries(SLOT_KEYS.map((k) => [k, ''])),
     gold: '',
+    killCount: { crawlers: '', top10: '', bosses: '', cityBosses: '' },
     gear: { head: '', torso: '', arms: '', hands: '', legs: '', feet: '', accessories: '' },
     popularity: '',
     pastTrauma: '',

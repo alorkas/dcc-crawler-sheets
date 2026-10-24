@@ -2,7 +2,7 @@
 // what happens if it fails) to one or more crawlers or the whole party. Crawlers can't turn them down. The GM marks
 // a quest completed or failed. On completion the reward is given at once: the Levels go straight onto the sheet
 // (Core Rulebook: quests give Levels) and the loot boxes wait, sealed, until the crawler is in a Saferoom.
-import { cleanReward } from './rewards.js';
+import { addFavor, cleanReward, rewardFavor } from './rewards.js';
 import { levelUp } from './progress.js';
 import { learnAll } from './learn.js';
 
@@ -35,7 +35,7 @@ export function cleanQuest(body) {
     hidden: !!b.hidden,
   };
 }
-const hasReward = (r) => !!(r && (r.boxes?.length || r.note || r.levels || r.skills?.length));
+const hasReward = (r) => !!(r && (r.boxes?.length || r.note || r.levels || r.skills?.length || r.aiFavor));
 
 export function mountQuests(app, { db, auth, adminOnly, loadChar, live, boxes }) {
   db.exec(`
@@ -121,6 +121,11 @@ export function mountQuests(app, { db, auth, adminOnly, loadChar, live, boxes })
       event,
       gmOnly: !row.party_since,
     });
+  /** A player's view of the steps: those done up to the first open one, which is shown too; the rest stay hidden. */
+  const visibleSteps = (objectives) => {
+    const open = objectives.findIndex((o) => !o.done);
+    return open === -1 ? objectives : objectives.slice(0, open + 1);
+  };
   const ids = (v) => [...new Set((Array.isArray(v) ? v : []).map(Number).filter((n) => Number.isInteger(n) && n > 0))];
   const toQuest = (r) => ({
     id: r.id,
@@ -161,6 +166,9 @@ export function mountQuests(app, { db, auth, adminOnly, loadChar, live, boxes })
     }
     const taught = learnAll(data, reward.skills);
     data = taught.data;
+    // AI Favor the quest gives goes into the AI Favor box
+    const favor = rewardFavor(reward);
+    if (favor) data = addFavor(data, favor);
     if (data !== before) saveChar(row, before, data, actorId);
     post(row, {
       type: 'quest',
@@ -172,6 +180,18 @@ export function mountQuests(app, { db, auth, adminOnly, loadChar, live, boxes })
     });
     if (levelEntry) post(row, { type: 'level', ...levelEntry });
     for (const l of taught.learned) post(row, { type: 'learned', ...l, source: 'quest', title: d.title || '' });
+    if (favor) {
+      const from = parseInt(String(before.dr?.aiFavor ?? ''), 10) || 0;
+      post(row, {
+        type: 'favor',
+        use: 'gain',
+        source: 'quest',
+        title: d.title || '',
+        n: favor,
+        from,
+        to: from + favor,
+      });
+    }
   };
   const assign = (questId, data, charIds, actorId) => {
     const given = [];
@@ -266,7 +286,8 @@ export function mountQuests(app, { db, auth, adminOnly, loadChar, live, boxes })
           description: d.description || '',
           giver: d.giver || '',
           floor: d.floor || 0,
-          objectives: d.objectives || [],
+          // players see the steps done so far and the current one; the next ones stay hidden until it's done
+          objectives: admin ? d.objectives || [] : visibleSteps(d.objectives || []),
           penalty: d.penalty || '',
           status: d.status || 'active',
           hidden: !!d.hidden,
@@ -282,6 +303,7 @@ export function mountQuests(app, { db, auth, adminOnly, loadChar, live, boxes })
                 note: reward.note || '',
                 levels: reward.levels || 0,
                 skills: reward.skills || [],
+                aiFavor: rewardFavor(reward),
               },
         };
       });
@@ -301,8 +323,8 @@ export function mountQuests(app, { db, auth, adminOnly, loadChar, live, boxes })
     next();
   };
 
-  // tick an objective (crawlers on the quest and the GM; it's shared by everyone on the quest)
-  app.post('/api/quest-crawlers/:linkId/objectives/:objId', auth, loadLink, (req, res) => {
+  // tick an objective (the GM only: the System AI decides when a step is done; shared by everyone on the quest)
+  app.post('/api/quest-crawlers/:linkId/objectives/:objId', auth, adminOnly, loadLink, (req, res) => {
     if (req.questData.status !== 'active') return res.status(409).json({ error: 'Quest closed', code: 'quest_closed' });
     const objectives = (req.questData.objectives || []).map((o) =>
       o.id === req.params.objId ? { ...o, done: !!req.body?.done } : o,

@@ -1,3 +1,5 @@
+import { statScores } from '../shared/items.js';
+
 // World Stats: the Floor the party is on, crawlers still alive in the World Dungeon, time to Level Collapse and the
 // Floor's ambience (English and Spanish). Everyone reads it; the GM changes it.
 
@@ -194,6 +196,28 @@ export function inSaferoom(db, row) {
   return !!JSON.parse(w?.value || '{}').saferoom;
 }
 
+/**
+ * The party leader: the crawler with the highest combined Stat total (Enhanced, gear included), the first to join on
+ * a tie; the GM can name someone else instead (world.leaderId). `auto` is false when the GM picked the leader.
+ */
+export function partyLeader(db) {
+  const rows = db
+    .prepare('SELECT id, data FROM characters WHERE party_since IS NOT NULL ORDER BY party_since, id')
+    .all();
+  const w = JSON.parse(db.prepare(`SELECT value FROM kv WHERE key = 'world'`).get()?.value || '{}');
+  if (w.leaderId && rows.some((r) => r.id === w.leaderId)) return { id: w.leaderId, auto: false };
+  let best = null;
+  let top = -Infinity;
+  for (const r of rows) {
+    const t = statScores(JSON.parse(r.data || '{}')).total;
+    if (t > top) {
+      top = t;
+      best = r.id;
+    }
+  }
+  return { id: best, auto: true };
+}
+
 export function mountWorld(app, { db, auth, adminOnly, live, onFloor }) {
   const EMPTY = { floor: 1, crawlersAlive: null, collapseHours: FLOORS[1].days * 24, custom: {} };
   const getWorld = () => {
@@ -223,7 +247,20 @@ export function mountWorld(app, { db, auth, adminOnly, live, onFloor }) {
       maxFloor: MAX_FLOOR,
       autoClock: !!w.autoClock,
       saferoom: !!w.saferoom,
+      partyName: w.partyName || '',
+      /** The leader the GM picked (null: the highest Stat total leads). */
+      leaderId: w.leaderId || null,
     };
+  };
+  const charName = (id) => {
+    const r = db.prepare('SELECT data FROM characters WHERE id = ?').get(id);
+    return String(JSON.parse(r?.data || '{}').name || '').slice(0, 80);
+  };
+  const renameParty = (w, name) => {
+    const v = clip(name, 60).trim();
+    if (v === (w.partyName || '')) return;
+    w.partyName = v;
+    live.postEvent({ event: { type: 'world', action: 'partyName', name: v } });
   };
 
   app.get('/api/world', auth, (_req, res) => res.json(view(getWorld())));
@@ -255,6 +292,25 @@ export function mountWorld(app, { db, auth, adminOnly, live, onFloor }) {
       live.postEvent({ event: { type: 'world', action: 'saferoom', on: w.saferoom } });
       live.send('boxes', {});
     }
+    if (b.partyName !== undefined) renameParty(w, b.partyName);
+    // the GM names the party leader (null: back to the crawler with the highest Stat total)
+    if (b.leaderId !== undefined) {
+      const id = b.leaderId === null || b.leaderId === '' ? null : int(b.leaderId, 0) || null;
+      if (id !== (w.leaderId || null)) {
+        w.leaderId = id;
+        const lead = partyLeader(db);
+        live.postEvent({
+          event: {
+            type: 'world',
+            action: 'leader',
+            id: lead.id,
+            name: lead.id ? charName(lead.id) : '',
+            auto: lead.auto,
+          },
+        });
+        live.send('party', {});
+      }
+    }
     // per-Floor text overrides; { reset: true } goes back to the defaults
     if (b.reset) {
       delete w.custom[w.floor];
@@ -275,6 +331,18 @@ export function mountWorld(app, { db, auth, adminOnly, live, onFloor }) {
       w.custom = { ...(w.custom ?? {}), [w.floor]: c };
       if (!Object.keys(c).length) delete w.custom[w.floor];
     }
+    putWorld(w);
+    res.json(view(w));
+  });
+
+  // the party leader (or the GM) names the party
+  app.patch('/api/party/name', auth, (req, res) => {
+    const lead = partyLeader(db);
+    const owner = lead.id ? db.prepare('SELECT owner_id FROM characters WHERE id = ?').get(lead.id)?.owner_id : null;
+    if (!req.user.is_admin && owner !== req.user.id)
+      return res.status(403).json({ error: 'Only the party leader can rename the party', code: 'not_party_leader' });
+    const w = getWorld();
+    renameParty(w, req.body?.name);
     putWorld(w);
     res.json(view(w));
   });

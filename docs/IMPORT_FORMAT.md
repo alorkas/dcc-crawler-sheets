@@ -65,12 +65,13 @@ Tiene que haber al menos una lista con algo.
 
 Se usa en logros y misiones.
 
-| Campo    | Tipo                         | Qué es                                                                                                                                              |
-| -------- | ---------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `boxes`  | lista de [Caja](#caja) (≤10) | Cajas de botín. Al reclamar el logro (o al completar la misión) van selladas a la pestaña **Cajas** del crawler y solo se abren en una Sala Segura. |
-| `note`   | texto (≤1000)                | Recompensa escrita: «+1 Favor de la IA», «una estrella sobre la cabeza», «la caja se abre en el piso 2»…                                            |
-| `skills` | lista de textos (≤5)         | Hechizos o habilidades de combate que enseña, por su nombre exacto. Se añaden a la ficha (si ya los tiene, suben un nivel).                         |
-| `levels` | número (0–20)                | **Solo en misiones:** niveles que da al completarse, en el momento.                                                                                 |
+| Campo     | Tipo                         | Qué es                                                                                                                                                           |
+| --------- | ---------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `boxes`   | lista de [Caja](#caja) (≤10) | Cajas de botín. Al reclamar el logro (o al completar la misión) van selladas a la pestaña **Cajas** del crawler y solo se abren en una Sala Segura.              |
+| `aiFavor` | número (0–20)                | Favor de la IA que da. Se suma solo a la casilla de Favor de la IA al reclamar el logro (o al completar la misión).                                              |
+| `note`    | texto (≤1000)                | Recompensa escrita: «una estrella sobre la cabeza», «la caja se abre en el piso 2»… (Un «+1 Favor de la IA» escrito aquí también se suma, pero mejor `aiFavor`.) |
+| `skills`  | lista de textos (≤5)         | Hechizos o habilidades de combate que enseña, por su nombre exacto. Se añaden a la ficha (si ya los tiene, suben un nivel).                                      |
+| `levels`  | número (0–20)                | **Solo en misiones:** niveles que da al completarse, en el momento.                                                                                              |
 
 ## Caja
 
@@ -240,7 +241,8 @@ El navegador no muestra ese bloque, así que el HTML se ve igual. El Importador 
 | ------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------- |
 | Logro: nombre \| quién \| condición \| texto de la IA \| recompensa | `title` · `gmNote` («Escena · Quién · Condición») · `description` · `reward`                              |
 | «Caja X (Aventurero, Plata)»                                        | caja con `label: "X"`, `kind: "adventurer"`, `tier: "silver"`, y su contenido sacado de la lista de cajas |
-| «+1 Favor de la IA», «estrella sobre la cabeza»                     | `reward.note`                                                                                             |
+| «+1 Favor de la IA»                                                 | `reward.aiFavor: 1`                                                                                       |
+| «estrella sobre la cabeza», otras recompensas escritas              | `reward.note`                                                                                             |
 | «Recompensa: ninguna»                                               | sin `reward`                                                                                              |
 | «1 objeto al azar (1d4): A · B · C · D»                             | los cuatro objetos con `"oneOf": "d4"`                                                                    |
 | «+1 Constitución», «+1 RD»                                          | `bonus: { "con": "1" }`, `bonus: { "dr": "1" }`                                                           |
@@ -254,5 +256,7 @@ El navegador no muestra ese bloque, así que el HTML se ve igual. El Importador 
 
 - Las cajas solo se abren en una Sala Segura (la app ya lo hace).
 - Los niveles de misión se dan en el momento (`reward.levels`).
+- El Favor de la IA de logros y misiones se suma solo al reclamar o completar (`reward.aiFavor`).
+- Los jugadores solo ven las etapas de misión ya cumplidas y la actual; las siguientes se desvelan cuando el GM marca la anterior.
 - En el piso 1 no hay oro (`gold: 0`).
 - Las misiones las asigna la IA y no se pueden rechazar.

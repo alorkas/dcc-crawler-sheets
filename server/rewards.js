@@ -16,6 +16,7 @@ import {
   ensureIds,
   EQUIP_FITS,
   ITEM_TYPES,
+  itemCard,
   RARITIES,
 } from '../shared/items.js';
 
@@ -94,7 +95,27 @@ export function cleanReward(raw) {
   const skills = [
     ...new Set((Array.isArray(r.skills) ? r.skills : []).map((x) => clip(x, 80).trim()).filter(Boolean)),
   ].slice(0, 5);
-  return { boxes, note: clip(r.note, 1000).trim(), skills };
+  const out = { boxes, note: clip(r.note, 1000).trim(), skills };
+  const favor = Math.max(0, Math.min(20, Math.floor(Number(r.aiFavor) || 0)));
+  if (favor) out.aiFavor = favor;
+  return out;
+}
+
+/**
+ * AI Favor a reward gives: its own field, or (rewards written before it existed, or imported) a "+1 Favor de la IA" /
+ * "+2 AI Favor" in the note.
+ */
+export function rewardFavor(r) {
+  const own = Math.floor(Number(r?.aiFavor) || 0);
+  if (own > 0) return Math.min(20, own);
+  const m = String(r?.note ?? '').match(/\+?\s*(\d{1,2})\s*(?:puntos?\s+de\s+)?(?:AI\s+)?favou?r\b/i);
+  return m ? Math.min(20, Number(m[1])) : 0;
+}
+
+/** The sheet with `n` more AI Favor (the AI Favor box on the Core tab). */
+export function addFavor(data, n) {
+  const have = parseInt(String(data?.dr?.aiFavor ?? ''), 10) || 0;
+  return { ...data, dr: { ...(data?.dr || {}), aiFavor: String(have + n) } };
 }
 
 /** Opened boxes as a player sees them: curses not yet revealed are invisible. */
@@ -107,7 +128,7 @@ export const hideBoxCurses = (o) =>
     })),
   };
 
-const hasReward = (r) => !!(r && (r.boxes?.length || r.note || r.skills?.length));
+const hasReward = (r) => !!(r && (r.boxes?.length || r.note || r.skills?.length || r.aiFavor));
 const boxInfo = (b) => ({ tier: b.tier, kind: b.kind, label: b.label || '' });
 
 /** Book gear slots → our body parts; a few book accessories are worn somewhere specific. */
@@ -324,6 +345,7 @@ export function mountRewards(app, { db, auth, adminOnly, loadChar, live, boxes }
               boxes: (reward.boxes || []).map(({ tier, kind, label }) => ({ tier, kind, label, items: [] })),
               note: w.claimed_at ? reward.note || '' : '',
               skills: w.claimed_at ? reward.skills || [] : [],
+              aiFavor: w.claimed_at ? rewardFavor(reward) : 0,
             },
         skillCount: (reward.skills || []).length,
         opened: admin ? opened : hideBoxCurses(opened),
@@ -357,7 +379,10 @@ export function mountRewards(app, { db, auth, adminOnly, loadChar, live, boxes }
       ownerId: row.owner_id,
       characterId: row.id,
       charName: clip(data.name, 80),
-      event: { type: 'gift', items: items.map((it) => ({ item: it.item, rarity: it.rarity, qty: it.qty })) },
+      event: {
+        type: 'gift',
+        items: items.map((it) => ({ item: it.item, rarity: it.rarity, qty: it.qty, card: itemCard(it) })),
+      },
       gmOnly: !row.party_since,
     });
     res.json({ ok: true, count: items.length });
@@ -388,30 +413,46 @@ export function mountRewards(app, { db, auth, adminOnly, loadChar, live, boxes }
     if (w.claimed_at) return res.status(409).json({ error: 'Already claimed', code: 'already_claimed' });
     const reward = JSON.parse(w.reward || '{}');
     if (!hasReward(reward)) return res.status(400).json({ error: 'Nothing to claim', code: 'no_reward' });
-    const opened = { boxes: (reward.boxes || []).map(boxInfo), note: reward.note || '', skills: reward.skills || [] };
+    const favor = rewardFavor(reward);
+    const opened = {
+      boxes: (reward.boxes || []).map(boxInfo),
+      note: reward.note || '',
+      skills: reward.skills || [],
+      ...(favor ? { aiFavor: favor } : {}),
+    };
     if (q.claim.run(JSON.stringify(opened), w.id).changes !== 1)
       return res.status(409).json({ error: 'Already claimed', code: 'already_claimed' });
     const ach = JSON.parse(q.ach.get(w.achievement_id)?.data || '{}');
     boxes.give(row, reward.boxes, { source: 'achievement', title: ach.title || '' });
-    // skills and spells it teaches go straight onto the sheet
-    if (opened.skills.length) {
-      const before = JSON.parse(row.data || '{}');
-      const r = learnAll(before, opened.skills);
-      if (r.learned.length) {
-        db.prepare(
-          `UPDATE characters SET data = ?, version = version + 1, updated_at = datetime('now') WHERE id = ?`,
-        ).run(JSON.stringify(r.data), row.id);
-        live.characterChanged(row, before, r.data, { version: row.version + 1, actorId: req.user.id });
-        for (const l of r.learned)
-          live.postEvent({
-            ownerId: row.owner_id,
-            characterId: row.id,
-            charName: clip(before.name, 80),
-            event: { type: 'learned', ...l, source: 'achievement', title: ach.title || '' },
-            gmOnly: !row.party_since,
-          });
-      }
+    // skills and spells it teaches, and its AI Favor, go straight onto the sheet (one save)
+    const before = JSON.parse(row.data || '{}');
+    const taught = opened.skills.length ? learnAll(before, opened.skills) : { data: before, learned: [] };
+    const next = favor ? addFavor(taught.data, favor) : taught.data;
+    if (taught.learned.length || favor) {
+      db.prepare(
+        `UPDATE characters SET data = ?, version = version + 1, updated_at = datetime('now') WHERE id = ?`,
+      ).run(JSON.stringify(next), row.id);
+      live.characterChanged(row, before, next, { version: row.version + 1, actorId: req.user.id });
     }
+    const post = (event) =>
+      live.postEvent({
+        ownerId: row.owner_id,
+        characterId: row.id,
+        charName: clip(before.name, 80),
+        event,
+        gmOnly: !row.party_since,
+      });
+    for (const l of taught.learned) post({ type: 'learned', ...l, source: 'achievement', title: ach.title || '' });
+    if (favor)
+      post({
+        type: 'favor',
+        use: 'gain',
+        source: 'achievement',
+        title: ach.title || '',
+        n: favor,
+        from: parseInt(String(before.dr?.aiFavor ?? ''), 10) || 0,
+        to: (parseInt(String(before.dr?.aiFavor ?? ''), 10) || 0) + favor,
+      });
     live.postEvent({
       ownerId: row.owner_id,
       characterId: row.id,

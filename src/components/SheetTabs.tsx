@@ -1,4 +1,5 @@
 import { useState } from 'react';
+import { KillCounters } from './Kills';
 import { Area, Input, Section, useSheet } from './fields';
 import { ListRows, Portrait } from './widgets';
 import { EffectsPanel } from './Status';
@@ -8,13 +9,13 @@ import { annotateDamage, damageExpr, num, pinnedAttacks, statModFromScore } from
 import { useSearchParams } from 'react-router-dom';
 import { CastButton } from './SkillsTab';
 import { RollButton } from './RollButton';
-import { damageBonusFor, isSpellRef, spellRef } from '../../shared/items.js';
+import { damageBonusFor, isSpellRef, spellRef, weaponFor } from '../../shared/items.js';
 import { HotlistSlots } from './Inventory';
 import { AttackRollButton, CombatTargetBar, TargetProvider } from './CombatAttack';
 import { AssignStatPoints } from './AssignStatPoints';
 import { useI18n, type MsgKey } from '../lib/i18n';
 import { useNamesEs } from '../lib/namesEs';
-import { STATS, signed, type StatKey } from '../lib/sheet';
+import { STATS, signed, type SheetData, type StatKey } from '../lib/sheet';
 
 const statLabel = (k: StatKey) => `stat.${k}` as MsgKey;
 const statShort = (k: StatKey) => `stat.${k}.short` as MsgKey;
@@ -52,7 +53,16 @@ export function CoreTab() {
             <div className="stat" key={s.key}>
               <div className="stat-name">{t(statLabel(s.key))}</div>
               <div className="stat-split">
-                <Input path={['stats', s.key, 'enhanced']} label={t('core.enhanced')} center numeric />
+                <label className="field" title={t('core.enhancedHint')}>
+                  <span className="lbl">{t('core.enhanced')}</span>
+                  <input
+                    className={`in center computed ${der.gearStats[s.key].total ? 'boosted' : ''}`}
+                    value={der.score[s.key] ?? ''}
+                    readOnly
+                    tabIndex={-1}
+                    aria-label={t('core.enhanced')}
+                  />
+                </label>
                 <span className="slash">/</span>
                 <Input path={['stats', s.key, 'unenhanced']} label={t('core.unenhanced')} center numeric />
               </div>
@@ -61,8 +71,7 @@ export function CoreTab() {
                   className="dim tiny gear-stat"
                   title={der.gearStats[s.key].from.map((f) => `${f.name} ${signed(f.value)}`).join(', ')}
                 >
-                  {t('gear.statWith', {
-                    n: der.score[s.key] ?? '—',
+                  {t('gear.statFrom', {
                     list: der.gearStats[s.key].from.map((f) => `${f.name} ${signed(f.value)}`).join(', '),
                   })}
                 </div>
@@ -303,6 +312,22 @@ function PinnedAttacks() {
   );
 }
 
+/**
+ * Aiming for this attack: the crawler's Aiming Ranks and how many d4 it adds, when the attack is a Ranged Attack
+ * (a ranged Skill or weapon, or a Spell with a range beyond Melee). Null when it doesn't apply.
+ */
+function aimingFor(data: SheetData, s: SheetData['skills'][number]): { rank: number; dice: number } | null {
+  const sk = data.skills.find((x) => /^(aiming|apuntar)$/i.test(x.name.trim()));
+  const rank = num(sk?.rank ?? '') ?? 0;
+  if (rank < 1 || sk === s) return null;
+  const range = s.range.trim();
+  const rangedSpell =
+    s.category === 'spell' && /\d/.test(range) && !/melee|cuerpo|touch|toque|self|personal/i.test(range);
+  const rangedWeapon = !!weaponFor(data.inventory, s.name)?.ranged;
+  if (s.attackType !== 'ranged' && !rangedSpell && !rangedWeapon) return null;
+  return { rank, dice: 1 + (rank >= 5 ? 1 : 0) + (rank >= 10 ? 1 : 0) + (rank >= 15 ? 1 : 0) };
+}
+
 /** "Melee" + "Melee (5 ft)" → "Melee (5 ft)"; otherwise "Ranged · 100 feet". */
 function rangeText(type: string, range: string): string {
   if (!range.trim()) return type;
@@ -328,7 +353,13 @@ function PinnedRow({ i, der, onEdit }: { i: number; der: ReturnType<typeof useSh
   const maxExtra = spell && s.overcharge && die ? Math.max(0, rank ?? 0) : 0;
   const boost = Math.min(extra, maxExtra);
   const withBoost = baseExpr && boost ? `${baseExpr}+${boost}d${die}` : baseExpr;
-  const dmgExpr = withBoost && gearDmg.total ? `${withBoost}${signed(gearDmg.total)}` : withBoost;
+  const gearExpr = withBoost && gearDmg.total ? `${withBoost}${signed(gearDmg.total)}` : withBoost;
+  // Aiming (passive Skill): a Ranged Attack made with Disadvantage adds the Aiming Ranks to hit and 1d4 damage
+  // (+1d4 at Ranks 5, 10 and 15)
+  const aim = aimingFor(data, s);
+  const [aimed, setAimed] = useState(false);
+  const aiming = !!aim && aimed;
+  const dmgExpr = aiming && gearExpr ? `${gearExpr}+${aim.dice}d4` : gearExpr;
   const cost = spell ? num(s.manaCost) : null;
   const typeLbl = s.subtype
     ? t(`skillsub.${s.category}.${s.subtype}` as MsgKey)
@@ -354,15 +385,28 @@ function PinnedRow({ i, der, onEdit }: { i: number; der: ReturnType<typeof useSh
           <strong>—</strong>
         ) : (
           <AttackRollButton
-            expr={`d20${signed(toHit)}`}
-            text={`d20 ${signed(toHit)}`}
-            label={t('roll.toHit', { name: s.name || t('skills.phSkill') })}
+            expr={`d20${signed(toHit + (aiming ? aim.rank : 0))}`}
+            text={`d20 ${signed(toHit + (aiming ? aim.rank : 0))}`}
+            label={t(aiming ? 'roll.toHitAimed' : 'roll.toHit', { name: s.name || t('skills.phSkill') })}
             name={s.name || t('skills.phSkill')}
             damage={dmgExpr}
             manaCost={cost !== null ? cost + boost : null}
             spell={spell}
+            aimed={aiming}
             className="pin-roll"
           />
+        )}
+        {aim && toHit !== null && (
+          <button
+            type="button"
+            className={`btn small ghost aim-toggle ${aiming ? 'on' : ''}`}
+            aria-pressed={aiming}
+            title={t('aim.hint', { rank: aim.rank, dice: `${aim.dice}d4` })}
+            onClick={() => setAimed(!aimed)}
+          >
+            🎯 {t('aim.label')}
+            {aiming && ` +${aim.rank} · +${aim.dice}d4 · ▼`}
+          </button>
         )}
         <span className="dim tiny">
           {[rank !== null && `${t('skills.rank')} ${rank}`, statLbl && mod !== null && `${statLbl} ${signed(mod)}`]
@@ -524,6 +568,9 @@ export function CompanionsTab() {
         </Section>
       </div>
       <div className="col">
+        <Section title={t('killc.title')}>
+          <KillCounters />
+        </Section>
         <Section title={t('kills.title')}>
           <ListRows<string> path={['kills']} make={() => ''} addLabel={t('kills.add')} className="simple">
             {(i) => <Input path={['kills', i]} ariaLabel={t('kills.item', { n: i + 1 })} placeholder="…" />}

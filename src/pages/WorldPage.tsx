@@ -4,6 +4,7 @@ import { api, type World, type WorldPatch } from '../lib/api';
 import { useAuth } from '../lib/auth';
 import { useI18n } from '../lib/i18n';
 import { useLive } from '../lib/live';
+import { PartyNameBar } from '../components/LivePanels';
 
 /** "Xd Yh" for in-game hours left. */
 export function collapseText(hours: number, t: ReturnType<typeof useI18n>['t']) {
@@ -49,9 +50,10 @@ export default function WorldPage() {
                 </div>
               )}
             </div>
-            <div className="world-tile">
+            <div className="world-tile party-tile">
               <span className="lbl">{t('world.party')}</span>
               <strong>{party?.length ?? 0}</strong>
+              {(party?.length ?? 0) > 0 && <PartyNameBar />}
             </div>
             <SaferoomTile w={w} />
           </div>
@@ -104,7 +106,7 @@ function SaferoomTile({ w }: { w: World }) {
 
 function WorldControls({ w }: { w: World }) {
   const { t, err } = useI18n();
-  const { setWorld } = useLive();
+  const { setWorld, party } = useLive();
   const [floor, setFloor] = useState(String(w.floor));
   const [sync, setSync] = useState(true);
   const [alive, setAlive] = useState(w.crawlersAlive === null ? '' : String(w.crawlersAlive));
@@ -165,6 +167,33 @@ function WorldControls({ w }: { w: World }) {
           </button>
         </div>
         <p className="dim tiny">{t('world.floorHint')}</p>
+
+        {(party?.length ?? 0) > 0 && (
+          <div className="world-row">
+            <label className="field grow">
+              <span className="lbl">{t('leader.title')}</span>
+              <select
+                className="in sel"
+                value={w.leaderId ?? ''}
+                onChange={(e) => save({ leaderId: e.target.value ? Number(e.target.value) : null }, t('world.saved'))}
+              >
+                <option value="">
+                  {t('leader.autoOption', {
+                    name:
+                      [...(party ?? [])].sort((a, b) => (b.view.statTotal ?? 0) - (a.view.statTotal ?? 0))[0]?.view
+                        .name || '?',
+                  })}
+                </option>
+                {(party ?? []).map((m) => (
+                  <option key={m.id} value={m.id}>
+                    {m.view.name || '?'} · {t('leader.total', { n: m.view.statTotal ?? 0 })}
+                  </option>
+                ))}
+              </select>
+            </label>
+          </div>
+        )}
+        <p className="dim tiny">{t('leader.hint')}</p>
 
         <label className="gm-check">
           <input type="checkbox" checked={w.autoClock} onChange={(e) => save({ autoClock: e.target.checked })} />

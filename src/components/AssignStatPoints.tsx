@@ -1,7 +1,7 @@
 import { useState } from 'react';
 import { useSheet } from './fields';
 import { useI18n, type MsgKey } from '../lib/i18n';
-import { assignStatPoints, num, statModFromScore } from '../lib/rules';
+import { assignStatPoints, enhancedScore, num, statModFromScore } from '../lib/rules';
 import { signed, type StatKey } from '../lib/sheet';
 
 const KEYS: StatKey[] = ['str', 'int', 'con', 'dex', 'cha'];
@@ -85,8 +85,7 @@ function AssignPanel({ onDone }: { onDone: () => void }) {
       </div>
       <div className="assign-grid">
         {KEYS.map((k) => {
-          const s = data.stats[k];
-          const cur = num(s.enhanced) ?? num(s.unenhanced) ?? 0;
+          const cur = enhancedScore(data, k) ?? 0;
           const next = cur + alloc[k];
           const modNow = statModFromScore(cur);
           const modNext = statModFromScore(next);

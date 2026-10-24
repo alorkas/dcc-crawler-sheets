@@ -5,7 +5,7 @@ import { useAuth } from '../lib/auth';
 import { useI18n, type MsgKey } from '../lib/i18n';
 import { useLive } from '../lib/live';
 import { derive, num } from '../lib/rules';
-import { normalize, signed } from '../lib/sheet';
+import { normalize, signed, type Kills } from '../lib/sheet';
 import { ChatIcon, ChevronIcon, DiceIcon, PartyIcon } from './icons';
 import { ActionPips, AllyInterrupts, CombatHeader, Declarations, Opponents, TargetedBy } from './CombatTracker';
 import { QuickItems } from './QuickItems';
@@ -14,6 +14,8 @@ import { BoxChip } from './Achievements';
 import { boxSource } from './Boxes';
 import { rarityClass } from './Inventory';
 import { DegreeBadge, StatusChips } from './Status';
+import { KillMarks } from './Kills';
+import { ItemPill } from './ItemPill';
 
 /* ---------------- collapsible side panel ---------------- */
 
@@ -194,6 +196,7 @@ export function PartyPanel() {
         <CombatHeader />
         <Declarations />
         {fighting && <div className="side-sub">{t('combat.crawlers')}</div>}
+        {!fighting && members.length > 0 && <PartyNameBar />}
         {party === null && <p className="dim small">{t('common.loading')}</p>}
         {party !== null && members.length === 0 && <PartyEmpty />}
         {members.map((m) => (
@@ -203,6 +206,83 @@ export function PartyPanel() {
         <MiniMap />
       </div>
     </SidePanel>
+  );
+}
+
+/**
+ * The party's name and leader (the crawler with the highest combined Stat total, unless the GM picked one). The
+ * leader's player, and the GM, can rename the party.
+ */
+export function PartyNameBar({ big = false }: { big?: boolean }) {
+  const { t, err } = useI18n();
+  const { user } = useAuth();
+  const { party, world, setWorld } = useLive();
+  const [editing, setEditing] = useState(false);
+  const [name, setName] = useState('');
+  const [error, setError] = useState('');
+  const leader = party?.find((m) => m.leader);
+  const canRename = !!user?.isAdmin || !!leader?.mine;
+  const save = async (e?: FormEvent) => {
+    e?.preventDefault();
+    setError('');
+    try {
+      setWorld(await api.renameParty(name));
+      setEditing(false);
+    } catch (x) {
+      setError(err(x));
+    }
+  };
+  return (
+    <div className={`party-name-bar ${big ? 'big' : ''}`}>
+      {editing ? (
+        <form className="party-rename" onSubmit={save}>
+          <input
+            className="in"
+            value={name}
+            maxLength={60}
+            autoFocus
+            placeholder={t('partyName.placeholder')}
+            aria-label={t('partyName.label')}
+            onChange={(e) => setName(e.target.value)}
+          />
+          <button type="submit" className="btn small primary">
+            {t('common.save')}
+          </button>
+          <button type="button" className="btn small ghost" onClick={() => setEditing(false)}>
+            {t('common.cancel')}
+          </button>
+        </form>
+      ) : (
+        <div className="party-name-row">
+          <span className={`party-name ${world?.partyName ? '' : 'dim'}`}>
+            {world?.partyName || t('partyName.none')}
+          </span>
+          {canRename && (
+            <button
+              type="button"
+              className="icon-btn small"
+              title={t('partyName.rename')}
+              aria-label={t('partyName.rename')}
+              onClick={() => {
+                setName(world?.partyName ?? '');
+                setEditing(true);
+              }}
+            >
+              ✎
+            </button>
+          )}
+        </div>
+      )}
+      {leader && (
+        <span className="dim tiny party-leader-line" title={t(world?.leaderId ? 'leader.byGm' : 'leader.auto')}>
+          👑 {t('leader.is', { name: leader.view.name || '?' })}
+          {!world?.leaderId && leader.view.statTotal !== undefined && (
+            <> · {t('leader.total', { n: leader.view.statTotal })}</>
+          )}
+        </span>
+      )}
+      {error && <span className="error tiny">{error}</span>}
+    </div>
   );
 }
 
@@ -251,13 +331,21 @@ export function MemberCard({ m, wide = false }: { m: PartyMember; wide?: boolean
       <div className="member-head">
         <Avatar id={m.id} tag={m.view.portraitTag} name={sheet.name} className="member-avatar" />
         <div className="member-id">
-          {canOpen ? (
-            <button type="button" className="member-name link" onClick={() => navigate(`/sheet/${m.id}`)}>
-              {sheet.name || t('dash.unnamed')}
-            </button>
-          ) : (
-            <span className="member-name">{sheet.name || t('dash.unnamed')}</span>
-          )}
+          <span className="member-name-row">
+            {m.leader && (
+              <span className="leader-crown" title={t('leader.title')} aria-label={t('leader.title')}>
+                👑
+              </span>
+            )}
+            {canOpen ? (
+              <button type="button" className="member-name link" onClick={() => navigate(`/sheet/${m.id}`)}>
+                {sheet.name || t('dash.unnamed')}
+              </button>
+            ) : (
+              <span className="member-name">{sheet.name || t('dash.unnamed')}</span>
+            )}
+            <KillMarks kills={(m.view as { killCount?: Kills }).killCount} />
+          </span>
           <span className="dim tiny">
             {[sheet.level && t('dash.lvl', { n: sheet.level }), sheet.race, sheet.class, m.ownerName]
               .filter(Boolean)
@@ -428,25 +516,28 @@ function MessageList({ filter }: { filter: Filter }) {
   // automatic entries (HP, mana, levels, combat) live in their own Log tab so they don't drown the chat
   // "All" is rolls and chat, plus the Mobs' declared attacks (players need those during combat), Hotlist
   // changes made in combat and items used (both can be undone from here)
-  const shown = messages.filter((m) =>
-    filter === 'all'
-      ? m.kind !== 'event' ||
-        [
-          'declare',
-          'world',
-          'achievement',
-          'reward',
-          'interrupt',
-          'hotlist',
-          'item',
-          'gift',
-          'cursed',
-          'boxes',
-          'box',
-          'learned',
-          'quest',
-        ].includes(m.event?.type ?? '')
-      : m.kind === filter,
+  const shown = messages.filter(
+    (m) =>
+      filter === 'all'
+        ? m.kind !== 'event' ||
+          [
+            'declare',
+            'world',
+            'achievement',
+            'reward',
+            'interrupt',
+            'hotlist',
+            'item',
+            'gift',
+            'cursed',
+            'boxes',
+            'box',
+            'learned',
+            'quest',
+            'show',
+            'trade',
+          ].includes(m.event?.type ?? '')
+        : m.kind === filter || (filter === 'chat' && m.event?.type === 'show'), // items shown belong to the chat
   );
 
   useEffect(() => {
@@ -801,6 +892,24 @@ function EventEntry({ m, ev, time }: { m: Message; ev: LogEvent; time: string })
     case 'world':
       icon = '▼';
       tone = 'combat';
+      if (ev.action === 'partyName') {
+        icon = '⚑';
+        tone = 'good';
+        body = <strong>{ev.name ? t('log.ev.partyName', { name: ev.name }) : t('log.ev.partyNameCleared')}</strong>;
+        break;
+      }
+      if (ev.action === 'leader') {
+        icon = '👑';
+        tone = 'good';
+        body = (
+          <strong>
+            {ev.id
+              ? t(ev.auto ? 'log.ev.leaderAuto' : 'log.ev.leader', { name: ev.name || '?' })
+              : t('log.ev.noLeader')}
+          </strong>
+        );
+        break;
+      }
       if (ev.action === 'saferoom') {
         icon = '🛏';
         tone = 'good';
@@ -812,12 +921,22 @@ function EventEntry({ m, ev, time }: { m: Message; ev: LogEvent; time: string })
     case 'favor':
       icon = '✦';
       tone = 'good';
-      body = (
-        <>
-          <strong>{who}</strong> {t(ev.use === 'reroll' ? 'log.ev.favorReroll' : 'log.ev.favorAction')}
-          <span className="dim"> · {t('log.ev.favorLeft', { n: ev.to })}</span>
-        </>
-      );
+      body =
+        ev.use === 'gain' ? (
+          <>
+            <strong>{who}</strong> {t('log.ev.favorGain', { n: ev.n })}
+            <span className="dim">
+              {' '}
+              · {t(`log.ev.favorFrom.${ev.source}` as MsgKey, { title: ev.title })} ·{' '}
+              {t('log.ev.favorNow', { n: ev.to })}
+            </span>
+          </>
+        ) : (
+          <>
+            <strong>{who}</strong> {t(ev.use === 'reroll' ? 'log.ev.favorReroll' : 'log.ev.favorAction')}
+            <span className="dim"> · {t('log.ev.favorLeft', { n: ev.to })}</span>
+          </>
+        );
       break;
     case 'expired':
       icon = '⏱';
@@ -848,12 +967,19 @@ function EventEntry({ m, ev, time }: { m: Message; ev: LogEvent; time: string })
         <>
           <span className={ev.undone ? 'struck' : ''}>
             <strong>{who}</strong>{' '}
-            {ev.kept
-              ? t('log.ev.itemAbility', { item: ev.item })
-              : ev.target
-                ? t('log.ev.itemOn', { item: ev.item, target: ev.target })
-                : t('log.ev.item', { item: ev.item })}
-            {ev.kept && ev.ability && <span className="dim"> · {ev.ability}</span>}
+            {ev.card ? (
+              <>
+                {t('log.ev.itemUse')} <ItemPill card={ev.card} />
+                {ev.target && <> {t('log.ev.itemOnTarget', { target: ev.target })}</>}
+              </>
+            ) : ev.kept ? (
+              t('log.ev.itemAbility', { item: ev.item })
+            ) : ev.target ? (
+              t('log.ev.itemOn', { item: ev.item, target: ev.target })
+            ) : (
+              t('log.ev.item', { item: ev.item })
+            )}
+            {ev.kept && ev.ability && !ev.card && <span className="dim"> · {ev.ability}</span>}
             {ev.applied?.type === 'heal' && <span> · {t('log.ev.itemHeal', { n: ev.applied.slots })}</span>}
             {ev.applied?.type === 'mana' && <span> · {t('log.ev.itemMana')}</span>}
             {!ev.kept && (
@@ -865,6 +991,28 @@ function EventEntry({ m, ev, time }: { m: Message; ev: LogEvent; time: string })
             )}
           </span>
           {ev.undone ? <span className="dim"> · {t('log.ev.undone')}</span> : ev.undo ? <UndoEvent m={m} /> : null}
+          {ev.card && !ev.undone && (ev.kept ? ev.card.ability || ev.card.notes : ev.card.notes) && (
+            <div className="ev-desc">{ev.kept ? ev.card.ability || ev.card.notes : ev.card.notes}</div>
+          )}
+        </>
+      );
+      break;
+    case 'show':
+      icon = '👁';
+      tone = '';
+      body = (
+        <>
+          <strong>{who}</strong> {t('log.ev.show')} <ItemPill card={ev.card} qty={ev.qty} />
+          <span className="dim tiny"> · {t('log.ev.showHint')}</span>
+        </>
+      );
+      break;
+    case 'trade':
+      icon = '⇄';
+      tone = 'good';
+      body = (
+        <>
+          <strong>{who}</strong> {t('log.ev.trade', { to: ev.to })} <ItemPill card={ev.card} qty={ev.qty} />
         </>
       );
       break;
@@ -999,12 +1147,16 @@ function EventEntry({ m, ev, time }: { m: Message; ev: LogEvent; time: string })
       body = (
         <>
           <strong>{who}</strong> {t('log.ev.gift')}{' '}
-          {ev.items.map((it, i) => (
-            <span key={i} className={`pill tiny-pill rar-pill ${rarityClass(it.rarity)}`}>
-              {it.item}
-              {Number(it.qty) > 1 ? ` ×${it.qty}` : ''}
-            </span>
-          ))}
+          {ev.items.map((it, i) =>
+            it.card ? (
+              <ItemPill key={i} card={it.card} qty={it.qty} />
+            ) : (
+              <span key={i} className={`pill tiny-pill rar-pill ${rarityClass(it.rarity)}`}>
+                {it.item}
+                {Number(it.qty) > 1 ? ` ×${it.qty}` : ''}
+              </span>
+            ),
+          )}
         </>
       );
       break;

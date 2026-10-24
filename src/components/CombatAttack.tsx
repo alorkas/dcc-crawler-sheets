@@ -226,6 +226,7 @@ export function AttackRollButton({
   damage,
   manaCost = null,
   spell = false,
+  aimed = false,
   className,
 }: {
   expr: string;
@@ -238,6 +239,8 @@ export function AttackRollButton({
   manaCost?: number | null;
   /** Spells never use Ammunition. */
   spell?: boolean;
+  /** Aiming: the roll is made with Disadvantage (an Advantage cancels it out). */
+  aimed?: boolean;
   className?: string;
 }) {
   const { t, err } = useI18n();
@@ -292,8 +295,8 @@ export function AttackRollButton({
     return (
       <>
         <RollButton
-          expr={expr}
-          text={flash ?? text}
+          expr={aimed ? withMode(expr, 'dis') : expr}
+          text={flash ?? `${aimed ? '▼ ' : ''}${text}`}
           label={label}
           className={className}
           beforeRoll={weapon?.ranged ? beforeRoll : undefined}
@@ -302,7 +305,9 @@ export function AttackRollButton({
       </>
     );
   }
-  const { fight, opps, mode } = aim;
+  const { fight, opps } = aim;
+  // Aiming adds a Disadvantage: with an Advantage they cancel out (Core Rulebook "Advantage & Disadvantage")
+  const mode = aimed ? (aim.mode === 'adv' ? 'normal' : 'dis') : aim.mode;
   const attack = async () => {
     // in combat a Spell is cast from the Hotlist (Heal is always available)
     if (spell && !isHealSpell(name) && !data.hotSlots.includes(spellRef(name))) return say(t('spell.notOnHotlist'));
@@ -315,6 +320,7 @@ export function AttackRollButton({
         expr: withMode(expr, mode),
         damage,
         label: name,
+        ...(aimed ? { aimed: true } : {}),
         ...(ammo ? { ammoItemId: ammo.id } : {}),
       });
       fight.live.setEncounter(enc);

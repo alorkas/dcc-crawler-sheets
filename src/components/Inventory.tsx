@@ -428,15 +428,17 @@ function InventoryRow({
             className="row-del"
             title={t('list.remove')}
             aria-label={t('list.remove')}
-            onClick={() =>
+            onClick={() => {
+              // a blank row goes straight away; a real item asks first
+              if (!blank && !confirm(t('inv.deleteConfirm', { item: it.item.trim() }))) return;
               update((d) => ({
                 ...d,
                 ...syncHot(
                   d.inventory.filter((_, j) => j !== i),
                   d.hotSlots,
                 ),
-              }))
-            }
+              }));
+            }}
           >
             ×
           </button>
@@ -488,7 +490,7 @@ export function ItemNameList() {
 /* ---------------- item details (inventory "⋯", Equipment slots, Hotlist) ---------------- */
 export function ItemDialog({ i, onClose }: { i: number; onClose: () => void }) {
   const { t } = useI18n();
-  const { data, set, update, playLocked } = useSheet();
+  const { data, set, update, playLocked, charId } = useSheet();
   const { user } = useAuth();
   const hot = useHotlistChange();
   const it = data.inventory[i];
@@ -745,12 +747,100 @@ export function ItemDialog({ i, onClose }: { i: number; onClose: () => void }) {
           {hot.inFight && hotlistable(it) && <p className="dim tiny span-2">{t('hot.costsAction')}</p>}
           {hot.error && <p className="tiny error span-2">{hot.error}</p>}
         </fieldset>
+        {!!charId && it.item.trim() && <ShareItem it={it} stuck={stuck} onGiven={onClose} />}
         <div className="modal-actions">
           <button type="button" className="btn primary" onClick={onClose}>
             {t('common.close')}
           </button>
         </div>
       </div>
+    </div>
+  );
+}
+
+/**
+ * Show an item to the party in the chat (they hover it to read it), or give it to another crawler in the party:
+ * it leaves this inventory (taken off first) and lands in theirs, and the log says so.
+ */
+function ShareItem({ it, stuck, onGiven }: { it: Item; stuck: boolean; onGiven: () => void }) {
+  const { t, err } = useI18n();
+  const { charId, runServer } = useSheet();
+  const live = useLiveOptional();
+  const others = (live?.party ?? []).filter((m) => m.id !== charId);
+  const inParty = (live?.party ?? []).some((m) => m.id === charId);
+  const stack = String(it.qty ?? '').trim() === '' ? 1 : Math.max(1, parseInt(it.qty, 10) || 1);
+  const [to, setTo] = useState('');
+  const [qty, setQty] = useState(String(stack));
+  const [msg, setMsg] = useState('');
+  const [busy, setBusy] = useState(false);
+  const show = async () => {
+    setMsg('');
+    setBusy(true);
+    try {
+      await runServer(() => api.showItem(charId!, it.id));
+      setMsg(t('share.shown'));
+    } catch (e) {
+      setMsg(err(e));
+    } finally {
+      setBusy(false);
+    }
+  };
+  const give = async () => {
+    const target = others.find((m) => String(m.id) === to);
+    if (!target) return;
+    const n = Math.max(1, Math.min(stack, parseInt(qty, 10) || stack));
+    if (!confirm(t('share.giveConfirm', { item: it.item, n, name: target.view.name || '?' }))) return;
+    setMsg('');
+    setBusy(true);
+    try {
+      await runServer(() => api.giveItem(charId!, it.id, target.id, n));
+      onGiven();
+    } catch (e) {
+      setMsg(err(e));
+      setBusy(false);
+    }
+  };
+  return (
+    <div className="share-item">
+      <button type="button" className="btn small" disabled={busy} onClick={show} title={t('share.showHint')}>
+        👁 {t('share.show')}
+      </button>
+      {inParty && others.length > 0 && (
+        <span className="share-give">
+          <select
+            className="in sel tiny-sel"
+            value={to}
+            aria-label={t('share.to')}
+            onChange={(e) => setTo(e.target.value)}
+          >
+            <option value="">{t('share.to')}</option>
+            {others.map((m) => (
+              <option key={m.id} value={m.id}>
+                {m.view.name || '?'}
+              </option>
+            ))}
+          </select>
+          {stack > 1 && (
+            <input
+              className="in center tiny-in"
+              inputMode="numeric"
+              value={qty}
+              aria-label={t('inv.qty')}
+              onChange={(e) => setQty(e.target.value.replace(/[^\d]/g, ''))}
+            />
+          )}
+          <button
+            type="button"
+            className="btn small"
+            disabled={busy || !to || stuck}
+            title={stuck ? t('share.stuck') : t('share.giveHint')}
+            onClick={give}
+          >
+            ⇄ {t('share.give')}
+          </button>
+        </span>
+      )}
+      {msg && <span className="dim tiny">{msg}</span>}
     </div>
   );
 }
