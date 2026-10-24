@@ -2121,3 +2121,22 @@ test('party name and leader, kill counters, giving and showing items, AI Favor f
   assert.equal(given.favorOffers.length, 0);
   assert.equal(Number((await p1('GET', `/api/characters/${a.body.id}`)).body.data.dr.aiFavor), before + 5);
 });
+
+test('bad request bodies get a JSON error without a stack trace; compressed bodies are refused', async () => {
+  const bad = await fetch(`${base}/api/auth/login`, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: '{bad',
+  });
+  assert.equal(bad.status, 400);
+  const body = await bad.json();
+  assert.equal(body.code, 'bad_request');
+  assert.ok(!JSON.stringify(body).includes('at '), 'no stack trace');
+  const br = await fetch(`${base}/api/auth/login`, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json', 'content-encoding': 'br' },
+    body: 'xx',
+  });
+  assert.equal(br.status, 415);
+  assert.equal((await br.json()).code, 'bad_request');
+});

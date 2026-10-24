@@ -1719,6 +1719,9 @@ export const en = {
   'aim.hint':
     'Aiming: roll with Disadvantage, add your Aiming Ranks ({rank}) to hit, and {dice} to the damage on a hit',
   'roll.toHitAimed': '{name} to hit (aiming)',
+  'err.too_large': "That's too big to send (portraits and maps are resized first; try a smaller image)",
+  'err.bad_request': "The server couldn't read that request",
+  'err.server_error': 'Something went wrong on the server',
 };
 
 export type Messages = { [K in keyof typeof en]: string };

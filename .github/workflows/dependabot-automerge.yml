@@ -1,0 +1,59 @@
+# Merge Dependabot PRs on their own once CI passes (patch and minor updates only; majors wait for a human).
+# It runs after the CI workflow, in the main branch's context: the PR's code is never checked out or run here.
+name: Dependabot auto-merge
+
+on:
+  workflow_run:
+    workflows: [CI]
+    types: [completed]
+
+permissions:
+  contents: write # merge the PR
+  pull-requests: write
+  actions: write # start the image publish afterwards
+
+jobs:
+  merge:
+    if: >-
+      github.event.workflow_run.conclusion == 'success' &&
+      github.event.workflow_run.event == 'pull_request' &&
+      github.event.workflow_run.actor.login == 'dependabot[bot]'
+    runs-on: ubuntu-latest
+    env:
+      GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      GH_REPO: ${{ github.repository }}
+      HEAD_SHA: ${{ github.event.workflow_run.head_sha }}
+      HEAD_BRANCH: ${{ github.event.workflow_run.head_branch }}
+    steps:
+      - name: Find the pull request
+        id: pr
+        run: |
+          pr=$(gh pr list --state open --head "$HEAD_BRANCH" --json number,author,headRefOid \
+            --jq ".[] | select((.author.login == \"app/dependabot\" or .author.login == \"dependabot[bot]\") and .headRefOid == \"$HEAD_SHA\") | .number")
+          if [ -z "$pr" ]; then
+            echo "No open Dependabot PR at $HEAD_SHA (closed, or new commits since CI ran)"
+          fi
+          echo "number=$pr" >> "$GITHUB_OUTPUT"
+
+      - name: Skip major updates
+        id: kind
+        if: steps.pr.outputs.number != ''
+        run: |
+          # Dependabot writes the update type of every dependency in its commit message
+          msg=$(gh api "repos/$GH_REPO/commits/$HEAD_SHA" --jq .commit.message)
+          if echo "$msg" | grep -q 'version-update:semver-major'; then
+            echo "Major update: left for review"
+            echo "ok=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "ok=true" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Merge
+        if: steps.kind.outputs.ok == 'true'
+        run: |
+          gh pr merge "${{ steps.pr.outputs.number }}" --squash --delete-branch --match-head-commit "$HEAD_SHA"
+
+      # a merge made with GITHUB_TOKEN doesn't start the push workflow, so start the image build explicitly
+      - name: Publish the image
+        if: steps.kind.outputs.ok == 'true'
+        run: gh workflow run publish.yml --ref main

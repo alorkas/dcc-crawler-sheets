@@ -33,7 +33,9 @@ export function createApp({
 }) {
   const app = express();
   app.set('trust proxy', true);
-  app.use(express.json({ limit: '6mb' }));
+  // the app never sends compressed request bodies: refusing them keeps untrusted gzip/Brotli data away from the
+  // decompressors (Node's October 2026 Brotli advisory)
+  app.use(express.json({ limit: '6mb', inflate: false }));
   app.use(cookieParser());
 
   app.get('/health', (_req, res) => res.json({ status: 'ok' }));
@@ -432,8 +434,20 @@ export function createApp({
         },
       }),
     );
-    app.get('*', (_req, res) => res.sendFile(path.join(staticDir, 'index.html')));
+    // every other path is the single-page app (Express 5 wildcard syntax)
+    app.get('/{*splat}', (_req, res) => res.sendFile(path.join(staticDir, 'index.html')));
   }
+
+  // errors (bad JSON, a body that's too big, a compressed body…) answer in JSON, without stack traces
+  // eslint-disable-next-line no-unused-vars
+  app.use((err, _req, res, _next) => {
+    const status = Number(err?.status || err?.statusCode) || 500;
+    if (status >= 500) console.error(err);
+    res.status(status >= 400 && status < 600 ? status : 500).json({
+      error: status >= 500 ? 'Server error' : 'Bad request',
+      code: err?.type === 'entity.too.large' ? 'too_large' : status >= 500 ? 'server_error' : 'bad_request',
+    });
+  });
 
   return app;
 }

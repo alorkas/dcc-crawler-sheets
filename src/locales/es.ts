@@ -1732,4 +1732,7 @@ export const es: Messages = {
   'aim.hint':
     'Apuntar: tiras con Desventaja, sumas tus rangos de Apuntar ({rank}) para impactar y {dice} al daño si aciertas',
   'roll.toHitAimed': '{name} para impactar (apuntando)',
+  'err.too_large': 'Es demasiado grande para enviarlo (prueba con una imagen más pequeña)',
+  'err.bad_request': 'El servidor no ha podido leer esa petición',
+  'err.server_error': 'Algo ha fallado en el servidor',
 };
