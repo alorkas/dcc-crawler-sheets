@@ -62,6 +62,8 @@ export type CatalogEntry = {
   /** What the System AI says about it (campaign spells and skills). */
   ai?: string;
   overcharge?: boolean;
+  /** Damage Effect: the Attack Skills it goes with (campaign effects). */
+  appliesTo?: string;
 };
 export type CatalogHit = { kind: 'weapon' | 'spell' | 'utility' | 'item'; entry: CatalogEntry };
 export type FullCatalog = {
@@ -198,7 +200,7 @@ export type LogEvent =
       round: number;
       undone: boolean;
     }
-  | { type: 'interrupt'; kind: 'catch'; ally: string; attack: string }
+  | { type: 'interrupt'; kind: 'catch'; ally: string; attack: string; dr?: number }
   | { type: 'reward'; title: string; boxes: Pick<LootBox, 'tier' | 'kind' | 'label'>[] }
   | { type: 'boxes'; source: BoxSource; title: string; boxes: Pick<LootBox, 'tier' | 'kind' | 'label'>[] }
   | {
@@ -273,6 +275,8 @@ export type World = {
   partyName: string;
   /** The leader the GM picked; null when the crawler with the highest Stat total leads. */
   leaderId: number | null;
+  /** In-game hours passed (the clock for cooldowns like Powerful Strike). */
+  gameHours: number;
 };
 export type WorldPatch = Partial<{
   floor: number;
@@ -339,6 +343,10 @@ export type Declaration = {
       /** Rerolled with AI Favor (once per check); `first` is the original total. */
       rerolled?: boolean;
       first?: number;
+      /** A failed free Evade (Taunt) rolled again with the Evade Action. */
+      retried?: boolean;
+      /** Rolled with Advantage (Dodge Rank 10 vs Ranged/Spells, Taunt Rank 15). */
+      advantage?: boolean;
       degree?: Degree | null;
       /** Major Fail: + Floor damage. Critical Fail: double damage. */
       extra?: number;
@@ -346,13 +354,19 @@ export type Declaration = {
       messageId?: number | null;
     } | null;
     applied: { damage: number; slots: number } | null;
-    /** Catcher: took the hit for this ally (and can't Evade it). */
+    /** Catcher: took the hit for this ally (and can't Evade it), with extra DR from its Ranks. */
     caughtFor?: string;
     noEvade?: boolean;
+    catchDr?: number;
+    ignoreDebuffs?: boolean;
+    /** Taunt: drawn from this crawler; Rank 5 gives a free Evade (Rank 15: with Advantage). */
+    tauntedFrom?: string;
+    freeEvade?: boolean;
+    evadeAdv?: boolean;
   }[];
   damage: { total: number; expr: string } | null;
   /** Taunt (Interrupt) against this attack: who tried, and whether it worked. */
-  taunt?: { id: number; name: string; won: boolean; total?: number; mob?: number } | null;
+  taunt?: { id: number; name: string; won: boolean; total?: number; mob?: number; degree?: Degree | null } | null;
   tauntedFrom?: string[];
 };
 export type LinkKind = 'grab' | 'taunt' | 'protect' | 'custom';
@@ -371,6 +385,8 @@ export type Encounter = {
   /** Crawler attacks this round (step 4 / surprise round). */
   attacks: CrawlerAttack[];
   links: Link[];
+  /** Crawlers who already Taunted this round (one Taunt each), with how many attacks they drew. */
+  taunts?: { id: number; round: number; n: number; degree: Degree | null }[];
   /** GM: AI Favor suggested at the end of the last fight (an attack with an AI Favor rating used most). */
   favorOffers?: FavorOffer[];
 };
@@ -403,9 +419,24 @@ export type CrawlerAttack = {
   /** Area Attack: the records of one roll share a group. */
   group?: number | null;
   damageExpr: string | null;
-  /** `crit`: Natural 20, the damage dice were doubled; `amazing`: + Floor for an Amazing Success. */
-  damage: { total: number; expr: string; crit?: boolean; amazing?: number } | null;
+  /**
+   * `crit`: Natural 20, the damage dice were doubled; `amazing`: + Floor for an Amazing Success. With a Damage
+   * Effect: its name, the Debuffs the target gains, × base dice (Powerful Strike) / × total (Choke Out, Smush).
+   */
+  damage: {
+    total: number;
+    expr: string;
+    crit?: boolean;
+    amazing?: number;
+    effect?: string;
+    debuffs?: string[];
+    multBase?: number;
+    mult?: number;
+    stunInstead?: boolean;
+  } | null;
   applied: { slots: number; damage: number } | null;
+  /** The Damage Effect added to this attack (Iron Punch on Pugilism…). */
+  effect?: { name: string; debuffs?: string[]; note?: string; tossFeet?: number; stunInstead?: boolean };
 };
 /** 'evade' / 'interrupt' are Crawler Reaction Interrupts, 'action' is a Crawler Action (step 4). */
 export type ActionKind = 'evade' | 'interrupt' | 'heal' | 'action' | 'attack';
@@ -750,6 +781,10 @@ export const api = {
     label: string;
     /** Aiming: shown in the log next to the attack. */
     aimed?: boolean;
+    /** A Damage Effect Skill added to this attack, with its options and the Str Mod (Toss adds Str). */
+    effect?: string;
+    effectOpts?: { sameSize?: boolean; stunInstead?: boolean };
+    strMod?: number;
     /** A ranged weapon's Ammunition (inventory item id, on the Hotlist): one is spent. */
     ammoItemId?: string;
   }) => request<Encounter>('POST', '/api/encounter/attacks', a),
@@ -769,8 +804,8 @@ export const api = {
   undoEvent: (messageId: number) => request<{ ok: boolean }>('POST', `/api/messages/${messageId}/undo`, {}),
   intervene: (messageId: number, characterId: number) =>
     request<Encounter>('POST', `/api/messages/${messageId}/intervene`, { characterId }),
-  taunt: (declId: number, characterId: number, expr: string) =>
-    request<Encounter>('POST', `/api/encounter/declarations/${declId}/taunt`, { characterId, expr }),
+  taunt: (characterId: number, expr: string, picks: { declId: number; targetId: number }[]) =>
+    request<Encounter>('POST', '/api/encounter/taunt', { characterId, expr, picks }),
   catchAttack: (declId: number, characterId: number, allyId: number) =>
     request<Encounter>('POST', `/api/encounter/declarations/${declId}/catch`, { characterId, allyId }),
   addLink: (l: { kind: LinkKind; a: Omit<LinkSide, 'name'>; b: Omit<LinkSide, 'name'>; label?: string }) =>

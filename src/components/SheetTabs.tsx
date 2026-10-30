@@ -10,6 +10,8 @@ import { useSearchParams } from 'react-router-dom';
 import { CastButton } from './SkillsTab';
 import { RollButton } from './RollButton';
 import { damageBonusFor, isSpellRef, spellRef, weaponFor } from '../../shared/items.js';
+import { effectRankDice, effectSpec, effectsFor, withEffectDice, type EffectSpec } from '../../shared/skillRules.js';
+import { useLiveOptional } from '../lib/live';
 import { HotlistSlots } from './Inventory';
 import { AttackRollButton, CombatTargetBar, TargetProvider } from './CombatAttack';
 import { AssignStatPoints } from './AssignStatPoints';
@@ -335,8 +337,30 @@ function rangeText(type: string, range: string): string {
   return `${type} · ${range}`;
 }
 
+/** What a chosen Damage Effect does, in one line: × base dice, × total under a Health Bar %, Debuffs, cooldown. */
+function FxSummary({ spec }: { spec: EffectSpec }) {
+  const { t } = useI18n();
+  const added = [...spec.add, ...(spec.flat ? [String(spec.flat)] : [])];
+  const rank = effectRankDice(spec);
+  const bits = [
+    !spec.stunInstead && added.length > 0 && t('fx.addBase', { dice: added.join('+') }),
+    !spec.stunInstead && rank && t('fx.addRank', { dice: rank }),
+    spec.addStr && t('fx.addStr'),
+    spec.stunInstead && t('fx.stunned'),
+    spec.multBase > 1 && t('fx.multBase', { n: spec.multBase }),
+    spec.multTotal > 1 && t('fx.multTotal', { n: spec.multTotal, pct: spec.atOrBelow ?? 100 }),
+    spec.debuffs.length > 0 && spec.debuffs.map((x) => t(`debuff.${x}` as MsgKey)).join(', '),
+    spec.tossFeet > 0 && t('fx.toss', { ft: spec.tossFeet }),
+    spec.note === 'critFailPopularity' && t('fx.critFailPopularity'),
+    spec.cooldownHours > 0 && t('fx.cooldown', { h: spec.cooldownHours }),
+    spec.oncePerRound && t('fx.oncePerRound'),
+  ].filter(Boolean);
+  return bits.length ? <div className="dim tiny fx-summary">{bits.join(' · ')}</div> : null;
+}
+
 function PinnedRow({ i, der, onEdit }: { i: number; der: ReturnType<typeof useSheet>['der']; onEdit: () => void }) {
-  const { data } = useSheet();
+  const { data, update } = useSheet();
+  const live = useLiveOptional();
   const { t } = useI18n();
   const es = useNamesEs();
   const s = data.skills[i];
@@ -359,7 +383,30 @@ function PinnedRow({ i, der, onEdit }: { i: number; der: ReturnType<typeof useSh
   const aim = aimingFor(data, s);
   const [aimed, setAimed] = useState(false);
   const aiming = !!aim && aimed;
-  const dmgExpr = aiming && gearExpr ? `${gearExpr}+${aim.dice}d4` : gearExpr;
+  // hand-to-hand Damage Effects that go with this Attack Skill (Iron Punch on Pugilism…)
+  const effects = effectsFor(data.skills, s);
+  const [effName, setEffName] = useState('');
+  const [sameSize, setSameSize] = useState(true);
+  const [stunInstead, setStunInstead] = useState(false);
+  const now = live?.world?.gameHours ?? 0;
+  const effSkill = effects.find((x) => x.name === effName) ?? null;
+  const spec = effSkill
+    ? effectSpec(effSkill, { sameSize, stunInstead, now, readyAt: num(effSkill.readyAt ?? '') ?? 0 })
+    : null;
+  const fx = spec?.usable ? spec : null;
+  const strMod = der.mods.str ?? 0;
+  const fxExpr = fx && gearExpr ? withEffectDice(gearExpr, fx, fx.addStr ? strMod : 0) : gearExpr;
+  const fxRank = fx ? effectRankDice(fx) : '';
+  const withFx = fxExpr && fxRank ? `${fxExpr}+${fxRank}` : fxExpr;
+  const dmgExpr = aiming && withFx ? `${withFx}+${aim.dice}d4` : withFx;
+  // a Damage Effect with a cooldown (Powerful Strike) starts it on the game clock when used out of combat
+  const startCooldown = () => {
+    if (!fx?.cooldownHours || !effSkill) return;
+    update((d) => ({
+      ...d,
+      skills: d.skills.map((x) => (x.name === effSkill.name ? { ...x, readyAt: String(now + fx.cooldownHours) } : x)),
+    }));
+  };
   const cost = spell ? num(s.manaCost) : null;
   const typeLbl = s.subtype
     ? t(`skillsub.${s.category}.${s.subtype}` as MsgKey)
@@ -393,8 +440,46 @@ function PinnedRow({ i, der, onEdit }: { i: number; der: ReturnType<typeof useSh
             manaCost={cost !== null ? cost + boost : null}
             spell={spell}
             aimed={aiming}
+            effect={fx ? { name: fx.name, opts: { sameSize, stunInstead } } : null}
+            strMod={strMod}
+            onPlainRoll={fx?.cooldownHours ? startCooldown : undefined}
             className="pin-roll"
           />
+        )}
+        {effects.length > 0 && toHit !== null && (
+          <div className="fx-pick">
+            <select
+              className="in sel tiny-sel"
+              value={effName}
+              aria-label={t('fx.label')}
+              title={t('fx.hint')}
+              onChange={(e) => setEffName(e.target.value)}
+            >
+              <option value="">{t('fx.none')}</option>
+              {effects.map((x) => {
+                const sp = effectSpec(x, { now, readyAt: num(x.readyAt ?? '') ?? 0 });
+                return (
+                  <option key={x.name} value={x.name} disabled={!sp.usable}>
+                    {es(x.name) || x.name} ({x.rank})
+                    {sp.why === 'cooldown' ? ` · ${t('fx.cooldownLeft', { h: sp.waitHours ?? 0 })}` : ''}
+                  </option>
+                );
+              })}
+            </select>
+            {fx?.sameSize && (
+              <label className="gm-check tiny">
+                <input type="checkbox" checked={sameSize} onChange={(e) => setSameSize(e.target.checked)} />
+                {t('fx.sameSize')}
+              </label>
+            )}
+            {fx?.canStunInstead && (
+              <label className="gm-check tiny">
+                <input type="checkbox" checked={stunInstead} onChange={(e) => setStunInstead(e.target.checked)} />
+                {t('fx.stunInstead')}
+              </label>
+            )}
+            {fx && <FxSummary spec={fx} />}
+          </div>
         )}
         {aim && toHit !== null && (
           <button

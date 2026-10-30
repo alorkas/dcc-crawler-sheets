@@ -248,6 +248,8 @@ export function mountWorld(app, { db, auth, adminOnly, live, onFloor }) {
       autoClock: !!w.autoClock,
       saferoom: !!w.saferoom,
       partyName: w.partyName || '',
+      /** In-game hours passed (rests, the GM's hour buttons): the clock for cooldowns like Powerful Strike. */
+      gameHours: Math.max(0, int(w.gameHours, 0)),
       /** The leader the GM picked (null: the highest Stat total leads). */
       leaderId: w.leaderId || null,
     };
@@ -283,7 +285,12 @@ export function mountWorld(app, { db, auth, adminOnly, live, onFloor }) {
     if (b.crawlersAlive !== undefined)
       w.crawlersAlive = b.crawlersAlive === null || b.crawlersAlive === '' ? null : Math.max(0, int(b.crawlersAlive));
     if (b.collapseHours !== undefined) w.collapseHours = Math.max(0, int(b.collapseHours));
-    if (b.addHours !== undefined) w.collapseHours = Math.max(0, w.collapseHours + int(b.addHours));
+    if (b.addHours !== undefined) {
+      const h = int(b.addHours);
+      w.collapseHours = Math.max(0, w.collapseHours + h);
+      // time passing (−h on the Collapse clock) moves the game clock forward; +h corrects it back
+      w.gameHours = Math.max(0, int(w.gameHours, 0) - h);
+    }
     // "2 hours passed" also runs the Level Collapse clock
     if (b.autoClock !== undefined) w.autoClock = !!b.autoClock;
     // the party is in a Saferoom: loot boxes can be opened (achievements and quests listen for it)
@@ -349,11 +356,13 @@ export function mountWorld(app, { db, auth, adminOnly, live, onFloor }) {
 
   return {
     getFloor: () => getWorld().floor,
+    gameHours: () => Math.max(0, int(getWorld().gameHours, 0)),
     /** Time passed in the dungeon (the party's "2 hours passed"), when the GM ties the clock to it. */
     timePassed(hours) {
       const w = getWorld();
       if (!w.autoClock) return;
       w.collapseHours = Math.max(0, w.collapseHours - hours);
+      w.gameHours = int(w.gameHours, 0) + hours;
       putWorld(w);
     },
   };

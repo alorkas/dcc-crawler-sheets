@@ -5,7 +5,7 @@ import { useAuth } from '../lib/auth';
 import { useI18n, type MsgKey } from '../lib/i18n';
 import { useLive } from '../lib/live';
 import { derive, num } from '../lib/rules';
-import { normalize, signed, type Kills } from '../lib/sheet';
+import { normalize, signed, type Kills, type SheetData, type StatKey } from '../lib/sheet';
 import { ChatIcon, ChevronIcon, DiceIcon, PartyIcon } from './icons';
 import { ActionPips, AllyInterrupts, CombatHeader, Declarations, Opponents, TargetedBy } from './CombatTracker';
 import { QuickItems } from './QuickItems';
@@ -130,6 +130,14 @@ const initials = (name: string) =>
     .slice(0, 2)
     .join('')
     .toUpperCase();
+
+/** Taunt Check bonus: Ranks + the Skill's Stat Mod (Charisma by default) + penalties; null when the Mod is unknown. */
+function tauntBonus(sheet: SheetData, der: ReturnType<typeof derive>, rank: number): number | null {
+  const sk = sheet.skills.find((x) => /^(taunt|provocar)$/i.test(x.name.trim()));
+  const stat = (sk?.stat && sk.stat !== 'none' ? sk.stat : 'cha') as StatKey;
+  const mod = der.mods[stat];
+  return mod === null ? null : rank + mod + (der.penalty ?? 0);
+}
 
 function useMemberStats(m: PartyMember) {
   return useMemo(() => {
@@ -397,7 +405,8 @@ export function MemberCard({ m, wide = false }: { m: PartyMember; wide?: boolean
         <AllyInterrupts
           memberId={m.id}
           catcher={interrupts.catcher}
-          tauntBonus={der.mods.int === null ? null : interrupts.tauntRank + (der.mods.int ?? 0) + (der.penalty ?? 0)}
+          tauntRank={interrupts.tauntRank}
+          tauntBonus={tauntBonus(sheet, der, interrupts.tauntRank)}
         />
       )}
       {canOpen && wide && <QuickItems memberId={m.id} items={m.view.inventory ?? []} manaMax={der.manaMax} />}
@@ -1038,6 +1047,7 @@ function EventEntry({ m, ev, time }: { m: Message; ev: LogEvent; time: string })
       body = (
         <>
           <strong>{who}</strong> {t('log.ev.catch', { ally: ev.ally, attack: ev.attack })}
+          {!!ev.dr && <span className="dim"> · {t('catch.dr', { n: ev.dr })}</span>}
         </>
       );
       break;

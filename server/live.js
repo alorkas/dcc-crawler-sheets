@@ -54,11 +54,15 @@ export function partyView(data, withMana) {
       manaCurrent: d.manaCurrent ?? '',
       evade: { dexMod: d.evade?.dexMod ?? '', buffs: d.evade?.buffs ?? '' },
       dr: { armor: d.dr?.armor ?? '', buffs: d.dr?.buffs ?? '', aiFavor: d.dr?.aiFavor ?? '' },
-      // Interrupts this crawler can use for an ally: Catcher needs Ranks; Taunt is a Taunt (Int) Check
+      // Interrupts this crawler can use for an ally: Catcher needs Ranks; Taunt is a Taunt (Cha) Check
       interrupts: {
         catcher: skillRank(d, /catcher/i) > 0,
         tauntRank: skillRank(d, /^taunt/i),
       },
+      // the Skills that change rolls made from the party panel (Dodge on Evade, Taunt's Stat)
+      skills: (Array.isArray(d.skills) ? d.skills : [])
+        .filter((sk) => /^(dodge|esquivar|taunt|catcher)$/i.test(String(sk?.name ?? '').trim()))
+        .map((sk) => ({ name: sk.name, rank: sk.rank ?? '', stat: sk.stat ?? '', category: sk.category ?? '' })),
       // equipped gear (its DR/Evade bonuses count in the totals) and quick-access items
       inventory: (Array.isArray(d.inventory) ? d.inventory : [])
         .filter((it) => it && (it.slot || it.hot) && String(it.item ?? '').trim())

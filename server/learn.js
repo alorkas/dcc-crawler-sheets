@@ -37,6 +37,7 @@ function rowFor(kind, e) {
     effect: e.effect || '',
     baseDamage: e.baseDamage || '',
     overcharge: !!e.overcharge,
+    ...(e.appliesTo ? { appliesTo: e.appliesTo } : {}),
   };
 }
 

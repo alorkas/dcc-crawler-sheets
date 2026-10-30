@@ -1,6 +1,7 @@
 // Game rules from "Rules for Survival" and "Crawlers & Customization" (DCC RPG, Tutorial Floors).
 // Everything here is pure data → data so it can be unit tested and reused by the UI.
 import { clearRestEffects } from '../../shared/combat.js';
+import { dodgeOf } from '../../shared/skillRules.js';
 import {
   ensureIds,
   gearBonus,
@@ -205,6 +206,12 @@ export function derive(d: SheetData): Derived {
   const penalty = checkPenalty(d.debuffList);
   const gearDr = gearBonus(d.inventory, 'dr');
   const gearEvade = gearBonus(d.inventory, 'evade');
+  // the Dodge Skill (Passive) is an Evade Buff: +1, +2 at Rank 5, +4 at 10, +6 at 15
+  const dodge = dodgeOf(d.skills);
+  if (dodge.evade) {
+    gearEvade.total += dodge.evade;
+    gearEvade.from = [...gearEvade.from, { name: `Dodge (${dodge.rank})`, value: dodge.evade }];
+  }
   const evadeSum = sumNumbers(dexMod === null ? '' : String(dexMod), d.evade.buffs);
   const evadeBase = evadeSum === null ? null : evadeSum + gearEvade.total;
   const drSum = sumNumbers(d.dr.armor, d.dr.buffs);

@@ -1,5 +1,19 @@
 // GM tools: NPC stat blocks, the combat tracker, and level-ups / skill advancement.
 import { BOOK_NPCS } from './catalog/npcs.js';
+import {
+  catcherPerks,
+  dodgeOf,
+  effectRankDice,
+  effectSpec,
+  effectsFor,
+  findSkill,
+  isRangedAttack,
+  multApplies,
+  skillRank,
+  tauntCount,
+  tauntPerks,
+  withEffectDice,
+} from '../shared/skillRules.js';
 import { lookup } from './catalog/index.js';
 import { NOTES_ES } from './catalog/npcNotesEs.js';
 import { npcNameEs } from './catalog/namesEs.js';
@@ -164,6 +178,11 @@ export function mountGame(app, { db, auth, adminOnly, loadChar, live, hooks = {}
   app.get('/api/pregens', auth, (_req, res) => res.json(PREGENS));
 
   /* ---------------- combat tracker ---------------- */
+  /** In-game hours passed (World Stats): the clock for cooldowns like Powerful Strike. */
+  const gameNow = () => {
+    const row = db.prepare(`SELECT value FROM kv WHERE key = 'world'`).get();
+    return Math.max(0, int(row ? JSON.parse(row.value).gameHours : 0, 0));
+  };
   const worldFloor = () => {
     const row = db.prepare(`SELECT value FROM kv WHERE key = 'world'`).get();
     return Math.max(1, int(row ? JSON.parse(row.value).floor : 1, 1));
@@ -195,7 +214,7 @@ export function mountGame(app, { db, auth, adminOnly, loadChar, live, hooks = {}
       area: !!d.area,
       targets: d.targets,
       damage: d.damage,
-      taunt: d.taunt ? { id: d.taunt.id, name: d.taunt.name, won: d.taunt.won } : null,
+      taunt: d.taunt ? { id: d.taunt.id, name: d.taunt.name, won: d.taunt.won, degree: d.taunt.degree ?? null } : null,
       tauntedFrom: d.tauntedFrom,
     };
   };
@@ -327,6 +346,8 @@ export function mountGame(app, { db, auth, adminOnly, loadChar, live, hooks = {}
     declarations: (enc.declarations || [])
       .filter((d) => d.round === enc.round && (admin || revealed(enc)))
       .map((d) => declView(enc, d, admin)),
+    // who has Taunted this round (one Taunt each)
+    taunts: enc.active ? (enc.taunts || []).filter((x) => x.round === enc.round) : [],
     // AI Favor the GM can hand out after a fight (attacks with an AI Favor rating used for most of a crawler's attacks)
     ...(admin ? { favorOffers: enc.favorOffers || [] } : {}),
     opponents: enc.opponents
@@ -368,6 +389,19 @@ export function mountGame(app, { db, auth, adminOnly, loadChar, live, hooks = {}
     }
   }
   /** Change one sheet (server-side effects of combat: Advantage earned, items used…). */
+  /** Mark a Skill for Advancement (it was used), unless it already is. */
+  function markSkill(cid, names, actorId = null) {
+    changeSheet(
+      cid,
+      (data) => {
+        const sk = findSkill(data.skills, ...names);
+        if (!sk || sk.done) return data;
+        return { ...data, skills: data.skills.map((x) => (x === sk ? { ...x, done: true } : x)) };
+      },
+      actorId,
+    );
+  }
+
   function changeSheet(cid, fn, actorId = null) {
     const row = charRow(cid);
     if (!row) return null;
@@ -650,6 +684,10 @@ export function mountGame(app, { db, auth, adminOnly, loadChar, live, hooks = {}
     if (!/^1?d20([+-]\d{1,2})?$/i.test(expr)) return res.status(400).json({ error: 'Invalid dice', code: 'bad_dice' });
     const reroll = !!req.body?.reroll;
     const acts = actionsOf(enc, target.id);
+    const sheet = JSON.parse(charRow(target.id)?.data || '{}');
+    const dodge = dodgeOf(sheet.skills);
+    // a free Evade from Taunt (Rank 5) that failed can be rolled again by spending the Evade Action
+    const retryFree = !reroll && target.freeEvade && target.evade?.success === false && !target.evade.retried;
     if (reroll) {
       const e = target.evade;
       if (!e || e.success !== false || e.natural === 1 || e.rerolled)
@@ -657,16 +695,29 @@ export function mountGame(app, { db, auth, adminOnly, loadChar, live, hooks = {}
       if (!spendFavor(target.id, 'reroll', req.user.id))
         return res.status(409).json({ error: 'No AI Favor left', code: 'no_ai_favor' });
     } else {
-      if (target.evade && !admin) return res.status(409).json({ error: 'Already rolled', code: 'already_rolled' });
-      if (!acts.used.includes('evade')) {
+      if (target.evade && !admin && !retryFree)
+        return res.status(409).json({ error: 'Already rolled', code: 'already_rolled' });
+      // one Evade Action covers every attack this round; Taunt's free Evades and Dodge Rank 15 cost nothing
+      const free = (target.freeEvade && !target.evade) || dodge.freeEvade;
+      if (!free && !acts.used.includes('evade')) {
         if (acts.used.length >= ACTIONS + (acts.extra ? 1 : 0) && !admin)
           return res.status(409).json({ error: 'No Actions left', code: 'no_actions_left' });
         acts.used.push('evade');
       }
     }
-    const r = rollDice(expr);
-    const first = reroll ? target.evade.total : undefined;
-    target.evade = { total: r.total, natural: r.natural, ...(reroll ? { rerolled: true, first } : {}) };
+    // Advantage: Dodge Rank 10 against Spells and Ranged Attacks, Taunt Rank 15 on its free Evades
+    const adv = (dodge.advVsRanged && isRangedAttack(d.attack)) || (target.evadeAdv && !target.evade);
+    const r = rollDice(adv ? expr.replace(/^1?d20/i, '2d20kh1') : expr);
+    const first = reroll || retryFree ? target.evade.total : undefined;
+    target.evade = {
+      total: r.total,
+      natural: r.natural,
+      ...(reroll ? { rerolled: true, first } : {}),
+      ...(retryFree ? { retried: true, first } : {}),
+      ...(adv ? { advantage: true } : {}),
+    };
+    // Dodge is marked for Advancement when Evading, until Rank 5
+    if (dodge.rank > 0 && dodge.rank < 5) markSkill(target.id, ['Dodge', 'Esquivar'], req.user.id);
     const o = enc.opponents.find((x) => x.id === d.opponentId);
     settleEvade(enc, d, target);
     const posted = live.postRoll({
@@ -675,7 +726,7 @@ export function mountGame(app, { db, auth, adminOnly, loadChar, live, hooks = {}
       charName: target.name,
       roll: {
         ...r,
-        label: `${reroll ? 'Evade reroll (AI Favor)' : 'Evade'} · ${o?.hidden ? '???' : d.opponentName} – ${d.attack.name}`,
+        label: `${reroll ? 'Evade reroll (AI Favor)' : 'Evade'}${adv ? ' ▲' : ''} · ${o?.hidden ? '???' : d.opponentName} – ${d.attack.name}`,
         vs: { dc: d.dc, success: target.evade.success, area: !!d.area, kind: 'evade', degree: target.evade.degree },
       },
     });
@@ -836,86 +887,143 @@ export function mountGame(app, { db, auth, adminOnly, loadChar, live, hooks = {}
 
   // Taunt (Interrupt): an Int-opposed Taunt Check against the Mob; if the crawler wins, the Mob attacks them instead
   // of its original target (not for Area Attacks). The crawler may still spend an Action to Evade.
-  app.post('/api/encounter/declarations/:did/taunt', auth, (req, res) => {
+  /**
+   * Taunt (Cha, Interrupt — Core Rulebook p. 200): after seeing where the Mob Attacks are headed, one Int-Opposed
+   * Check draws attacks onto the taunter: one on a Success, two on an Amazing Success, three on a Natural 20, in the
+   * order picked. { characterId, expr, picks: [{ declId, targetId }] }. Not against Area Attacks. Rank 5: a free
+   * Evade against each Taunted Attack; Rank 10: 60 ft instead of 30; Rank 15: those Evades with Advantage.
+   */
+  app.post('/api/encounter/taunt', auth, (req, res) => {
     const enc = getEnc();
-    const d = findDecl(enc, req.params.did);
     const row = partyRow(req, req.body?.characterId);
-    if (!d || !revealed(enc) || !row) return res.status(404).json({ error: 'Not found', code: 'not_found' });
-    if (d.area) return res.status(409).json({ error: 'Not against an Area Attack', code: 'no_taunt_area' });
-    if (d.targets.some((x) => x.id === row.id))
+    if (!row || !enc.active || !revealed(enc)) return res.status(404).json({ error: 'Not found', code: 'not_found' });
+    const picks = (Array.isArray(req.body?.picks) ? req.body.picks : []).slice(0, 6).map((p) => {
+      const d = findDecl(enc, p?.declId);
+      const tg = d?.targets.find((x) => x.id === Number(p?.targetId));
+      return d && tg ? { d, tg } : null;
+    });
+    if (!picks.length || picks.some((p) => !p)) return res.status(404).json({ error: 'Not found', code: 'not_found' });
+    if (picks.some(({ d }) => d.area))
+      return res.status(409).json({ error: 'Not against an Area Attack', code: 'no_taunt_area' });
+    if (picks.some(({ d, tg }) => tg.id === row.id || d.targets.some((x) => x.id === row.id)))
       return res.status(409).json({ error: 'Already the target', code: 'already_target' });
-    if (d.taunt) return res.status(409).json({ error: 'Already taunted', code: 'already_rolled' });
+    if (picks.some(({ tg }) => tg.evade || tg.applied || tg.noEvade))
+      return res.status(409).json({ error: 'Too late for that attack', code: 'taunt_too_late' });
+    if ((enc.taunts || []).some((x) => x.id === row.id && x.round === enc.round))
+      return res.status(409).json({ error: 'Already taunted this round', code: 'already_rolled' });
     const expr = String(req.body?.expr ?? 'd20').replace(/\s+/g, '');
     if (!/^1?d20([+-]\d{1,3})?$/i.test(expr)) return res.status(400).json({ error: 'Invalid dice', code: 'bad_dice' });
     if (!useAction(enc, row.id, 'interrupt'))
       return res.status(409).json({ error: 'No Actions left', code: 'no_actions_left' });
-    const o = enc.opponents.find((x) => x.id === d.opponentId);
-    const mobMod = o ? int(attackSource()(o).mods?.int, 0) : 0;
+    const data = JSON.parse(row.data || '{}');
+    const rank = skillRank(data.skills, 'Taunt', 'Provocar');
+    const perks = tauntPerks(rank);
+    // the Mobs resist with Int: the sharpest of the ones picked rolls
+    const mobs = [...new Set(picks.map(({ d }) => d.opponentId))].map((id) => enc.opponents.find((o) => o.id === id));
+    const mobMod = Math.max(0, ...mobs.map((o) => (o ? int(attackSource()(o).mods?.int, 0) : 0)));
     const mine = rollDice(expr);
     const mob = rollDice(`d20${mobMod >= 0 ? '+' : ''}${mobMod}`);
-    const won = mine.total >= mob.total; // ties go to the crawler
-    const name = clip(JSON.parse(row.data || '{}').name) || '?';
-    const shown = o?.hidden ? '???' : d.opponentName;
+    const degree = degreeOf(mine.total, mine.natural, mob.total);
+    const n = Math.min(picks.length, tauntCount(degree));
+    const name = clip(data.name) || '?';
+    const hidden = mobs.some((o) => o?.hidden);
+    const shown = mobs.map((o) => (o?.hidden ? '???' : (o?.name ?? '?'))).join(', ');
     live.postRoll({
       userId: req.user.id,
       characterId: row.id,
       charName: name,
-      roll: { ...mine, label: `Taunt → ${shown}`, vs: { dc: mob.total, success: won, kind: 'taunt' } },
-      gmOnly: !!o?.hidden,
+      roll: { ...mine, label: `Taunt → ${shown}`, vs: { dc: mob.total, success: n > 0, kind: 'taunt', degree } },
+      gmOnly: hidden,
     });
     live.postRoll({
       userId: req.user.id,
       charName: shown,
       roll: { ...mob, label: `Int (resists Taunt by ${name})` },
-      gmOnly: !!o?.hidden,
+      gmOnly: hidden,
     });
-    d.taunt = { id: row.id, name, total: mine.total, mob: mob.total, won };
-    if (won) {
-      d.tauntedFrom = d.targets.map((x) => x.name);
-      d.targets = [{ id: row.id, name, evade: null, applied: null }];
+    picks.forEach(({ d, tg }, i) => {
+      const won = i < n;
+      d.taunt = { id: row.id, name, total: mine.total, mob: mob.total, won, degree };
+      if (!won) return;
+      d.tauntedFrom = [...(d.tauntedFrom || []), tg.name];
+      Object.assign(tg, {
+        id: row.id,
+        name,
+        evade: null,
+        applied: null,
+        tauntedFrom: tg.name,
+        ...(perks.freeEvade ? { freeEvade: true } : {}),
+        ...(perks.advantage ? { evadeAdv: true } : {}),
+      });
       enc.seq += 1;
       enc.links = [
         ...(enc.links || []),
         { id: enc.seq, kind: 'taunt', a: { type: 'crawler', id: row.id }, b: { type: 'opponent', id: d.opponentId } },
       ];
-    }
+    });
+    enc.taunts = [
+      ...(enc.taunts || []).filter((x) => x.round === enc.round),
+      { id: row.id, round: enc.round, n, degree },
+    ];
+    // a Skill Check was attempted: Taunt gets its Advancement mark
+    if (rank > 0) markSkill(row.id, ['Taunt', 'Provocar'], req.user.id);
     putEnc(enc);
     res.json(viewFor(enc, !!req.user.is_admin));
   });
 
-  // Catcher (Interrupt, for crawlers with Ranks in Catcher): take the hit for an adjacent ally. The catcher can't
-  // Evade the attack they're catching.
+  /**
+   * Catcher (Passive, Interrupt — Core Rulebook p. 187): when a Successful direct (non-Area) Attack is about to damage
+   * an adjacent ally, take the damage instead — also after the ally's Evade failed. The catcher can't Evade it, and
+   * gets +5 DR at Ranks 5, 10 and 15 (Rank 15 also ignores the hit's Debuffs).
+   */
   app.post('/api/encounter/declarations/:did/catch', auth, (req, res) => {
     const enc = getEnc();
     const d = findDecl(enc, req.params.did);
     const row = partyRow(req, req.body?.characterId);
     if (!d || !revealed(enc) || !row) return res.status(404).json({ error: 'Not found', code: 'not_found' });
+    if (d.area) return res.status(409).json({ error: 'Not against an Area Attack', code: 'no_catch_area' });
     const data = JSON.parse(row.data || '{}');
-    const hasSkill = (data.skills || []).some((sk) => /catcher/i.test(sk?.name || '') && int(sk.rank, 0) > 0);
-    if (!hasSkill && !req.user.is_admin)
+    const rank = skillRank(data.skills, 'Catcher');
+    if (rank <= 0 && !req.user.is_admin)
       return res.status(409).json({ error: 'Needs Ranks in Catcher', code: 'needs_catcher' });
     const ally = d.targets.find((x) => x.id === Number(req.body?.allyId));
-    if (!ally || ally.id === row.id || ally.evade || d.targets.some((x) => x.id === row.id))
+    if (!ally || ally.id === row.id || ally.applied || ally.evade?.success || d.targets.some((x) => x.id === row.id))
       return res.status(409).json({ error: 'Not this attack', code: 'no_catch' });
     if (!useAction(enc, row.id, 'interrupt'))
       return res.status(409).json({ error: 'No Actions left', code: 'no_actions_left' });
     const name = clip(data.name) || '?';
-    Object.assign(ally, { id: row.id, name, evade: null, applied: null, caughtFor: ally.name, noEvade: true });
+    const perks = catcherPerks(rank);
+    // the ally's failed Evade (and its Injury) no longer matters: the catcher takes the plain hit
+    enc.injuries = (enc.injuries || []).filter((x) => x.key !== `${d.id}:${ally.id}`);
+    const allyId = ally.id;
+    Object.assign(ally, {
+      id: row.id,
+      name,
+      evade: null,
+      applied: null,
+      caughtFor: ally.name,
+      noEvade: true,
+      catchDr: perks.dr,
+      ...(perks.ignoreDebuffs ? { ignoreDebuffs: true } : {}),
+    });
+    delete ally.freeEvade;
+    delete ally.evadeAdv;
     enc.seq += 1;
     enc.links = [
       ...(enc.links || []),
-      {
-        id: enc.seq,
-        kind: 'protect',
-        a: { type: 'crawler', id: row.id },
-        b: { type: 'crawler', id: Number(req.body?.allyId) },
-      },
+      { id: enc.seq, kind: 'protect', a: { type: 'crawler', id: row.id }, b: { type: 'crawler', id: allyId } },
     ];
     live.postEvent({
       ownerId: row.owner_id,
       characterId: row.id,
       charName: name,
-      event: { type: 'interrupt', kind: 'catch', ally: ally.caughtFor, attack: `${d.opponentName} – ${d.attack.name}` },
+      event: {
+        type: 'interrupt',
+        kind: 'catch',
+        ally: ally.caughtFor,
+        attack: `${d.opponentName} – ${d.attack.name}`,
+        dr: perks.dr,
+      },
     });
     putEnc(enc);
     res.json(viewFor(enc, !!req.user.is_admin));
@@ -1356,10 +1464,50 @@ export function mountGame(app, { db, auth, adminOnly, loadChar, live, hooks = {}
       (!ammo || ammo.type !== 'ammunition' || int(ammo.qty, 0) <= 0 || !(data.hotSlots || []).includes(ammoId))
     )
       return res.status(409).json({ error: 'No ammunition', code: 'no_ammo' });
+    // a hand-to-hand Damage Effect added to this Attack Skill (Iron Punch on Pugilism…), checked against the sheet
+    const label = clip(b.label, 60) || 'Attack';
+    let effect = null;
+    let effSkill = null;
+    if (b.effect) {
+      const attackSkill = findSkill(data.skills, label);
+      effSkill = effectsFor(data.skills, attackSkill).find(
+        (x) => String(x.name).trim().toLowerCase() === String(b.effect).trim().toLowerCase(),
+      );
+      if (!effSkill || opps.length > 1)
+        return res
+          .status(409)
+          .json({ error: 'That Damage Effect does not go with this attack', code: 'effect_not_allowed' });
+      const spec = effectSpec(effSkill, {
+        targetPct: pct(opps[0]),
+        sameSize: b.effectOpts?.sameSize === undefined ? undefined : !!b.effectOpts.sameSize,
+        stunInstead: !!b.effectOpts?.stunInstead,
+        now: gameNow(),
+        readyAt: int(effSkill.readyAt, 0),
+        usedThisRound: (enc.smush || {})[cid] === enc.round,
+      });
+      if (!spec.usable)
+        return res.status(409).json({ error: 'Damage Effect not available', code: `effect_${spec.why}` });
+      effect = {
+        name: spec.name,
+        add: spec.add,
+        flat: spec.flat,
+        rankDice: effectRankDice(spec),
+        multBase: spec.multBase,
+        multTotal: spec.multTotal,
+        atOrBelow: spec.atOrBelow,
+        addStr: spec.addStr,
+        strMod: Math.max(-5, Math.min(30, int(b.strMod, 0))),
+        debuffs: spec.debuffs,
+        stunInstead: spec.stunInstead,
+        note: spec.note,
+        tossFeet: spec.tossFeet,
+      };
+      if (spec.oncePerRound) enc.smush = { ...(enc.smush || {}), [cid]: enc.round };
+      if (spec.cooldownHours) effect.readyAt = gameNow() + spec.cooldownHours;
+    }
     a.used.push('attack');
     const r = rollDice(expr);
     const name = clip(data.name) || '?';
-    const label = clip(b.label, 60) || 'Attack';
     const area = opps.length > 1;
     const group = area ? enc.seq + 1 : null;
     const records = opps.map((o) => {
@@ -1383,6 +1531,7 @@ export function mountGame(app, { db, auth, adminOnly, loadChar, live, hooks = {}
         damageExpr: dmg || null,
         damage: null,
         applied: null,
+        ...(effect ? { effect } : {}),
       };
     });
     // the Ammunition it used comes back if the GM undoes the attack
@@ -1393,8 +1542,10 @@ export function mountGame(app, { db, auth, adminOnly, loadChar, live, hooks = {}
         slot: (data.hotSlots || []).indexOf(ammo.id),
       };
     enc.attacks = [...(enc.attacks || []), ...records];
-    // which attack each crawler uses, for the AI Favor of "wimpy" attacks at the end of the fight
-    tallyAttack(enc, cid, label, data, 1);
+    // which attack each crawler uses, for the AI Favor of "wimpy" attacks at the end of the fight (an attack with a
+    // Damage Effect doesn't earn it: "only if no Damage Effect is used")
+    if (effect) tallyAttack(enc, cid, `${label} + ${effect.name}`, null, 1);
+    else tallyAttack(enc, cid, label, data, 1);
     const shown = opps.map((o) => (o.hidden ? '???' : o.name)).join(', ');
     const posted = live.postRoll({
       userId: req.user.id,
@@ -1402,7 +1553,11 @@ export function mountGame(app, { db, auth, adminOnly, loadChar, live, hooks = {}
       charName: name,
       roll: {
         ...r,
-        label: `${label}${b.aimed ? ' 🎯' : ''}${area ? ' (Area)' : ''} → ${shown}`.slice(0, 120),
+        label:
+          `${label}${effect ? ` + ${effect.name}` : ''}${b.aimed ? ' 🎯' : ''}${area ? ' (Area)' : ''} → ${shown}`.slice(
+            0,
+            120,
+          ),
         vs: area
           ? { dc: null, success: null, kind: 'attack' }
           : { dc: null, success: records[0].hit, kind: 'attack', degree: records[0].degree },
@@ -1420,6 +1575,14 @@ export function mountGame(app, { db, auth, adminOnly, loadChar, live, hooks = {}
           d = { ...d, effects: d.effects.filter((e) => !(e.kind === 'advantage' && hitIds.has(e.vsOpponent))) };
         const spent = ammoId ? spendOne(d.inventory || [], d.hotSlots || [], ammoId) : null;
         if (spent) d = { ...d, inventory: spent.inventory, hotSlots: spent.hotSlots };
+        // a Damage Effect with a cooldown (Powerful Strike) waits on the game clock
+        if (effect?.readyAt !== undefined)
+          d = {
+            ...d,
+            skills: (d.skills || []).map((x) =>
+              x?.name === effSkill.name ? { ...x, readyAt: String(effect.readyAt) } : x,
+            ),
+          };
         return d;
       },
       req.user.id,
@@ -1461,7 +1624,7 @@ export function mountGame(app, { db, auth, adminOnly, loadChar, live, hooks = {}
     const atk = findAttack(enc, req.params.id);
     if (!atk) return res.status(404).json({ error: 'Not found', code: 'not_found' });
     // an undone attack doesn't count for AI Favor (an Area Attack is one roll, so one tally)
-    tallyAttack(enc, atk.characterId, atk.label, null, -1);
+    tallyAttack(enc, atk.characterId, atk.effect ? `${atk.label} + ${atk.effect.name}` : atk.label, null, -1);
     // an Area Attack is one roll (and one Action) against several opponents: undo all of it
     const removed = enc.attacks.filter((x) => x === atk || (atk.group && x.group === atk.group));
     enc.attacks = enc.attacks.filter((x) => !removed.includes(x));
@@ -1485,25 +1648,44 @@ export function mountGame(app, { db, auth, adminOnly, loadChar, live, hooks = {}
     if (atk.hit === false && !admin)
       return res.status(409).json({ error: 'That attack missed', code: 'attack_missed' });
     if (atk.damage && !admin) return res.status(409).json({ error: 'Already rolled', code: 'already_rolled' });
-    const base = String(req.body?.expr ?? atk.damageExpr ?? '').replace(/\s+/g, '');
+    const fx = atk.effect || null;
+    // Damage Effect: extra base dice (doubled on a Critical Hit with the rest of the base damage), then Rank dice
+    const base = withEffectDice(
+      String(req.body?.expr ?? atk.damageExpr ?? '').replace(/\s+/g, ''),
+      fx,
+      fx?.addStr ? fx.strMod : 0,
+    );
     // Critical Hit (Natural 20): twice the damage dice. Amazing Success: + Floor damage (per target)
     const crit = atk.degree === 'crit';
-    const expr = crit ? doubleDice(base) : base;
+    const doubled = crit ? doubleDice(base) : base;
+    const expr = fx?.stunInstead ? '0' : fx?.rankDice && doubled ? `${doubled}+${fx.rankDice}` : doubled;
     const r = expr ? rollDice(expr) : null;
     if (!r) return res.status(400).json({ error: 'Invalid dice', code: 'bad_dice' });
+    // Powerful Strike: the base damage dice result × its Rank, then the modifiers
+    let rolled = r.total;
+    if (fx?.multBase > 1) {
+      const dice = r.parts.filter((p) => p.dice).reduce((sum, p) => sum + p.sign * p.value, 0);
+      rolled = r.total + dice * (fx.multBase - 1);
+    }
     const same = atk.group ? enc.attacks.filter((x) => x.group === atk.group && x.round === enc.round) : [atk];
     const parts = [];
     for (const x of same) {
       if (x !== atk && (x.hit === false || x.damage)) continue;
       const bonus = x.degree === 'amazing' ? enc.floor : 0;
+      const ox = enc.opponents.find((o) => o.id === x.opponentId);
+      // Choke Out / Smush: × the total when the target is weak enough
+      const mult = fx && ox && multApplies(fx, pct(ox)) ? fx.multTotal : 1;
       x.damage = {
-        total: r.total + bonus,
+        total: (rolled + bonus) * mult,
         expr,
         ...(crit ? { crit: true } : {}),
         ...(bonus ? { amazing: bonus } : {}),
+        ...(fx ? { effect: fx.name, debuffs: fx.debuffs || [] } : {}),
+        ...(fx?.multBase > 1 ? { multBase: fx.multBase } : {}),
+        ...(mult > 1 ? { mult } : {}),
+        ...(fx?.stunInstead ? { stunInstead: true } : {}),
       };
-      const ox = enc.opponents.find((o) => o.id === x.opponentId);
-      parts.push(`${ox?.hidden ? '???' : x.opponentName}${bonus ? ` +${bonus}` : ''}`);
+      parts.push(`${ox?.hidden ? '???' : x.opponentName}${bonus ? ` +${bonus}` : ''}${mult > 1 ? ` ×${mult}` : ''}`);
     }
     const hidden = same.some((x) => enc.opponents.find((o) => o.id === x.opponentId)?.hidden);
     live.postRoll({
@@ -1512,7 +1694,11 @@ export function mountGame(app, { db, auth, adminOnly, loadChar, live, hooks = {}
       charName: atk.charName,
       roll: {
         ...r,
-        label: `${atk.label} · ${crit ? 'CRIT ' : ''}damage → ${parts.join(', ')}`.slice(0, 120),
+        label:
+          `${atk.label}${fx ? ` + ${fx.name}` : ''}${fx?.multBase > 1 ? ` (base ×${fx.multBase})` : ''} · ${crit ? 'CRIT ' : ''}${fx?.stunInstead ? 'Stunned instead of damage' : 'damage'} → ${parts.join(', ')}`.slice(
+            0,
+            120,
+          ),
       },
       gmOnly: hidden,
     });

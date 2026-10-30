@@ -49,6 +49,10 @@ export type Skill = {
   baseDamage: string;
   /** Cheap spells that take extra Mana: one more damage die per extra point, up to the spell's level. */
   overcharge?: boolean;
+  /** Damage Effect: the Attack Skills it can be added to ("Pugilism", "cuerpo a cuerpo"…); empty = the book's. */
+  appliesTo?: string;
+  /** Damage Effect with a cooldown: the game hour (World Stats clock) it can be used again. */
+  readyAt?: string;
 };
 import { emptyItem as newItem, SLOT_KEYS, type Item } from '../../shared/items.js';
 export type { Item, GearSlot, ItemType, Rarity } from '../../shared/items.js';

@@ -908,6 +908,7 @@ function DeclarationRow({ d }: { d: Declaration }) {
         cid,
         shareOf(d, tg, d.damage.total),
         `${d.opponentName} – ${d.attack.name}${note ? ` (${note})` : ''}`,
+        tg.catchDr ?? 0,
       );
       setEncounter(await api.markTarget(d.id, cid, { applied: r }));
     });
@@ -960,7 +961,17 @@ function DeclarationRow({ d }: { d: Declaration }) {
               <span className="grow">
                 {tg.name}
                 {tg.splash && <span className="dim tiny"> · {t('decl.splash')}</span>}
-                {tg.caughtFor && <span className="dim tiny"> · 🛡 {t('catch.for', { name: tg.caughtFor })}</span>}
+                {tg.caughtFor && (
+                  <span className="dim tiny">
+                    {' '}
+                    · 🧤 {t('catch.for', { name: tg.caughtFor })}
+                    {!!tg.catchDr && ` · ${t('catch.dr', { n: tg.catchDr })}`}
+                    {tg.ignoreDebuffs && ` · ${t('catch.ignoreDebuffs')}`}
+                  </span>
+                )}
+                {tg.tauntedFrom && (
+                  <span className="dim tiny"> · 📣 {t('taunt.drawnFrom', { name: tg.tauntedFrom })}</span>
+                )}
               </span>
               <EvadeResult evade={tg.evade} area={d.area} />
               {tg.applied ? (
@@ -1009,7 +1020,8 @@ function EvadeResult({ evade, area }: { evade: Declaration['targets'][number]['e
   if (!evade) return <span className="dim tiny">{t('decl.evadePending')}</span>;
   return (
     <span className={`evade-res ${evade.success ? 'ok' : evade.success === false ? 'bad' : ''}`}>
-      {evade.success ? '✓' : evade.success === false ? '✗' : '•'} {evade.total}
+      {evade.success ? '✓' : evade.success === false ? '✗' : '•'} {evade.advantage && '▲ '}
+      {evade.total}
       {evade.success && area && <span className="tiny"> · {t('decl.half')}</span>}
       <DegreeBadge degree={evade.degree} />
       {evade.rerolled && (
@@ -1066,6 +1078,8 @@ export function TargetedBy({
         const tg = d.targets.find((x) => x.id === memberId)!;
         const e = tg.evade;
         const canReroll = canRoll && !!e && e.success === false && e.natural !== 1 && !e.rerolled;
+        // a failed free Evade (Taunt Rank 5) can be rolled again with the Evade Action
+        const canRetry = canRoll && !!tg.freeEvade && !!e && e.success === false && !e.retried && !noActions;
         return (
           <li key={d.id} className={e?.success ? 'evaded' : e ? 'hit' : ''}>
             <span className="grow">
@@ -1081,10 +1095,19 @@ export function TargetedBy({
             <span className="pill">{t('decl.dc', { n: d.dc ?? '?' })}</span>
             {tg.caughtFor && (
               <span className="pill" title={t('catch.noEvade')}>
-                🛡 {t('catch.for', { name: tg.caughtFor })}
+                🧤 {t('catch.for', { name: tg.caughtFor })}
+                {!!tg.catchDr && ` · ${t('catch.dr', { n: tg.catchDr })}`}
               </span>
             )}
-            {d.taunt?.won && d.taunt.id === memberId && <span className="pill">📣 {t('taunt.drawn')}</span>}
+            {tg.tauntedFrom && (
+              <span
+                className="pill"
+                title={tg.freeEvade ? t(tg.evadeAdv ? 'taunt.freeEvadeAdv' : 'taunt.freeEvade') : ''}
+              >
+                📣 {t('taunt.drawnFrom', { name: tg.tauntedFrom })}
+                {tg.freeEvade && !e && ` · ${t('taunt.free')}`}
+              </span>
+            )}
             {e ? (
               <EvadeResult evade={e} area={d.area} />
             ) : tg.noEvade ? null : (
@@ -1092,7 +1115,7 @@ export function TargetedBy({
                 <button
                   type="button"
                   className="btn small primary"
-                  disabled={busy === d.id || evadeTotal === null || noActions}
+                  disabled={busy === d.id || evadeTotal === null || (noActions && !tg.freeEvade)}
                   title={
                     evadeTotal === null
                       ? t('decl.noEvade')
@@ -1107,6 +1130,17 @@ export function TargetedBy({
                   🎲 {t('core.evade')} {evadeTotal !== null && signed(evadeTotal)}
                 </button>
               )
+            )}
+            {canRetry && (
+              <button
+                type="button"
+                className="btn small"
+                disabled={busy === d.id}
+                title={t('taunt.retryHint')}
+                onClick={() => roll(d)}
+              >
+                ↻ {t('taunt.retry')}
+              </button>
             )}
             {canReroll && (
               <button
@@ -1131,84 +1165,149 @@ export function TargetedBy({
 }
 
 /**
- * Crawler Reaction: Interrupts this crawler can use to protect an ally. Taunt (an Int-opposed Taunt Check: the Mob
- * attacks the taunter instead) and Catcher (for crawlers with Ranks in it: take the hit, no Evade).
+ * Crawler Reaction: Interrupts this crawler can use to protect an ally (Core Rulebook pp. 187, 200). Taunt: one Taunt
+ * (Cha) Check opposed by the Mobs' Int draws 1/2/3 picked attacks onto the taunter (Success/Amazing/Natural 20).
+ * Catcher (with Ranks in it): take a direct hit meant for an ally, even after their Evade failed; no Evade, extra DR.
  */
 export function AllyInterrupts({
   memberId,
   tauntBonus,
+  tauntRank,
   catcher,
 }: {
   memberId: number;
-  /** Taunt Check bonus (Taunt Rank + Int Mod + penalties); null = unknown. */
+  /** Taunt Check bonus (Taunt Rank + Cha Mod + penalties); null = unknown. */
   tauntBonus: number | null;
+  tauntRank: number;
   catcher: boolean;
 }) {
   const { t, err } = useI18n();
   const { encounter, setEncounter } = useLive();
   const [busy, setBusy] = useState<string | null>(null);
   const [error, setError] = useState('');
+  const [picks, setPicks] = useState<string[]>([]);
   if (!encounter?.active || encounter.phase !== 2 || encounter.round < 1) return null;
   const others = (encounter.declarations ?? []).filter((d) => !d.targets.some((x) => x.id === memberId));
   if (!others.length) return null;
   const acts = encounter.actions?.[memberId] ?? { used: [], extra: false, max: 2 };
   const none = acts.used.length >= acts.max;
+  const tauntedAlready = (encounter.taunts ?? []).find((x) => x.id === memberId);
   const run = async (key: string, fn: () => Promise<Encounter>) => {
     setBusy(key);
     setError('');
     try {
       setEncounter(await fn());
+      setPicks([]);
     } catch (e) {
       setError(err(e));
     } finally {
       setBusy(null);
     }
   };
+  // attacks that can still be Taunted: direct (not Area), not yet Evaded, Caught or applied
+  const tauntable = others
+    .filter((d) => !d.area)
+    .flatMap((d) =>
+      d.targets.filter((x) => !x.evade && !x.applied && !x.noEvade).map((x) => ({ key: `${d.id}:${x.id}`, d, x })),
+    );
+  const perks = { freeEvade: tauntRank >= 5, range: tauntRank >= 10 ? 60 : 30, adv: tauntRank >= 15 };
+  const toggle = (key: string) =>
+    setPicks((p) => (p.includes(key) ? p.filter((k) => k !== key) : p.length < 3 ? [...p, key] : p));
+  const taunt = () =>
+    run('taunt', () =>
+      api.taunt(
+        memberId,
+        `d20${signed(tauntBonus ?? 0)}`,
+        picks.map((k) => {
+          const [declId, targetId] = k.split(':').map(Number);
+          return { declId, targetId };
+        }),
+      ),
+    );
+  // Catcher: a direct attack about to damage an ally (not Evaded, not applied yet)
+  const catchable = catcher
+    ? others
+        .filter((d) => !d.area)
+        .flatMap((d) => d.targets.filter((x) => !x.applied && !x.evade?.success && !x.noEvade).map((x) => ({ d, x })))
+    : [];
   return (
-    <details className="ally-int">
+    <details className="ally-int" open>
       <summary>
         🛡 {t('ally.title')} <span className="dim tiny">({others.length})</span>
       </summary>
-      <ul>
-        {others.map((d) => (
-          <li key={d.id}>
-            <div className="grow">
-              <strong>{d.opponentName}</strong> · {d.attack.name} → {d.targets.map((x) => x.name).join(', ')}
-            </div>
-            {!d.area && !d.taunt && (
+      <div className="react-block">
+        <div className="react-head">
+          📣 <strong>{t('taunt.title')}</strong>{' '}
+          <span className="dim tiny">
+            {t('taunt.rules', { range: perks.range })}
+            {perks.freeEvade && ` · ${t(perks.adv ? 'taunt.freeEvadeAdv' : 'taunt.freeEvade')}`}
+          </span>
+        </div>
+        {tauntedAlready ? (
+          <p className="dim tiny">{t('taunt.done', { n: tauntedAlready.n })}</p>
+        ) : tauntable.length === 0 ? (
+          <p className="dim tiny">{t('taunt.nothing')}</p>
+        ) : (
+          <>
+            <ul className="taunt-picks">
+              {tauntable.map(({ key, d, x }) => {
+                const order = picks.indexOf(key);
+                return (
+                  <li key={key}>
+                    <label className="gm-check">
+                      <input type="checkbox" checked={order >= 0} onChange={() => toggle(key)} />
+                      {order >= 0 && <span className="pill tiny-pill">{order + 1}</span>}
+                      <strong>{d.opponentName}</strong> · {d.attack.name} → {x.name}
+                    </label>
+                  </li>
+                );
+              })}
+            </ul>
+            <div className="react-actions">
               <button
                 type="button"
-                className="btn small"
-                disabled={none || busy !== null}
+                className="btn small primary"
+                disabled={none || busy !== null || !picks.length}
                 title={t('taunt.hint')}
-                onClick={() => run(`t${d.id}`, () => api.taunt(d.id, memberId, `d20${signed(tauntBonus ?? 0)}`))}
+                onClick={taunt}
               >
                 📣 {t('taunt.button')} {tauntBonus !== null && signed(tauntBonus)}
               </button>
-            )}
-            {d.taunt && (
-              <span className="dim tiny">
-                📣 {d.taunt.name} {d.taunt.won ? '✓' : '✗'}
-              </span>
-            )}
-            {catcher &&
-              d.targets
-                .filter((x) => !x.evade && !x.noEvade)
-                .map((x) => (
+              <span className="dim tiny">{t('taunt.degrees')}</span>
+            </div>
+          </>
+        )}
+      </div>
+      {catcher && (
+        <div className="react-block">
+          <div className="react-head">
+            🧤 <strong>{t('catch.title')}</strong> <span className="dim tiny">{t('catch.rules')}</span>
+          </div>
+          {catchable.length === 0 ? (
+            <p className="dim tiny">{t('catch.nothing')}</p>
+          ) : (
+            <ul>
+              {catchable.map(({ d, x }) => (
+                <li key={`${d.id}:${x.id}`}>
+                  <div className="grow">
+                    <strong>{d.opponentName}</strong> · {d.attack.name} → {x.name}
+                    {x.evade?.success === false && <span className="dim tiny"> · {t('catch.evadeFailed')}</span>}
+                  </div>
                   <button
-                    key={x.id}
                     type="button"
                     className="btn small"
                     disabled={none || busy !== null}
                     title={t('catch.hint')}
                     onClick={() => run(`c${d.id}:${x.id}`, () => api.catchAttack(d.id, memberId, x.id))}
                   >
-                    🛡 {t('catch.button', { name: x.name })}
+                    🧤 {t('catch.button', { name: x.name })}
                   </button>
-                ))}
-          </li>
-        ))}
-      </ul>
+                </li>
+              ))}
+            </ul>
+          )}
+        </div>
+      )}
       {none && <p className="dim tiny">{t('actions.none')}</p>}
       {error && <p className="error tiny">{error}</p>}
     </details>

@@ -1100,15 +1100,29 @@ test('Phase 4: effects tick down, Evade degrees, Advantage, Intervene, Taunt, Ca
   const d1 = await decl();
   const d2 = await decl();
   await dm('POST', '/api/encounter', { action: 'next' }); // Crawler Reaction
-  const taunt = await p2('POST', `/api/encounter/declarations/${d1}/taunt`, { characterId: B, expr: 'd20+80' });
+  const taunt = await p2('POST', '/api/encounter/taunt', {
+    characterId: B,
+    expr: 'd20+80',
+    picks: [{ declId: d1, targetId: A }],
+  });
   assert.equal(taunt.status, 200);
-  let dd = taunt.body.declarations.find((d) => d.id === d1);
-  assert.deepEqual(
-    dd.targets.map((x) => x.name),
-    ['Bo'],
-    'the Mob attacks the taunter now',
+  assert.equal(
+    (await p2('POST', '/api/encounter/taunt', { characterId: B, expr: 'd20+80', picks: [{ declId: d2, targetId: A }] }))
+      .status,
+    409,
+    'one Taunt per round',
   );
-  assert.ok(taunt.body.links.some((l) => l.kind === 'taunt'));
+  let dd = taunt.body.declarations.find((d) => d.id === d1);
+  // (a Natural 1 is a Critical Fail even with a huge bonus)
+  if (dd.taunt.degree !== 'critFail') {
+    assert.deepEqual(
+      dd.targets.map((x) => x.name),
+      ['Bo'],
+      'the Mob attacks the taunter now',
+    );
+    assert.equal(dd.targets[0].tauntedFrom, 'Ana');
+    assert.ok(taunt.body.links.some((l) => l.kind === 'taunt'));
+  }
   assert.equal(
     (await p1('POST', `/api/encounter/declarations/${d2}/catch`, { characterId: A, allyId: A })).status,
     409,
@@ -2139,4 +2153,122 @@ test('bad request bodies get a JSON error without a stack trace; compressed bodi
   });
   assert.equal(br.status, 415);
   assert.equal((await br.json()).code, 'bad_request');
+});
+
+test('Dodge on Evade, Taunt and Catcher upgrades, Damage Effects on attacks, the game clock', async () => {
+  const dm = client();
+  const pl = client();
+  await dm('POST', '/api/auth/login', { username: 'dm', password: 'adminpass123' });
+  await pl('POST', '/api/auth/register', { username: 'brawler1', password: 'password1' });
+  for (const m of (await dm('GET', '/api/party')).body)
+    await dm('PATCH', `/api/characters/${m.id}/party`, { inParty: false });
+  const mk = async (name, skills) =>
+    (await pl('POST', '/api/characters', { data: { schema: 10, name, skills } })).body.id;
+  const A = await mk('Puños', [
+    { name: 'Pugilism', category: 'combat', subtype: 'handToHand', rank: '3', attackType: 'melee' },
+    { name: 'Iron Punch', category: 'combat', subtype: 'damageEffect', rank: '5' },
+    { name: 'Powerful Strike', category: 'combat', subtype: 'damageEffect', rank: '3' },
+    { name: 'Bow', category: 'combat', subtype: 'ranged', rank: '2', attackType: 'ranged' },
+    { name: 'Dodge', category: 'utility', subtype: 'passive', rank: '10' },
+    {
+      name: 'Rematar',
+      category: 'combat',
+      subtype: 'damageEffect',
+      rank: '6',
+      effect: '+1d4 de daño, +1 cada 3 niveles.',
+      appliesTo: 'cuerpo a cuerpo',
+    },
+  ]);
+  const B = await mk('Muro', [
+    { name: 'Catcher', rank: '10' },
+    { name: 'Taunt', rank: '5', stat: 'cha' },
+    { name: 'Dodge', rank: '2' },
+  ]);
+  for (const id of [A, B]) await dm('PATCH', `/api/characters/${id}/party`, { inParty: true });
+
+  await dm('POST', '/api/encounter', { action: 'start', floor: 1 });
+  let enc = (
+    await dm('POST', '/api/encounter/opponents', { name: 'Ogro', slots: 10, slotValue: 1, evade: '0', count: 1 })
+  ).body;
+  const ogre = enc.opponents.at(-1).id;
+  const decl = async (target, attack) =>
+    (
+      await dm('POST', '/api/encounter/declarations', { opponentId: ogre, attack, targets: [target] })
+    ).body.declarations.at(-1).id;
+  const dRanged = await decl(A, { name: 'Lanza', toHit: '10', damage: '1d6', range: '60 ft' });
+  const dHit = await decl(A, { name: 'Porrazo', toHit: '30', damage: '1d6', range: '5 ft' });
+  const dB = await decl(A, { name: 'Pisotón', toHit: '10', damage: '1d6', range: '5 ft' });
+  await dm('POST', '/api/encounter', { action: 'next' }); // Crawler Reaction
+
+  // Dodge Rank 10: Advantage against a ranged attack; Dodge below Rank 5 gets marked when Evading
+  enc = (await pl('POST', `/api/encounter/declarations/${dRanged}/evade`, { characterId: A, expr: 'd20+3' })).body;
+  assert.equal(enc.declarations.find((d) => d.id === dRanged).targets[0].evade.advantage, true);
+
+  // Catcher after a failed Evade: takes the hit with +10 DR (Rank 10)
+  enc = (await pl('POST', `/api/encounter/declarations/${dHit}/evade`, { characterId: A, expr: 'd20-50' })).body;
+  assert.equal(enc.declarations.find((d) => d.id === dHit).targets[0].evade.success, false);
+  const caught = await pl('POST', `/api/encounter/declarations/${dHit}/catch`, { characterId: B, allyId: A });
+  assert.equal(caught.status, 200);
+  const tg = caught.body.declarations.find((d) => d.id === dHit).targets[0];
+  assert.deepEqual([tg.name, tg.caughtFor, tg.catchDr, tg.noEvade], ['Muro', 'Puños', 10, true]);
+
+  // Taunt Rank 5: drawn attacks come with a free Evade; Taunt gets its Advancement mark
+  const tr = await pl('POST', '/api/encounter/taunt', {
+    characterId: B,
+    expr: 'd20+60',
+    picks: [{ declId: dB, targetId: A }],
+  });
+  assert.equal(tr.status, 200);
+  const dd = tr.body.declarations.find((d) => d.id === dB);
+  if (dd.taunt.degree !== 'critFail') {
+    assert.equal(dd.targets[0].freeEvade, true);
+    const before = tr.body.actions[B].used.length;
+    const ev = (await pl('POST', `/api/encounter/declarations/${dB}/evade`, { characterId: B, expr: 'd20' })).body;
+    assert.equal(ev.actions[B].used.length, before, 'the free Evade costs no Action');
+    const marks = (await pl('GET', `/api/characters/${B}`)).body.data.skills;
+    assert.equal(marks.find((x) => x.name === 'Taunt').done, true);
+    assert.equal(marks.find((x) => x.name === 'Dodge').done, true);
+  }
+
+  // Damage Effects: Iron Punch goes with Pugilism, not with Bow; Rematar by its "applies to" text
+  for (let i = 0; i < 2; i++) await dm('POST', '/api/encounter', { action: 'next' }); // Crawler Action
+  const attack = (body) =>
+    pl('POST', '/api/encounter/attacks', { characterId: A, opponentId: ogre, expr: 'd20+50', ...body });
+  assert.equal((await attack({ label: 'Bow', damage: '1d6', effect: 'Iron Punch' })).status, 409);
+  let r = await attack({ label: 'Pugilism', damage: '1d2+1', effect: 'Iron Punch' });
+  assert.equal(r.status, 201);
+  let atk = r.body.attacks.at(-1);
+  assert.equal(atk.effect.name, 'Iron Punch');
+  if (atk.hit) {
+    const dmg = (await pl('POST', `/api/encounter/attacks/${atk.id}/damage`)).body.attacks.find(
+      (x) => x.id === atk.id,
+    ).damage;
+    assert.match(dmg.expr, /\+\d?d2\+1d4$/, 'base + 1d2, then a Rank die (Rank 5)');
+    assert.equal(dmg.effect, 'Iron Punch');
+  }
+  // (the Evade and that attack used both Actions: on to the next round's step 4)
+  const nextRound = async () => {
+    for (let k = 0; k < 5; k++) await dm('POST', '/api/encounter', { action: 'next' });
+  };
+  await nextRound();
+  // Powerful Strike: base dice × Rank, then a 30-hour cooldown on the game clock
+  const now = (await dm('GET', '/api/world')).body.gameHours;
+  const a2 = await attack({ label: 'Pugilism', damage: '1d2+1', effect: 'Powerful Strike' });
+  assert.equal(a2.status, 201);
+  const ready = (await pl('GET', `/api/characters/${A}`)).body.data.skills.find(
+    (x) => x.name === 'Powerful Strike',
+  ).readyAt;
+  assert.equal(ready, String(now + 30));
+  await nextRound();
+  assert.equal(
+    (await attack({ label: 'Pugilism', damage: '1d2', effect: 'Powerful Strike' })).body.code,
+    'effect_cooldown',
+  );
+  // time passes on the game clock (a long rest), and it's ready again
+  await dm('PATCH', '/api/world', { addHours: -30 });
+  assert.equal((await dm('GET', '/api/world')).body.gameHours, now + 30);
+  assert.equal((await attack({ label: 'Pugilism', damage: '1d2', effect: 'Powerful Strike' })).status, 201);
+  // a campaign effect by its "applies to" text
+  assert.equal((await attack({ label: 'Pugilism', damage: '1d2', effect: 'Rematar' })).status, 201);
+  await dm('POST', '/api/encounter', { action: 'end' });
 });

@@ -6736,3 +6736,60 @@ li.imp-exists {
   border-color: var(--gold);
   background: rgba(255, 196, 0, 0.1);
 }
+
+/* Damage Effect picker on pinned attacks, the effect's link on its card, Taunt/Catcher reactions */
+.fx-pick {
+  display: flex;
+  flex-direction: column;
+  gap: 0.2rem;
+  margin-top: 0.25rem;
+  min-width: 0;
+  max-width: 100%;
+}
+.fx-pick select {
+  height: auto;
+  padding: 0.25rem 0.4rem;
+  font-size: 0.8rem;
+  width: 100%;
+  max-width: 100%;
+  min-width: 0;
+}
+.fx-summary {
+  line-height: 1.3;
+}
+.effect-link {
+  display: flex;
+  flex-direction: column;
+  gap: 0.3rem;
+  margin-top: 0.4rem;
+}
+.react-block {
+  display: flex;
+  flex-direction: column;
+  gap: 0.3rem;
+  padding: 0.35rem 0;
+}
+.react-block + .react-block {
+  border-top: 1px dashed var(--border);
+}
+.react-head {
+  line-height: 1.35;
+}
+.react-actions {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  flex-wrap: wrap;
+}
+.taunt-picks {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.2rem;
+}
+.taunt-picks .gm-check {
+  align-items: center;
+  gap: 0.35rem;
+}

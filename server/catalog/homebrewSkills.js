@@ -39,6 +39,7 @@ export const HOMEBREW_SKILLS = [
   K({
     name: 'Rematar',
     subtype: 'damageEffect',
+    appliesTo: 'cuerpo a cuerpo',
     limitations: 'Contra enemigos por debajo de la mitad de su vida',
     effect: '+1d4 de daño, +1 cada 3 niveles.',
     upgrades: 'N5: si lo matas, ataque gratis contra otro enemigo adyacente (una vez por turno).',
@@ -47,6 +48,7 @@ export const HOMEBREW_SKILLS = [
   K({
     name: 'Puñalada Trapera',
     subtype: 'damageEffect',
+    appliesTo: 'cuerpo a cuerpo',
     limitations: 'Si el objetivo no te ve o está flanqueado',
     effect: '+1d6 de daño, +1 cada 3 niveles.',
     upgrades: 'N5: crítico con 19–20.',

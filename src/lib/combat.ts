@@ -10,12 +10,14 @@ export async function applyAttackDamage(
   characterId: number,
   amount: number,
   source: string,
+  /** Extra DR for this hit only (Catcher). */
+  extraDr = 0,
 ): Promise<{ damage: number; slots: number }> {
   for (let attempt = 0; ; attempt++) {
     const c = await api.getCharacter(characterId);
     const sheet = loadSheet(c.data);
     const der = derive(sheet);
-    const damage = effectiveDamage({ amount, dr: der.drTotal ?? 0 });
+    const damage = effectiveDamage({ amount, dr: (der.drTotal ?? 0) + extraDr });
     const slots = der.slotValue ? slotsLost(damage, der.slotValue, HB_SLOTS - der.hbLost) : 0;
     if (!slots) return { damage, slots: 0 };
     try {

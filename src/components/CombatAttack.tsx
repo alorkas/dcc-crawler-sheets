@@ -176,7 +176,8 @@ function AttackResult({ a }: { a: CrawlerAttack }) {
   return (
     <li className={a.hit ? 'hit' : a.hit === false ? 'miss' : ''}>
       <span className="grow">
-        <strong>{a.label}</strong> → {a.opponentName}
+        <strong>{a.label}</strong>
+        {a.effect && <span className="dim tiny"> + {a.effect.name}</span>} → {a.opponentName}
       </span>
       <HitResult a={a} />
       <DegreeBadge degree={a.degree} />
@@ -185,6 +186,11 @@ function AttackResult({ a }: { a: CrawlerAttack }) {
           <span>
             🎲 <strong>{a.damage.total}</strong>
             {a.damage.crit && <span className="degree deg-crit">{t('deg.critDice')}</span>}
+            {!!a.damage.mult && <span className="degree deg-amazing">×{a.damage.mult}</span>}
+            {a.damage.stunInstead && <span className="dim tiny"> · {t('fx.stunned')}</span>}
+            {!!a.damage.debuffs?.length && (
+              <span className="dim tiny"> · {a.damage.debuffs.map((x) => t(`debuff.${x}` as MsgKey)).join(', ')}</span>
+            )}
             {!!a.damage.amazing && <span className="degree deg-amazing">+{a.damage.amazing}</span>}
             {a.applied ? (
               <span className="dim tiny"> · {t('atkt.applied', { n: a.applied.slots })}</span>
@@ -227,6 +233,9 @@ export function AttackRollButton({
   manaCost = null,
   spell = false,
   aimed = false,
+  effect = null,
+  strMod = 0,
+  onPlainRoll,
   className,
 }: {
   expr: string;
@@ -241,6 +250,11 @@ export function AttackRollButton({
   spell?: boolean;
   /** Aiming: the roll is made with Disadvantage (an Advantage cancels it out). */
   aimed?: boolean;
+  /** A Damage Effect added to the attack (the server checks it against the sheet and works out the damage). */
+  effect?: { name: string; opts: { sameSize?: boolean; stunInstead?: boolean } } | null;
+  strMod?: number;
+  /** Out of combat, after a plain roll (e.g. start a Damage Effect's cooldown). */
+  onPlainRoll?: () => void;
   className?: string;
 }) {
   const { t, err } = useI18n();
@@ -281,6 +295,7 @@ export function AttackRollButton({
   if (!aim || !aim.opps.length) {
     // a plain roll: the shot still uses up one Ammunition
     const beforeRoll = () => {
+      onPlainRoll?.();
       if (!weapon?.ranged) return true;
       if (!ammo || playLocked) {
         if (!ammo) say(t('ammo.none'));
@@ -299,7 +314,7 @@ export function AttackRollButton({
           text={flash ?? `${aimed ? '▼ ' : ''}${text}`}
           label={label}
           className={className}
-          beforeRoll={weapon?.ranged ? beforeRoll : undefined}
+          beforeRoll={weapon?.ranged || onPlainRoll ? beforeRoll : undefined}
         />
         {picker}
       </>
@@ -321,6 +336,7 @@ export function AttackRollButton({
         damage,
         label: name,
         ...(aimed ? { aimed: true } : {}),
+        ...(effect ? { effect: effect.name, effectOpts: effect.opts, strMod } : {}),
         ...(ammo ? { ammoItemId: ammo.id } : {}),
       });
       fight.live.setEncounter(enc);

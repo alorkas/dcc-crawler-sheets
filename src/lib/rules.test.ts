@@ -673,3 +673,17 @@ describe('Spells on the Hotlist (schema 9)', async () => {
     expect(items.hotlistSpells([spell('Heal'), spell('Fireball')]).map((x) => x.name)).toEqual(['Fireball']);
   });
 });
+
+describe('Dodge on Evade', () => {
+  it('adds +1 (Ranks 1–4) and +2 (Rank 5) to the Evade total, listed with the gear', () => {
+    const at = (rank: string) => {
+      const d = loadSheet({ stats: { dex: { enhanced: '6', unenhanced: '6', mod: '' } } });
+      d.skills = [{ ...d.skills[0], name: 'Dodge', rank, category: 'utility', subtype: 'passive' }];
+      return derive(d);
+    };
+    const base = at('0').evadeTotal!;
+    expect(at('3').evadeTotal).toBe(base + 1);
+    expect(at('5').evadeTotal).toBe(base + 2);
+    expect(at('5').gearEvade.from).toEqual([{ name: 'Dodge (5)', value: 2 }]);
+  });
+});

@@ -4,6 +4,8 @@ import { AdvancementPanel, RankBadge, StatMod, useStatMod } from './rulesWidgets
 import { useI18n, type MsgKey } from '../lib/i18n';
 import { canPin, castHeal, num, spendMana } from '../lib/rules';
 import { spellRef } from '../../shared/items.js';
+import { BOOK_EFFECTS, effectsFor, isDamageEffect } from '../../shared/skillRules.js';
+import { useLiveOptional } from '../lib/live';
 import { useNamesEs } from '../lib/namesEs';
 import { emptySkill, signed, type Skill } from '../lib/sheet';
 import { SKILL_CATEGORIES, isCategory, isValidType, type SkillCategory } from '../lib/skillTypes';
@@ -559,8 +561,55 @@ function SkillCard({
           <Area path={f('description')} label={t('skill.description')} rows={2} />
           <Area path={f('effect')} label={t(spell ? 'skill.effect' : 'skill.effects')} rows={1} />
           <Area path={f('notes')} label={t('skills.notes')} rows={2} placeholder={t('skill.phNotes')} />
+          {isDamageEffect(s) && <EffectLink i={i} />}
           {spell && <CastButton i={i} />}
         </div>
+      )}
+    </div>
+  );
+}
+
+/**
+ * A Damage Effect's link to its Attack Skills: the book's ones by default (Iron Punch → Pugilism); the GM can write
+ * others ("Pugilism, Foot Soldier", "cuerpo a cuerpo", "a distancia", "todos"). Also its cooldown on the game clock.
+ */
+function EffectLink({ i }: { i: number }) {
+  const { data, update } = useSheet();
+  const { t } = useI18n();
+  const { user } = useAuth();
+  const live = useLiveOptional();
+  const s = data.skills[i];
+  const book = BOOK_EFFECTS[s.name.trim().toLowerCase().replace(/[’']/g, "'")];
+  const now = live?.world?.gameHours ?? 0;
+  const ready = num(s.readyAt ?? '') ?? 0;
+  const attacks = data.skills.filter(
+    (x) => x.category === 'combat' && !isDamageEffect(x) && effectsFor(data.skills, x).includes(s),
+  );
+  return (
+    <div className="effect-link">
+      <Input
+        path={['skills', i, 'appliesTo']}
+        label={t('fx.appliesTo')}
+        placeholder={book ? book.attacks.join(', ') : t('fx.appliesToPh')}
+      />
+      <span className="dim tiny">
+        {attacks.length ? t('fx.linkedTo', { list: attacks.map((x) => x.name).join(', ') }) : t('fx.linkedNone')}
+      </span>
+      {ready > now && (
+        <span className="dim tiny">
+          ⏳ {t('fx.cooldownLeft', { h: ready - now })}
+          {user?.isAdmin && (
+            <button
+              type="button"
+              className="btn small ghost"
+              onClick={() =>
+                update((d) => ({ ...d, skills: d.skills.map((x, j) => (j === i ? { ...x, readyAt: '' } : x)) }))
+              }
+            >
+              {t('fx.resetCooldown')}
+            </button>
+          )}
+        </span>
       )}
     </div>
   );
