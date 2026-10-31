@@ -1,6 +1,10 @@
 // Skill categories and subtypes, following the structure of "Crawlers & Customization" (Skills chapter):
 // Attack Skills grouped by weapon family, Utility Skills by how they are checked, Spell Skills by type.
 
+import { UTILITY } from '../../server/catalog/utility.js';
+import { WEAPONS } from '../../server/catalog/weapons.js';
+import { skillEs } from '../../shared/namesEs.js';
+
 export type SkillCategory = 'combat' | 'utility' | 'spell';
 
 export const SKILL_CATEGORIES: { id: SkillCategory; subtypes: string[] }[] = [
@@ -44,73 +48,18 @@ export function defaultCheckType(
 
 type Known = [SkillCategory, string];
 
-/** Weapons and utility skills from the player books, by type (names only). */
+/**
+ * Weapons and utility skills from the player books, by type: read from the same catalog the server uses (so the two
+ * can't drift apart), plus their Spanish names and a couple of spellings players type.
+ */
 const KNOWN: Record<string, Known> = {};
 const add = (cat: SkillCategory, sub: string, names: string[]) => {
-  for (const n of names) KNOWN[n.toLowerCase()] = [cat, sub];
+  for (const n of names) if (n) KNOWN[n.toLowerCase()] = [cat, sub];
 };
-
-add('combat', 'animal', ['Back Claw', 'Bite', 'Slice Attack']);
-add('combat', 'bashing', ['Club', 'Improvised Weapons', 'Improvised Weapon', 'Warhammer']);
-add('combat', 'edged', ['Axe', 'Dagger', 'Longsword', 'Rapier']);
-add('combat', 'handToHand', ['Foot Soldier', 'Noggin Nocker', 'Pugilism', 'Unarmed Combat', 'Wrasslin’', "Wrasslin'"]);
-add('combat', 'damageEffect', [
-  'Choke Out',
-  'Dirty Fighting',
-  'Iron Punch',
-  'Powerful Strike',
-  'Skullcracker',
-  'Smush',
-  'Toss',
-]);
-add('combat', 'ranged', ['Bow', 'Crossbow', 'Handgun', 'Javelin', 'Shotgun', 'Shuriken', 'Slingshot']);
-add('combat', 'reach', ['Herding Weapons', 'Lance', 'Polearm', 'Quarterstaff']);
-
-add('utility', 'passive', ['Aiming', 'Catcher', 'Determine Value', 'Dodge', 'Find Crawler', 'Regeneration']);
-add('utility', 'opposed', [
-  'Ambush',
-  'Animal Handling',
-  'Deception',
-  'Detect Lies',
-  'Good First Impression',
-  'Hide in Shadows',
-  'Intimidate',
-  'Negotiation',
-  'Persuasion',
-  'Sleight of Hand',
-  'Stealth',
-  'Taunt',
-]);
-add('utility', 'unopposed', [
-  'Chopper Pilot',
-  'Climbing',
-  'Detect Trap',
-  'Driving',
-  'Dumpster Diving',
-  'Endurance',
-  'Engineering',
-  'Escape Artist',
-  'Explosives Handling',
-  'Fabricate',
-  'First Aid',
-  'Goblin Explosives',
-  'Incendiary Device Handling',
-  'Investigation',
-  'Jumping',
-  'Light on Your Feet',
-  'Lockpicking',
-  'Perception',
-  'Performance',
-  'Repair',
-  'Running',
-  'Salvage',
-  'Streetwise',
-  'Survival',
-  'Swimming',
-  'Tactics',
-  'Throwing',
-  'Tracking',
-]);
+for (const w of WEAPONS) add('combat', w.subtype ?? '', [w.name, skillEs(w.name)]);
+for (const u of UTILITY) add('utility', u.subtype ?? '', [u.name, skillEs(u.name)]);
+add('combat', 'bashing', ['Improvised Weapon']);
+add('combat', 'handToHand', ["Wrasslin'"]);
 
 // Spells are deliberately NOT listed here: the browser bundle is readable by players, and spell names
 // would be spoilers. Spells are recognised through the server catalog (src/lib/catalog.ts) instead.

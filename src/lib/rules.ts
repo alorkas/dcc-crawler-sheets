@@ -360,6 +360,10 @@ export function slotsLost(damage: number, slotValue: number, remaining: number):
   return Math.min(remaining, Math.floor(damage / slotValue));
 }
 
+/**
+ * Lose Health Bar slots. Reaching 0% starts Dying for as many rounds as the Con Mod: the book says "Con" in the text
+ * and "Con Mod" in Table 11; this table plays it as the Con Mod.
+ */
 export function applyHbLoss(d: SheetData, slots: number, conMod: number | null): SheetData {
   const hbLost = clamp(d.hbLost + slots, 0, HB_SLOTS);
   const becameDying = hbLost >= HB_SLOTS && d.hbLost < HB_SLOTS;

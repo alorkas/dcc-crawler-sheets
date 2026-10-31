@@ -274,6 +274,12 @@ describe('skill categories', () => {
     expect(classifySkill('Rapier')).toEqual(['combat', 'edged']);
     expect(classifySkill('Stealth')).toEqual(['utility', 'opposed']);
     expect(classifySkill('Internet Memes')).toBeNull();
+    // the whole book catalog (not just a hand-kept list), by English or Spanish name
+    expect(classifySkill('Leadership')).toEqual(['utility', 'opposed']);
+    expect(classifySkill('Shield Block')).toEqual(['utility', 'unopposed']);
+    expect(classifySkill('Sigilo')).toEqual(['utility', 'opposed']);
+    expect(classifySkill('Find Crawler')).toEqual(['utility', 'passive']);
+    expect(classifySkill("Wrasslin'")).toEqual(['combat', 'handToHand']);
   });
   it('default check types', () => {
     expect(defaultCheckType('combat', 'edged')).toBe('evade');
