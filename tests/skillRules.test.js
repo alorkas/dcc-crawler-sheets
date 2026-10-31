@@ -9,8 +9,10 @@ import {
   isRangedAttack,
   multApplies,
   rankDie,
+  rankUpgrades,
   tauntCount,
   tauntPerks,
+  upgradeDice,
   withEffectDice,
 } from '../shared/skillRules.js';
 
@@ -99,4 +101,39 @@ test('Damage Effect specs: Rank dice, multipliers, conditions, cooldowns', () =>
   const toss = effectSpec({ name: 'Toss', rank: '10' });
   assert.equal(withEffectDice('1d4+2', toss, 3), '1d4+2+1d8+3');
   assert.equal(toss.tossFeet, 10);
+});
+
+test('Attack Skill Rank upgrades come from the book notes', () => {
+  const pug = {
+    name: 'Pugilism',
+    category: 'combat',
+    subtype: 'handToHand',
+    notes: 'R5: +2d2 · R10: +1d2 · R15: +1d2, free extra attack with Disadvantage\nCore Rulebook p. 179',
+  };
+  assert.deepEqual(upgradeDice(rankUpgrades({ ...pug, rank: '4' })), { base: '', rank: '' });
+  assert.deepEqual(upgradeDice(rankUpgrades({ ...pug, rank: '5' })), { base: '2d2', rank: '' });
+  assert.deepEqual(upgradeDice(rankUpgrades({ ...pug, rank: '12' })), { base: '2d2+1d2', rank: '' });
+  const xbow = {
+    name: 'Crossbow',
+    category: 'combat',
+    subtype: 'ranged',
+    notes: 'R5: +1d8 · R10: +1d8, Blood Trail · R15: +1d8, range 100 ft',
+  };
+  assert.deepEqual(upgradeDice(rankUpgrades({ ...xbow, rank: '5' })), { base: '1d8', rank: '' });
+  const noggin = {
+    name: 'Noggin Nocker',
+    category: 'combat',
+    notes: 'R5: +1d4, no self-damage · R10: +1d4, +1 Rank damage die',
+  };
+  assert.deepEqual(upgradeDice(rankUpgrades({ ...noggin, rank: '10' })), { base: '1d4+1d4', rank: '1d10' });
+  // Damage Effects and Spells are handled elsewhere
+  const ip = {
+    name: 'Iron Punch',
+    category: 'combat',
+    subtype: 'damageEffect',
+    rank: '5',
+    notes: 'R5: +1 Rank damage die',
+  };
+  assert.deepEqual(upgradeDice(rankUpgrades(ip)), { base: '', rank: '' });
+  assert.deepEqual(upgradeDice(rankUpgrades({ ...xbow, category: 'spell', rank: '5' })), { base: '', rank: '' });
 });

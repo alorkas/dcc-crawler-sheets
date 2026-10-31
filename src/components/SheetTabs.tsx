@@ -10,7 +10,15 @@ import { useSearchParams } from 'react-router-dom';
 import { CastButton } from './SkillsTab';
 import { RollButton } from './RollButton';
 import { damageBonusFor, isSpellRef, spellRef, weaponFor } from '../../shared/items.js';
-import { effectRankDice, effectSpec, effectsFor, withEffectDice, type EffectSpec } from '../../shared/skillRules.js';
+import {
+  effectRankDice,
+  effectSpec,
+  effectsFor,
+  rankUpgrades,
+  upgradeDice,
+  withEffectDice,
+  type EffectSpec,
+} from '../../shared/skillRules.js';
 import { useLiveOptional } from '../lib/live';
 import { HotlistSlots } from './Inventory';
 import { AttackRollButton, CombatTargetBar, TargetProvider } from './CombatAttack';
@@ -370,7 +378,10 @@ function PinnedRow({ i, der, onEdit }: { i: number; der: ReturnType<typeof useSh
   const statLbl = s.stat && s.stat !== 'none' ? t(`stat.${s.stat}.short` as MsgKey) : '';
   const spell = s.category === 'spell';
   const gearDmg = damageBonusFor(data.inventory, s.name, spell);
-  const baseExpr = s.baseDamage ? damageExpr(s.baseDamage, der, data.floor) : null;
+  // Rank upgrades of the Attack Skill (Pugilism R5 +2d2, Crossbow R5 +1d8…), applied on their own
+  const up = upgradeDice(rankUpgrades(s));
+  const sheetExpr = s.baseDamage ? damageExpr(s.baseDamage, der, data.floor) : null;
+  const baseExpr = sheetExpr && up.base ? `${sheetExpr}+${up.base}` : sheetExpr;
   // Overcharge: cheap spells take extra Mana, one more damage die per point (up to the spell's level)
   const [extra, setExtra] = useState(0);
   const die = s.baseDamage.match(/\d*d(\d+)/i)?.[1];
@@ -398,7 +409,10 @@ function PinnedRow({ i, der, onEdit }: { i: number; der: ReturnType<typeof useSh
   const fxExpr = fx && gearExpr ? withEffectDice(gearExpr, fx, fx.addStr ? strMod : 0) : gearExpr;
   const fxRank = fx ? effectRankDice(fx) : '';
   const withFx = fxExpr && fxRank ? `${fxExpr}+${fxRank}` : fxExpr;
-  const dmgExpr = aiming && withFx ? `${withFx}+${aim.dice}d4` : withFx;
+  const withAim = aiming && withFx ? `${withFx}+${aim.dice}d4` : withFx;
+  const dmgExpr = withAim && up.rank ? `${withAim}+${up.rank}` : withAim;
+  // in a fight the server adds the Damage Effect and the Rank dice itself (Critical Hits double only the base dice)
+  const attackBase = gearExpr && aiming ? `${gearExpr}+${aim.dice}d4` : gearExpr;
   // a Damage Effect with a cooldown (Powerful Strike) starts it on the game clock when used out of combat
   const startCooldown = () => {
     if (!fx?.cooldownHours || !effSkill) return;
@@ -437,6 +451,8 @@ function PinnedRow({ i, der, onEdit }: { i: number; der: ReturnType<typeof useSh
             label={t(aiming ? 'roll.toHitAimed' : 'roll.toHit', { name: s.name || t('skills.phSkill') })}
             name={s.name || t('skills.phSkill')}
             damage={dmgExpr}
+            damageBase={attackBase}
+            damageRank={up.rank}
             manaCost={cost !== null ? cost + boost : null}
             spell={spell}
             aimed={aiming}
@@ -501,6 +517,12 @@ function PinnedRow({ i, der, onEdit }: { i: number; der: ReturnType<typeof useSh
       </div>
       <div className="pin-dmg">
         {s.baseDamage ? annotateDamage(s.baseDamage, der) : '—'}
+        {(up.base || up.rank) && (
+          <span className="dim tiny rank-up">
+            {' '}
+            {t('skill.rankUpDmg', { dice: [up.base, up.rank].filter(Boolean).join('+') })}
+          </span>
+        )}
         {maxExtra > 0 && (
           <span className="overcharge" title={t('overcharge.hint', { n: maxExtra })}>
             <button

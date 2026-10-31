@@ -1763,6 +1763,7 @@ export const en = {
   'err.effect_targetTooHealthy': "The target's Health Bar is too high for that Damage Effect",
   'err.taunt_too_late': 'Too late to Taunt that attack (already Evaded or applied)',
   'err.no_catch_area': "Catcher doesn't work against Area Attacks",
+  'skill.rankUpDmg': '+{dice} from Rank upgrades',
   'fx.addBase': '+{dice} base damage',
   'fx.addRank': '+{dice} Rank dice (not doubled on a Critical Hit)',
   'fx.addStr': '+ Str',

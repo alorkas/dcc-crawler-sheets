@@ -230,6 +230,8 @@ export function AttackRollButton({
   label,
   name,
   damage,
+  damageBase,
+  damageRank = '',
   manaCost = null,
   spell = false,
   aimed = false,
@@ -244,6 +246,13 @@ export function AttackRollButton({
   /** Attack name for the log ("Long Sword → Bad Llama 2"). */
   name: string;
   damage: string | null;
+  /**
+   * In a fight: the damage without the Damage Effect and the Rank dice (the server adds those once, and doubles
+   * only the base dice on a Critical Hit). Defaults to `damage`.
+   */
+  damageBase?: string | null;
+  /** Rank damage dice from the Attack Skill's upgrades (not doubled on a Critical Hit). */
+  damageRank?: string;
   /** Attack spells: their Mana cost is spent when cast at a target. */
   manaCost?: number | null;
   /** Spells never use Ammunition. */
@@ -333,7 +342,8 @@ export function AttackRollButton({
         characterId: fight.charId,
         ...(opps.length > 1 ? { opponentIds: opps.map((o) => o.id) } : { opponentId: opps[0].id }),
         expr: withMode(expr, mode),
-        damage,
+        damage: damageBase === undefined ? damage : damageBase,
+        ...(damageBase !== undefined && damageRank ? { damageRank } : {}),
         label: name,
         ...(aimed ? { aimed: true } : {}),
         ...(effect ? { effect: effect.name, effectOpts: effect.opts, strMod } : {}),

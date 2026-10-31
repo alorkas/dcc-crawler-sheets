@@ -1775,6 +1775,7 @@ export const es: Messages = {
   'err.effect_targetTooHealthy': 'El objetivo tiene demasiada vida para ese efecto de daño',
   'err.taunt_too_late': 'Ya es tarde para provocar ese ataque (ya se esquivó o se aplicó)',
   'err.no_catch_area': 'Parador no funciona contra Ataques de Área',
+  'skill.rankUpDmg': '+{dice} por mejoras de rango',
   'fx.addBase': '+{dice} de daño base',
   'fx.addRank': '+{dice} de dados de rango (no se doblan en crítico)',
   'fx.addStr': '+ FUE',

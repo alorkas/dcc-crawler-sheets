@@ -778,6 +778,8 @@ export const api = {
     opponentIds?: number[];
     expr: string;
     damage?: string | null;
+    /** Rank damage dice from the Attack Skill's upgrades, added after any Critical Hit doubling. */
+    damageRank?: string;
     label: string;
     /** Aiming: shown in the log next to the attack. */
     aimed?: boolean;

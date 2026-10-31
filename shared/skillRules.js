@@ -233,6 +233,36 @@ export function effectSpec(skill, ctx = {}) {
   return { ...spec, usable: true };
 }
 
+/* ---------------- Rank upgrades of Attack Skills ---------------- */
+
+/**
+ * Extra damage an Attack Skill gets from its Rank upgrades, read from the upgrades text that "Fill from the book"
+ * puts in the Skill's notes: "R5: +2d2 · R10: +1d2 · R15: +1d2, free extra attack" at Rank 10 → add ['2d2', '1d2'].
+ * "+1 Rank damage die" becomes Rank dice (not doubled on a Critical Hit). Only Combat Attack Skills: Damage Effects
+ * have their own rules (BOOK_EFFECTS) and Spell upgrades work differently.
+ */
+export function rankUpgrades(skill) {
+  const r = int(skill?.rank);
+  const none = { add: [], rankDice: 0, rankDie: rankDie(r) };
+  if (!skill || skill.category !== 'combat' || isDamageEffect(skill) || r < 5) return none;
+  const add = [];
+  let rankDice = 0;
+  for (const m of String(skill.notes ?? '').matchAll(/\bR(\d+)\s*:\s*([^·\n]*)/gi)) {
+    if (int(m[1]) > r) continue;
+    const dice = m[2].match(/^\s*\+\s*(\d*)d(\d+)\b/i);
+    if (dice) add.push(`${dice[1] || 1}d${dice[2]}`);
+    rankDice += (m[2].match(/\+\s*1\s+Rank\s+damage\s+die/gi) ?? []).length;
+  }
+  return { add, rankDice, rankDie: rankDie(r) };
+}
+/** The Rank upgrade dice as expressions: base dice ("2d2+1d2") and Rank dice ("1d4"), or ''. */
+export function upgradeDice(up) {
+  return {
+    base: (up?.add ?? []).join('+'),
+    rank: up?.rankDice && up.rankDie ? Array.from({ length: up.rankDice }, () => up.rankDie).join('+') : '',
+  };
+}
+
 /** The base damage expression with the effect's extra base dice (before any Critical Hit doubling). */
 export function withEffectDice(baseExpr, spec, strMod = 0) {
   if (!baseExpr) return baseExpr;

@@ -1449,6 +1449,9 @@ export function mountGame(app, { db, auth, adminOnly, loadChar, live, hooks = {}
     if (!ATTACK_EXPR.test(expr)) return res.status(400).json({ error: 'Invalid dice', code: 'bad_dice' });
     const dmg = b.damage ? String(b.damage).replace(/\s+/g, '') : '';
     if (dmg && !parseDice(dmg)) return res.status(400).json({ error: 'Invalid dice', code: 'bad_dice' });
+    // Rank damage dice from the Attack Skill's upgrades: added after any Critical Hit doubling
+    const dmgRank = dmg && b.damageRank ? String(b.damageRank).replace(/\s+/g, '') : '';
+    if (dmgRank && !parseDice(dmgRank)) return res.status(400).json({ error: 'Invalid dice', code: 'bad_dice' });
     // Actions: 2 per round (+1 non-Attack Action bought with AI Favor), at most 2 of them Attacks
     const a = actionsOf(enc, cid);
     const max = ACTIONS + (a.extra ? 1 : 0);
@@ -1529,6 +1532,7 @@ export function mountGame(app, { db, auth, adminOnly, loadChar, live, hooks = {}
         hit: hitOf(degree, dc),
         group,
         damageExpr: dmg || null,
+        ...(dmgRank ? { damageRank: dmgRank } : {}),
         damage: null,
         applied: null,
         ...(effect ? { effect } : {}),
@@ -1658,7 +1662,9 @@ export function mountGame(app, { db, auth, adminOnly, loadChar, live, hooks = {}
     // Critical Hit (Natural 20): twice the damage dice. Amazing Success: + Floor damage (per target)
     const crit = atk.degree === 'crit';
     const doubled = crit ? doubleDice(base) : base;
-    const expr = fx?.stunInstead ? '0' : fx?.rankDice && doubled ? `${doubled}+${fx.rankDice}` : doubled;
+    // Rank dice (the Damage Effect's and the Attack Skill's upgrades) are added after the doubling
+    const extra = [fx?.rankDice, req.body?.expr ? '' : atk.damageRank].filter(Boolean).join('+');
+    const expr = fx?.stunInstead ? '0' : extra && doubled ? `${doubled}+${extra}` : doubled;
     const r = expr ? rollDice(expr) : null;
     if (!r) return res.status(400).json({ error: 'Invalid dice', code: 'bad_dice' });
     // Powerful Strike: the base damage dice result × its Rank, then the modifiers

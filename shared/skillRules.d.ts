@@ -55,3 +55,9 @@ export function effectSpec(
 export function withEffectDice(baseExpr: string | null, spec: EffectSpec | null, strMod?: number): string | null;
 export function effectRankDice(spec: EffectSpec | null): string;
 export function multApplies(spec: EffectSpec | null, targetPct: number | undefined): boolean;
+
+export type RankUpgrades = { add: string[]; rankDice: number; rankDie: string };
+export function rankUpgrades(
+  skill: { category?: string; subtype?: string; name?: string; rank?: string | number; notes?: string } | null,
+): RankUpgrades;
+export function upgradeDice(up: RankUpgrades | null): { base: string; rank: string };
