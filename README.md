@@ -102,10 +102,10 @@ The party and log panels use Server-Sent Events on `/api/events`. Caddy works ou
 
 ## Keeping it up to date
 
-- Runtime: Node 24 LTS (`node:24-slim`, supported until April 2028).
+- Runtime: Node 26 LTS (`node:26-slim`, supported until April 2029). Stay on even (LTS) Node versions.
 - The publish workflow tests (including `npm audit --audit-level=high`) before building, and rebuilds the image every Monday so Node and Debian security patches from the base image land without new commits. Pull them on the server with `docker compose pull && docker compose up -d`.
 - Dependabot (`.github/dependabot.yml`) opens weekly PRs for npm packages, the Docker base image and GitHub Actions. Turn on "Dependabot alerts" and "Dependabot security updates" in the repository settings to get security fixes as soon as they're published.
-- Dependabot PRs merge on their own once CI passes (`.github/workflows/dependabot-automerge.yml`), patch and minor updates only; major updates wait for review. The merge then starts the image publish.
+- Dependabot PRs merge on their own once CI passes (`.github/workflows/dependabot-automerge.yml`), patch and minor updates only; major updates and any change to the Node base image wait for review. The merge then starts the image publish.
 - TypeScript stays on 6.x until typescript-eslint supports TypeScript 7.
 
 ## Local development

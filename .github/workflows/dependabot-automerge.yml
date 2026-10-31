@@ -44,6 +44,11 @@ jobs:
           if echo "$msg" | grep -q 'version-update:semver-major'; then
             echo "Major update: left for review"
             echo "ok=false" >> "$GITHUB_OUTPUT"
+          # Docker tags aren't semver, so a Node major (24 → 25) isn't marked as one: changes to the Node base image
+          # always wait for a human (odd Node versions have no LTS)
+          elif echo "$msg" | grep -qE '^Bump node from '; then
+            echo "Node base image: left for review"
+            echo "ok=false" >> "$GITHUB_OUTPUT"
           else
             echo "ok=true" >> "$GITHUB_OUTPUT"
           fi

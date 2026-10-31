@@ -15,7 +15,10 @@ export type GearedSkill<T> = T & {
   gearFrom?: { name: string; value: number }[];
   fromGear?: boolean;
 };
-export function effectiveSkills<T extends SkillLike>(skills: T[] | undefined, inventory: unknown[] | undefined): GearedSkill<T>[];
+export function effectiveSkills<T extends SkillLike>(
+  skills: T[] | undefined,
+  inventory: unknown[] | undefined,
+): GearedSkill<T>[];
 export function multiplyBaseDice(
   roll: { total: number; parts: { sign: number; dice?: string; value: number }[] } | null,
   multBase: number,

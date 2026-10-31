@@ -5,3 +5,7 @@ data
 .github
 tests
 *.md
+# never in the image: rulebooks, session prep (spoilers), secrets
+DCC Books
+sesiones
+.env
