@@ -2,7 +2,7 @@
 // reward. A new one goes on the sheet at Level 1, filled from the catalog; one the crawler already has goes up a
 // Level (the book's rule for reading a spell you already know), up to 15.
 import { lookup, norm } from './catalog/index.js';
-import { MAX_SKILL_RANK } from './progress.js';
+import { maxRank } from './progress.js';
 import { spellBookSpell, spendOne } from '../shared/items.js';
 
 const CATEGORY = { weapon: 'combat', spell: 'spell', utility: 'utility' };
@@ -59,9 +59,10 @@ export function learn(data, rawName, { only = '' } = {}) {
   const i = skills.findIndex((s) => s && names.has(norm(s.name)));
   if (i >= 0) {
     const from = int(skills[i].rank);
-    const rank = Math.min(MAX_SKILL_RANK, Math.max(1, from + 1));
+    const cap = maxRank(skills[i].name);
+    const rank = Math.min(cap, Math.max(1, from + 1));
     const next = skills.map((s, j) => (j === i ? { ...s, rank: String(rank) } : s));
-    return { data: { ...data, skills: next }, name: skills[i].name, rank, raised: true, max: from >= MAX_SKILL_RANK };
+    return { data: { ...data, skills: next }, name: skills[i].name, rank, raised: true, max: from >= cap };
   }
   const row = hit
     ? rowFor(hit.kind, e)

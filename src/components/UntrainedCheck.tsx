@@ -2,7 +2,8 @@ import { useEffect, useState } from 'react';
 import { useI18n, type MsgKey } from '../lib/i18n';
 import { lookup } from '../lib/catalog';
 import type { CatalogHit } from '../lib/api';
-import { checkRoll, num } from '../lib/rules';
+import { checkRoll, learnsUntrained, num } from '../lib/rules';
+import { useLiveOptional } from '../lib/live';
 import { STATS, type SheetData, type StatKey } from '../lib/sheet';
 import { useNamesEs } from '../lib/namesEs';
 import { CheckButton } from './RollButton';
@@ -21,6 +22,9 @@ export function UntrainedCheck() {
   const { t } = useI18n();
   const es = useNamesEs();
   const { data, der } = useSheet();
+  const live = useLiveOptional();
+  // only the Tutorial Floors teach Skills tried untrained
+  const learns = learnsUntrained(live?.world?.floor ?? num(data.floor));
   const [name, setName] = useState('');
   const [picked, setPicked] = useState<StatKey | ''>('');
   const [hit, setHit] = useState<CatalogHit | null | undefined>(undefined);
@@ -70,7 +74,7 @@ export function UntrainedCheck() {
       : null;
   // after the roll: on the list for the end of the session (once), unless the crawler has it trained
   const remember = (d: SheetData): SheetData =>
-    trained || d.untrained.some((s) => norm(s) === norm(label))
+    trained || !learns || d.untrained.some((s) => norm(s) === norm(label))
       ? d
       : { ...d, untrained: [...d.untrained.filter((s) => s.trim()), label] };
 
@@ -121,7 +125,7 @@ export function UntrainedCheck() {
                 ? t('untr.looking')
                 : hit === null && !stat
                   ? t('untr.notInBook')
-                  : t('untr.ready')}
+                  : t(learns ? 'untr.ready' : 'untr.readyNoLearn')}
       </p>
     </div>
   );

@@ -66,13 +66,12 @@ add('combat', 'damageEffect', [
 add('combat', 'ranged', ['Bow', 'Crossbow', 'Handgun', 'Javelin', 'Shotgun', 'Shuriken', 'Slingshot']);
 add('combat', 'reach', ['Herding Weapons', 'Lance', 'Polearm', 'Quarterstaff']);
 
-add('utility', 'passive', ['Aiming', 'Catcher', 'Determine Value', 'Dodge', 'Regeneration']);
+add('utility', 'passive', ['Aiming', 'Catcher', 'Determine Value', 'Dodge', 'Find Crawler', 'Regeneration']);
 add('utility', 'opposed', [
   'Ambush',
   'Animal Handling',
   'Deception',
   'Detect Lies',
-  'Escape Artist',
   'Good First Impression',
   'Hide in Shadows',
   'Intimidate',
@@ -90,9 +89,9 @@ add('utility', 'unopposed', [
   'Dumpster Diving',
   'Endurance',
   'Engineering',
+  'Escape Artist',
   'Explosives Handling',
   'Fabricate',
-  'Find Crawler',
   'First Aid',
   'Goblin Explosives',
   'Incendiary Device Handling',

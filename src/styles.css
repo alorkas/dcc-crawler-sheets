@@ -3641,6 +3641,17 @@ ul.plain {
 .declare-form .quick-opp .mini.grow {
   grid-column: span 2;
 }
+.decl-target-head {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  flex-wrap: wrap;
+}
+.decl-target-head .mini {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.3rem;
+}
 .target-picks {
   display: flex;
   flex-wrap: wrap;

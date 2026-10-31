@@ -258,11 +258,19 @@ export function mountGame(app, { db, auth, adminOnly, loadChar, live, hooks = {}
     if (!a || a.round !== enc.round) enc.actions[cid] = { round: enc.round, used: [], extra: false };
     return enc.actions[cid];
   };
+  /**
+   * How many Actions a crawler has this round: 2 (+1 non-Attack bought with AI Favor). The surprise round (round 0)
+   * is a single free Action: "it's only one action".
+   */
+  const maxActions = (enc, a) => (enc.round === 0 ? 1 : ACTIONS + (a?.extra ? 1 : 0));
+  /** "When a crawler's HB is reduced to 0%, they are unable to use any remaining Actions until healed." */
+  const isDown = (cid) => int(JSON.parse(charRow(Number(cid))?.data || '{}').hbLost, 0) >= 10;
+  const DOWN = { error: 'At 0% Health Bar: no Actions until healed', code: 'no_actions_down' };
   const actionsView = (enc) =>
     Object.fromEntries(
       Object.entries(enc.actions || {})
         .filter(([, a]) => a.round === enc.round)
-        .map(([cid, a]) => [cid, { used: a.used, extra: a.extra, max: ACTIONS + (a.extra ? 1 : 0) }]),
+        .map(([cid, a]) => [cid, { used: a.used, extra: a.extra, max: maxActions(enc, a) }]),
     );
   /* links between two participants ("Grabbing: Alvaro" / "Grabbed by: Bad Llama 2") */
   const LINK_KINDS = ['grab', 'taunt', 'protect', 'custom'];
@@ -615,22 +623,40 @@ export function mountGame(app, { db, auth, adminOnly, loadChar, live, hooks = {}
     );
     const ids = [...new Set((Array.isArray(b.targets) ? b.targets : []).map(Number))].filter((id) => party.has(id));
     if (!ids.length) return res.status(400).json({ error: 'Pick a target', code: 'bad_request' });
-    enc.seq += 1;
-    const d = {
-      id: enc.seq,
-      round: enc.round,
-      opponentId: o.id,
-      opponentName: o.name,
-      attack,
-      dc: resolveNum(attack.toHit, enc.floor),
-      // Area Attack: an Evade halves the damage instead of avoiding it (the GM can override the guess)
-      area: typeof b.area === 'boolean' ? b.area : isAreaAttack(attack),
-      targets: ids.map((id) => ({ id, name: party.get(id), evade: null, applied: null })),
-      damage: null,
-    };
+    const mode = ['adv', 'dis'].includes(b.mode) ? b.mode : 'normal';
+    const area = typeof b.area === 'boolean' ? b.area : isAreaAttack(attack);
+    // the GM rolls each Attack's damage: an attack that isn't an Area Attack is one Attack per target
+    const groups = area ? [ids] : ids.map((id) => [id]);
     const splash = new Set((Array.isArray(b.splash) ? b.splash : []).map(Number));
-    if (d.area) for (const tg of d.targets) tg.splash = splash.has(tg.id);
-    enc.declarations = [...(enc.declarations || []), d];
+    for (const group of groups) {
+      enc.seq += 1;
+      const d = {
+        id: enc.seq,
+        round: enc.round,
+        opponentId: o.id,
+        opponentName: o.name,
+        attack,
+        // a Mob with Advantage: +5 to the Difficulty of its Action; with Disadvantage: −5 (the GM never rolls)
+        dc: (() => {
+          const base = resolveNum(attack.toHit, enc.floor);
+          return base === null ? null : base + (mode === 'adv' ? 5 : mode === 'dis' ? -5 : 0);
+        })(),
+        ...(mode !== 'normal' ? { mode } : {}),
+        // Area Attack: an Evade halves the damage instead of avoiding it (the GM can override the guess)
+        area,
+        // a Disadvantaged Attack gives its targets a free Evade Check (they may still spend an Action if it fails)
+        targets: group.map((id) => ({
+          id,
+          name: party.get(id),
+          evade: null,
+          applied: null,
+          ...(mode === 'dis' ? { freeEvade: true } : {}),
+        })),
+        damage: null,
+      };
+      if (d.area) for (const tg of d.targets) tg.splash = splash.has(tg.id);
+      enc.declarations = [...(enc.declarations || []), d];
+    }
     // declared late (after the reveal): post it right away
     if (revealed(enc)) revealDeclarations(enc);
     putEnc(enc);
@@ -687,6 +713,7 @@ export function mountGame(app, { db, auth, adminOnly, loadChar, live, hooks = {}
     const target = d.targets.find((x) => x.id === Number(req.body?.characterId));
     if (!target || !canAct(req, target.id))
       return res.status(404).json({ error: 'Character not found', code: 'char_not_found' });
+    if (!admin && isDown(target.id)) return res.status(409).json(DOWN);
     const expr = String(req.body?.expr ?? 'd20').replace(/\s+/g, '');
     if (!/^1?d20([+-]\d{1,2})?$/i.test(expr)) return res.status(400).json({ error: 'Invalid dice', code: 'bad_dice' });
     const reroll = !!req.body?.reroll;
@@ -707,7 +734,7 @@ export function mountGame(app, { db, auth, adminOnly, loadChar, live, hooks = {}
       // one Evade Action covers every attack this round; Taunt's free Evades and Dodge Rank 15 cost nothing
       const free = (target.freeEvade && !target.evade) || dodge.freeEvade;
       if (!free && !acts.used.includes('evade')) {
-        if (acts.used.length >= ACTIONS + (acts.extra ? 1 : 0) && !admin)
+        if (acts.used.length >= maxActions(enc, acts) && !admin)
           return res.status(409).json({ error: 'No Actions left', code: 'no_actions_left' });
         acts.used.push('evade');
       }
@@ -837,7 +864,7 @@ export function mountGame(app, { db, auth, adminOnly, loadChar, live, hooks = {}
   /** Use one of a crawler's Actions for an Interrupt (or a step-4 Action). False when none are left. */
   const useAction = (enc, cid, kind) => {
     const a = actionsOf(enc, cid);
-    if (a.used.length >= ACTIONS + (a.extra ? 1 : 0)) return false;
+    if (a.used.length >= maxActions(enc, a)) return false;
     a.used.push(kind);
     return true;
   };
@@ -856,6 +883,7 @@ export function mountGame(app, { db, auth, adminOnly, loadChar, live, hooks = {}
     if (!enc.active) return res.status(409).json({ error: 'No combat', code: 'no_combat' });
     if (!row || row.kind !== 'roll' || !roll || roll.natural === null || roll.natural === undefined || !helper)
       return res.status(404).json({ error: 'Not found', code: 'not_found' });
+    if (!req.user.is_admin && isDown(helper.id)) return res.status(409).json(DOWN);
     if (row.character_id === helper.id || roll.rerolled || roll.stat)
       return res.status(409).json({ error: 'Not this roll', code: 'no_intervene' });
     if ((roll.intervene || []).some((x) => x.id === helper.id))
@@ -913,6 +941,7 @@ export function mountGame(app, { db, auth, adminOnly, loadChar, live, hooks = {}
     const enc = getEnc();
     const row = partyRow(req, req.body?.characterId);
     if (!row || !enc.active || !revealed(enc)) return res.status(404).json({ error: 'Not found', code: 'not_found' });
+    if (!req.user.is_admin && isDown(row.id)) return res.status(409).json(DOWN);
     const picks = (Array.isArray(req.body?.picks) ? req.body.picks : []).slice(0, 6).map((p) => {
       const d = findDecl(enc, p?.declId);
       const tg = d?.targets.find((x) => x.id === Number(p?.targetId));
@@ -1004,6 +1033,7 @@ export function mountGame(app, { db, auth, adminOnly, loadChar, live, hooks = {}
     const row = partyRow(req, req.body?.characterId);
     if (!d || !revealed(enc) || !row) return res.status(404).json({ error: 'Not found', code: 'not_found' });
     if (d.area) return res.status(409).json({ error: 'Not against an Area Attack', code: 'no_catch_area' });
+    if (!req.user.is_admin && isDown(row.id)) return res.status(409).json(DOWN);
     const data = JSON.parse(row.data || '{}');
     const rank = skillRank(effectiveSkills(data.skills, data.inventory), 'Catcher');
     if (rank <= 0 && !req.user.is_admin)
@@ -1107,6 +1137,7 @@ export function mountGame(app, { db, auth, adminOnly, loadChar, live, hooks = {}
     if (!target || (target.id !== req.char.id && !target.party_since))
       return res.status(404).json({ error: 'Character not found', code: 'char_not_found' });
     const actionKind = enc.phase === 2 && fx?.type === 'heal' ? 'heal' : 'action';
+    if (inFight && !req.user.is_admin && isDown(req.char.id)) return res.status(409).json(DOWN);
     if (inFight && !useAction(enc, req.char.id, actionKind))
       return res.status(409).json({ error: 'No Actions left', code: 'no_actions_left' });
     const spent = kept ? null : spendOne(inv, hotSlots, it.id);
@@ -1257,6 +1288,7 @@ export function mountGame(app, { db, auth, adminOnly, loadChar, live, hooks = {}
       return res.json({ data, version: req.char.version, messageId: null });
     const enc = getEnc();
     const inFight = enc.active && !!req.char.party_since;
+    if (inFight && !req.user.is_admin && isDown(req.char.id)) return res.status(409).json(DOWN);
     if (inFight && !useAction(enc, req.char.id, 'hotlist'))
       return res.status(409).json({ error: 'No Actions left', code: 'no_actions_left' });
     const mine = { ...data, inventory: next.inventory, hotSlots: next.hotSlots };
@@ -1368,8 +1400,9 @@ export function mountGame(app, { db, auth, adminOnly, loadChar, live, hooks = {}
     const inParty = db.prepare('SELECT party_since FROM characters WHERE id = ?').get(cid)?.party_since;
     if (!inParty) return res.status(404).json({ error: 'Not found', code: 'not_found' });
     const a = actionsOf(enc, cid);
-    const max = ACTIONS + (a.extra ? 1 : 0);
+    const max = maxActions(enc, a);
     const op = req.body?.op;
+    if ((op === 'use' || op === 'extra') && !req.user.is_admin && isDown(cid)) return res.status(409).json(DOWN);
     if (op === 'use') {
       if (a.used.length >= max) return res.status(409).json({ error: 'No Actions left', code: 'no_actions_left' });
       a.used.push(['interrupt', 'heal'].includes(req.body?.kind) ? req.body.kind : 'action');
@@ -1379,6 +1412,8 @@ export function mountGame(app, { db, auth, adminOnly, loadChar, live, hooks = {}
       a.used.splice(i, 1);
     } else if (op === 'extra') {
       if (a.extra) return res.status(409).json({ error: 'Once per round', code: 'already_extra' });
+      if (enc.round === 0)
+        return res.status(409).json({ error: 'One Action in the surprise round', code: 'surprise_one' });
       if (!spendFavor(cid, 'action', req.user.id))
         return res.status(409).json({ error: 'No AI Favor left', code: 'no_ai_favor' });
       a.extra = true;
@@ -1448,7 +1483,7 @@ export function mountGame(app, { db, auth, adminOnly, loadChar, live, hooks = {}
   const hitOf = (degree, dc) =>
     degree === 'critFail' ? false : dc === null ? (degree === 'crit' ? true : null) : isSuccess(degree);
 
-  // { opponentId } or, for an Area Attack, { opponentIds: [...] }: one roll against each opponent's Evade,
+  // { opponentId } or, for an Area Attack, { opponentIds: [...] }: one roll against the first one's Evade (it hits them all or none),
   // one Action. Rolling with Advantage ("2d20kh1…") uses up an Advantage earned against that Mob.
   app.post('/api/encounter/attacks', auth, (req, res) => {
     const enc = getEnc();
@@ -1464,6 +1499,7 @@ export function mountGame(app, { db, auth, adminOnly, loadChar, live, hooks = {}
       .slice(0, 12)
       .map((id) => enc.opponents.find((x) => x.id === id && (admin || !x.hidden) && x.lost < x.slots));
     if (!opps.length || opps.some((o) => !o)) return res.status(404).json({ error: 'Not found', code: 'not_found' });
+    if (!admin && isDown(cid)) return res.status(409).json(DOWN);
     // attacks happen in the surprise round and in step 4 (the GM can allow them any time)
     if (!admin && !(enc.round === 0 || enc.phase === 4))
       return res.status(409).json({ error: 'Not the Crawler Action step', code: 'not_attack_step' });
@@ -1476,7 +1512,7 @@ export function mountGame(app, { db, auth, adminOnly, loadChar, live, hooks = {}
     if (dmgRank && !parseDice(dmgRank)) return res.status(400).json({ error: 'Invalid dice', code: 'bad_dice' });
     // Actions: 2 per round (+1 non-Attack Action bought with AI Favor), at most 2 of them Attacks
     const a = actionsOf(enc, cid);
-    const max = ACTIONS + (a.extra ? 1 : 0);
+    const max = maxActions(enc, a);
     const attacks = a.used.filter((k) => k === 'attack').length;
     if (a.used.length >= max || attacks >= ACTIONS)
       return res.status(409).json({ error: 'No Actions left', code: 'no_actions_left' });
@@ -1541,9 +1577,11 @@ export function mountGame(app, { db, auth, adminOnly, loadChar, live, hooks = {}
     const name = clip(data.name) || '?';
     const area = opps.length > 1;
     const group = area ? enc.seq + 1 : null;
+    // an Area Attack is one Attack roll against the foe the crawler chose (the first one): if it hits, every Mob in
+    // the area takes the same damage (Core Rulebook "Area of Effect Attacks")
+    const dc = resolveNum(opps[0].evade, enc.floor);
+    const degree = degreeOf(r.total, r.natural, dc);
     const records = opps.map((o) => {
-      const dc = resolveNum(o.evade, enc.floor);
-      const degree = degreeOf(r.total, r.natural, dc);
       enc.seq += 1;
       return {
         id: enc.seq,
@@ -1803,7 +1841,15 @@ export function mountGame(app, { db, auth, adminOnly, loadChar, live, hooks = {}
       const n = crawlerKillLevels(data.level, body.victimLevel, d6);
       r = levelUp(data, n, 'kill', `d6 ${d6}, victim Lvl ${int(body.victimLevel)}`);
     } else if (type === 'grind') {
-      const g = addGrindHours(data, int(body.hours));
+      // the party member with the lowest Level gains 1d2 Levels (not on a tie for lowest)
+      const levels = row.party_since
+        ? db
+            .prepare('SELECT id, data FROM characters WHERE party_since IS NOT NULL AND id != ?')
+            .all(row.id)
+            .map((r) => int(JSON.parse(r.data || '{}').level, 0))
+        : [];
+      const lowest = levels.length > 0 && levels.every((l) => int(data.level, 0) < l);
+      const g = addGrindHours(data, int(body.hours), lowest);
       if (!g.leveled) {
         writeSheet(row, g.data, null);
         progressEvent(row, g.data, { type: 'grind', hours: int(body.hours), total: g.total, level: int(data.level) });

@@ -20,6 +20,7 @@ export const EFFECT_KINDS: EffectKind[];
 export const DURATIONS: Duration[];
 export function newEffectId(): string;
 export function cleanEffect(raw: unknown): Effect;
+export function dyingTick<T extends object>(data: T): T;
 export function tickRound<T extends object>(data: T): { data: T; ended: string[] };
 export function endCombat<T extends object>(data: T): { data: T; ended: string[] };
 export function clearRestEffects<T extends object>(data: T): T;
@@ -28,6 +29,11 @@ export function itemEffect(
   notes: string,
 ): { type: 'heal'; amount: number } | { type: 'manaFull' } | { type: 'mana'; amount: number } | null;
 
+export function randomTargets<T extends { id: number; view?: { hbLost?: number } }>(
+  members: T[],
+  n?: number,
+  rand?: (k: number) => number,
+): number[];
 export type RollKind = 'check' | 'attack' | 'evade';
 export type RollMode = 'normal' | 'adv' | 'dis';
 export function debuffDisadvantage(list: { id: string }[] | undefined, kind: RollKind): string[];

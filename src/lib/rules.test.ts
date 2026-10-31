@@ -72,7 +72,7 @@ describe('derived values', () => {
     const d = derive(s);
     expect(d.penalty).toBe(-2);
     expect(d.evadeTotal).toBe(0);
-    expect(d.moveEffective).toBe(10);
+    expect(d.moveEffective).toBe(5); // two stacks of Fatigued: halved twice (stacked Debuffs apply cumulatively)
   });
 });
 

@@ -1,5 +1,6 @@
 import { ApiError, api } from './api';
 import { HB_SLOTS, applyHbLoss, derive, effectiveDamage, loadSheet, slotsLost } from './rules';
+import { dyingTick } from '../../shared/combat.js';
 
 /**
  * Mob Attack Resolution: apply a declared attack's damage to a crawler's Health Bar
@@ -19,9 +20,17 @@ export async function applyAttackDamage(
     const der = derive(sheet);
     const damage = effectiveDamage({ amount, dr: (der.drTotal ?? 0) + extraDr });
     const slots = der.slotValue ? slotsLost(damage, der.slotValue, HB_SLOTS - der.hbLost) : 0;
-    if (!slots) return { damage, slots: 0 };
+    // a Dying crawler who takes damage loses one of their remaining rounds instead
+    const next = der.dying
+      ? damage > 0
+        ? dyingTick(sheet)
+        : sheet
+      : slots
+        ? applyHbLoss(sheet, slots, der.mods.con)
+        : sheet;
+    if (next === sheet) return { damage, slots: 0 };
     try {
-      await api.saveCharacter(characterId, applyHbLoss(sheet, slots, der.mods.con), c.version, { hp: [source] });
+      await api.saveCharacter(characterId, next, c.version, { hp: [source] });
       return { damage, slots };
     } catch (e) {
       // the player saved at the same moment: read the sheet again and retry once

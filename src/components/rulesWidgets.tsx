@@ -3,6 +3,8 @@ import { useField, useSheet, type Path } from './fields';
 import { useCombatAction } from './CombatAttack';
 import { useI18n, type MsgKey } from '../lib/i18n';
 import { useAuth } from '../lib/auth';
+import { useLiveOptional } from '../lib/live';
+import { dyingTick } from '../../shared/combat.js';
 import { api } from '../lib/api';
 import {
   DEBUFFS,
@@ -16,6 +18,8 @@ import {
   debuffDef,
   effectiveDamage,
   heal,
+  isTainted,
+  learnsUntrained,
   learnUntrained,
   num,
   removeDebuff,
@@ -331,7 +335,10 @@ export function HealthTools() {
                 className="btn small primary"
                 disabled={eff === null || !slot}
                 onClick={() => {
-                  update((d) => applyHbLoss(d, lose, der.mods.con), t('undo.damage', { slots: lose }), {
+                  // a Dying crawler who takes damage loses one of their remaining rounds instead
+                  const hit = (d: typeof data) =>
+                    der.dying ? ((eff ?? 0) > 0 ? dyingTick(d) : d) : applyHbLoss(d, lose, der.mods.con);
+                  update(hit, t('undo.damage', { slots: lose }), {
                     hp: `${source.trim() || t('src.damage')} (${t('src.dmgAmount', { n: eff ?? 0 })})`,
                   });
                   setAmount('');
@@ -365,7 +372,8 @@ export function HealthTools() {
             <button
               type="button"
               className="btn small"
-              disabled={!healSlots || der.hbLost === 0}
+              disabled={!healSlots || der.hbLost === 0 || isTainted(data)}
+              title={isTainted(data) ? t('heal.tainted') : undefined}
               onClick={() => {
                 update((d) => heal(d, healSlots ?? 0), t('undo.healSlots', { n: healSlots ?? 0 }), {
                   hp: healSrc.trim() || t('src.healing'),
@@ -415,6 +423,7 @@ export function HealButton({ className = 'btn small' }: { className?: string }) 
         title={combat.inCombat ? t('mana.healCombatHint', { n: combat.left }) : t('mana.healHint')}
         onClick={async () => {
           setMsg('');
+          if (isTainted(data)) return setMsg(t('heal.tainted'));
           if (!castHeal(data)) return setMsg(t('mana.notEnough'));
           // in combat, Healing is an Interrupt (or an Action in step 4): it uses one of the crawler's Actions
           if (combat.inCombat) {
@@ -622,6 +631,7 @@ export function DebuffPanel() {
 
 export function AdvancementPanel() {
   const { data, update, locked, charId, runServer } = useSheet();
+  const live = useLiveOptional();
   const { user } = useAuth();
   const { t } = useI18n();
   const [results, setResults] = useState<AdvanceResult[] | null>(null);
@@ -700,7 +710,10 @@ export function AdvancementPanel() {
         <div className="lbl">{t('adv.untrained')}</div>
         <div className="dim tiny">{t('adv.untrainedHint')}</div>
         <UntrainedList />
-        {!locked && untrained.length > 0 && (
+        {!learnsUntrained(live?.world?.floor ?? num(data.floor)) && (
+          <div className="dim tiny">{t('adv.untrainedFloor')}</div>
+        )}
+        {!locked && untrained.length > 0 && learnsUntrained(live?.world?.floor ?? num(data.floor)) && (
           <div className="debuff-add">
             <select
               className="in sel"

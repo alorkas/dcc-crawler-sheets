@@ -365,6 +365,8 @@ export type Declaration = {
     evadeAdv?: boolean;
   }[];
   damage: { total: number; expr: string } | null;
+  /** The Mob attacked with Advantage (+5 Difficulty) or Disadvantage (−5, free Evade). */
+  mode?: 'adv' | 'dis';
   /** Taunt (Interrupt) against this attack: who tried, and whether it worked. */
   taunt?: { id: number; name: string; won: boolean; total?: number; mob?: number; degree?: Degree | null } | null;
   tauntedFrom?: string[];
@@ -754,6 +756,8 @@ export const api = {
     targets: number[];
     area?: boolean;
     splash?: number[];
+    /** The Mob has Advantage (+5 to the Evade Difficulty) or Disadvantage (−5, and a free Evade). */
+    mode?: 'normal' | 'adv' | 'dis';
   }) => request<Encounter>('POST', '/api/encounter/declarations', d),
   removeDeclaration: (id: number) => request<Encounter>('DELETE', `/api/encounter/declarations/${id}`),
   clearDeclarations: (opponentId: number) =>

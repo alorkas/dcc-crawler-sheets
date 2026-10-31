@@ -2272,3 +2272,86 @@ test('Dodge on Evade, Taunt and Catcher upgrades, Damage Effects on attacks, the
   assert.equal((await attack({ label: 'Pugilism', damage: '1d2', effect: 'Rematar' })).status, 201);
   await dm('POST', '/api/encounter', { action: 'end' });
 });
+
+test('Book pass: surprise round, Dying, Mob Advantage/Disadvantage, one Attack per target, Area Attacks, grinding', async () => {
+  const dm = client();
+  await dm('POST', '/api/auth/login', { username: 'dm', password: 'adminpass123' });
+  for (const m of (await dm('GET', '/api/party')).body)
+    await dm('PATCH', `/api/characters/${m.id}/party`, { inParty: false });
+  const pl = client();
+  await pl('POST', '/api/auth/register', { username: 'bookpass', password: 'password1' });
+  const make = async (data) => (await pl('POST', '/api/characters', { data: { schema: 10, ...data } })).body.id;
+  const A = await make({ name: 'Ana', level: '3', stats: { dex: { enhanced: '5', unenhanced: '5', mod: '' } } });
+  const B = await make({ name: 'Bo', level: '5', hbLost: 10, dyingRounds: '3' });
+  for (const id of [A, B]) await dm('PATCH', `/api/characters/${id}/party`, { inParty: true });
+  const sheet = async (id) => (await dm('GET', `/api/characters/${id}`)).body.data;
+
+  // the surprise round is one Action (and no extra one bought with AI Favor)
+  await dm('POST', '/api/encounter', { action: 'start', floor: 2, surprise: true });
+  let enc = (
+    await dm('POST', '/api/encounter/opponents', { name: 'Rat', slots: 20, slotValue: 1, evade: '0+F', count: 3 })
+  ).body;
+  const [r1, r2] = enc.opponents.slice(-3).map((o) => o.id);
+  const atk = (body) =>
+    pl('POST', '/api/encounter/attacks', { characterId: A, expr: 'd20+50', label: 'Punch', damage: '1d4', ...body });
+  assert.equal((await atk({ opponentId: r1 })).status, 201);
+  assert.equal((await atk({ opponentId: r1 })).body.code, 'no_actions_left');
+  assert.equal((await pl('POST', '/api/encounter/actions', { characterId: A, op: 'extra' })).body.code, 'surprise_one');
+
+  // a crawler at 0% Health Bar can't spend Actions (the GM still can for them)
+  assert.equal(
+    (await pl('POST', '/api/encounter/actions', { characterId: B, op: 'use' })).body.code,
+    'no_actions_down',
+  );
+
+  // next round: Clean Up after round 1 takes a round off Dying
+  await dm('POST', '/api/encounter', { action: 'next' }); // surprise round → round 1
+  for (let k = 0; k < 5; k++) await dm('POST', '/api/encounter', { action: 'next' });
+  assert.equal((await sheet(B)).dyingRounds, '2');
+
+  // Mob Disadvantage: −5 to the Evade Difficulty and a free Evade; Advantage: +5
+  const declare = (body) =>
+    dm('POST', '/api/encounter/declarations', {
+      opponentId: r2,
+      attack: { name: 'Bite', toHit: '10+F', damage: '1d6' },
+      ...body,
+    });
+  enc = (await declare({ targets: [A], mode: 'dis' })).body;
+  let d = enc.declarations.at(-1);
+  assert.equal(d.dc, 7);
+  assert.equal(d.targets[0].freeEvade, true);
+  enc = (await declare({ targets: [A], mode: 'adv' })).body;
+  assert.equal(enc.declarations.at(-1).dc, 17);
+  // not an Area Attack on two crawlers: two Attacks, each with its own damage roll
+  const before = enc.declarations.length;
+  enc = (await declare({ targets: [A, B], area: false })).body;
+  assert.equal(enc.declarations.length, before + 2);
+  assert.deepEqual(
+    enc.declarations.slice(-2).map((x) => x.targets.length),
+    [1, 1],
+  );
+  // an Area Attack stays one Attack on everyone in it
+  enc = (await declare({ targets: [A, B], area: true })).body;
+  assert.equal(enc.declarations.at(-1).targets.length, 2);
+
+  // a crawler's Area Attack: one roll against the chosen foe's Evade, and it hits all of them or none
+  for (let k = 0; k < 3; k++) await dm('POST', '/api/encounter', { action: 'next' }); // to step 4
+  enc = (await dm('POST', '/api/encounter/opponents', { name: 'Armadillo', slots: 5, slotValue: 1, evade: '99' })).body;
+  const tough = enc.opponents.at(-1).id;
+  enc = (await atk({ opponentIds: [r1, tough], expr: 'd20+30' })).body;
+  const mine = enc.attacks.filter((x) => x.characterId === A);
+  assert.equal(mine.length, 2);
+  assert.ok(
+    mine.every((x) => x.hit === mine[0].hit && x.degree === mine[0].degree),
+    'same result for the whole area',
+  );
+  assert.notEqual(mine[0].hit, false, 'Evade 99 on the Armadillo does not matter');
+  await dm('POST', '/api/encounter', { action: 'end' });
+
+  // grinding: the party member with the lowest Level gains 1d2 Levels
+  const g = await dm('POST', `/api/characters/${A}/progress`, { type: 'grind', hours: 3 });
+  assert.equal(g.status, 200);
+  const lvl = Number((await sheet(A)).level);
+  assert.ok(lvl === 4 || lvl === 5, `lowest Level: 1d2 Levels (got ${lvl})`);
+  for (const id of [A, B]) await dm('PATCH', `/api/characters/${id}/party`, { inParty: false });
+});

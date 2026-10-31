@@ -279,6 +279,7 @@ export function startingSkills(c: Choices): { name: string; rank: number; main: 
 export function rollBoosts(c: Choices): Record<string, number> {
   const out: Record<string, number> = {};
   for (const sk of startingSkills(c)) {
+    if (sk.name === 'Heal') continue; // "Rank 1 maximum"
     const add = sk.main ? roll(4) + roll(4) : roll(4);
     out[sk.name] = Math.max(0, Math.min(10, sk.rank + add) - sk.rank);
   }

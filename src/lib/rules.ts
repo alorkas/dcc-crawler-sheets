@@ -93,36 +93,37 @@ export function rankDamageDie(rank: number | null): string {
 
 /* ---------------- debuffs (Table 8) ---------------- */
 
-export type DebuffDef = { id: string; penalty?: number; stackable?: boolean; halveMove?: boolean };
+/** `brief`: lasts an hour or less (Table 11), so it's over after any rest. */
+export type DebuffDef = { id: string; penalty?: number; stackable?: boolean; halveMove?: boolean; brief?: boolean };
 
 /** Debuffs from Table 8. Effect/duration text lives in the locale files (debuff.<id>.*). */
 export const DEBUFFS: DebuffDef[] = [
-  { id: 'blinded' },
+  { id: 'blinded', brief: true },
   { id: 'bloodTrail', stackable: true },
-  { id: 'burned' },
+  { id: 'burned', brief: true },
   { id: 'drowning' },
-  { id: 'enraged' },
+  { id: 'enraged', brief: true },
   { id: 'fatigued', penalty: -1, stackable: true, halveMove: true },
   { id: 'held' },
   { id: 'minorInjury', penalty: -2 },
   { id: 'majorInjury', penalty: -5 },
   { id: 'ltMinorInjury', penalty: -2 },
   { id: 'ltMajorInjury', penalty: -5 },
-  { id: 'muted' },
+  { id: 'muted', brief: true },
   { id: 'poisoned', stackable: true },
-  { id: 'paralyzed' },
-  { id: 'queasy' },
+  { id: 'paralyzed', brief: true },
+  { id: 'queasy', brief: true },
   { id: 'sepsis' },
-  { id: 'shitFaced' },
-  { id: 'shocked' },
-  { id: 'soreAsShit', penalty: -1 },
-  { id: 'staggered' },
-  { id: 'stiffLegs' },
-  { id: 'stunned' },
+  { id: 'shitFaced', brief: true },
+  { id: 'shocked', brief: true },
+  { id: 'soreAsShit', penalty: -1, brief: true },
+  { id: 'staggered', brief: true },
+  { id: 'stiffLegs', brief: true },
+  { id: 'stunned', brief: true },
   { id: 'takeDown' },
-  { id: 'terrified' },
-  { id: 'theTaint' },
-  { id: 'woozy' },
+  { id: 'terrified', brief: true },
+  { id: 'theTaint', brief: true },
+  { id: 'woozy', brief: true },
 ];
 const DEBUFF_BY_ID = new Map(DEBUFFS.map((d) => [d.id, d]));
 export const debuffDef = (id: string) => DEBUFF_BY_ID.get(id);
@@ -236,11 +237,16 @@ export function derive(d: SheetData): Derived {
   const drSum = sumNumbers(d.dr.armor, d.dr.buffs);
   const drTotal = drSum === null && !gearDr.total ? null : (drSum ?? 0) + gearDr.total;
   const running = skills.find((s) => s.name.trim().toLowerCase() === 'running');
-  const moveAuto = BASE_MOVE + ((num(running?.rank ?? '') ?? 0) >= 5 ? 5 : 0);
+  // Running: a permanent +5 ft Move Buff at Rank 5, +10 more at Rank 10, +15 more at Rank 15
+  const runRank = num(running?.rank ?? '') ?? 0;
+  const moveAuto = BASE_MOVE + (runRank >= 5 ? 5 : 0) + (runRank >= 10 ? 10 : 0) + (runRank >= 15 ? 15 : 0);
   const move = d.evade.move.trim() ? num(d.evade.move) : moveAuto;
   const stepAuto = BASE_STEP;
   const step = d.evade.step.trim() ? num(d.evade.step) : stepAuto;
-  const halve = d.debuffList.some((x) => debuffDef(x.id)?.halveMove);
+  // Fatigued halves Move, and stacked Debuffs apply their effect cumulatively (two stacks: a quarter)
+  const halvings = d.debuffList.reduce((n, x) => n + (debuffDef(x.id)?.halveMove ? x.stacks || 1 : 0), 0);
+  const halve = halvings > 0;
+  const slowed = (m: number) => Math.floor(m / 2 ** halvings);
   const str = score.str;
   const hbLost = clamp(d.hbLost, 0, HB_SLOTS);
   return {
@@ -262,10 +268,10 @@ export function derive(d: SheetData): Derived {
     penalty,
     move,
     moveAuto,
-    moveEffective: move === null ? null : halve ? Math.floor(move / 2) : move,
+    moveEffective: move === null ? null : halve ? slowed(move) : move,
     step,
     stepAuto,
-    moveMod: move === null ? null : Math.floor((halve ? Math.floor(move / 2) : move) / 10),
+    moveMod: move === null ? null : Math.floor((halve ? slowed(move) : move) / 10),
     liftKg: str === null ? null : Math.max(5, Math.round((str * 15 * 0.4536) / 5) * 5),
     dying: hbLost >= HB_SLOTS,
     skills,
@@ -360,7 +366,11 @@ export function applyHbLoss(d: SheetData, slots: number, conMod: number | null):
   return { ...d, hbLost, dyingRounds: becameDying ? String(conMod ?? '') : d.dyingRounds };
 }
 
+/** The Taint: "You can't be healed" (Table 11). */
+export const isTainted = (d: SheetData) => d.debuffList.some((x) => x.id === 'theTaint');
+
 export function heal(d: SheetData, slots: number): SheetData {
+  if (isTainted(d)) return d;
   const hbLost = clamp(d.hbLost - slots, 0, HB_SLOTS);
   return { ...d, hbLost, dyingRounds: hbLost < HB_SLOTS ? '' : d.dyingRounds };
 }
@@ -376,7 +386,9 @@ export function spendMana(d: SheetData, cost: number): SheetData | null {
   return { ...d, manaCurrent: String(cur - cost) };
 }
 
+/** Null when there isn't enough Mana, or the crawler has The Taint (no Mana spent then). */
 export function castHeal(d: SheetData): SheetData | null {
+  if (isTainted(d)) return null;
   const spent = spendMana(d, HEAL_MANA_COST);
   return spent ? heal(spent, HEAL_SLOTS) : null;
 }
@@ -396,15 +408,19 @@ export function rest(d: SheetData, kind: RestKind): SheetData {
   const der = derive(d);
   const max = der.manaMax;
   const cur = der.manaCurrent ?? max ?? 0;
-  let out: SheetData = { ...d, debuffList: d.debuffList.filter((x) => !CLEARS[kind].includes(x.id)) };
+  // a rest also outlasts every Debuff that only lasts an hour or less (Sore as Shit, Shit-Faced, The Taint…)
+  let out: SheetData = {
+    ...d,
+    debuffList: d.debuffList.filter((x) => !CLEARS[kind].includes(x.id) && !debuffDef(x.id)?.brief),
+  };
   if (kind !== 'mend') out = clearRestEffects(out);
   if (kind === 'mend') {
     out = heal(out, 1);
     out = setMana(out, cur + 5, max);
   } else if (kind === 'short') {
     out = heal(out, 5);
-    const intScore = enhancedScore(d, 'int') ?? 0;
-    out = setMana(out, cur + Math.floor(intScore / 2), max);
+    // half of their total Mana, rounded down
+    out = setMana(out, cur + Math.floor((max ?? 0) / 2), max);
   } else {
     out = heal(out, HB_SLOTS);
     if (max !== null) out = { ...out, manaCurrent: String(max) };
@@ -413,6 +429,9 @@ export function rest(d: SheetData, kind: RestKind): SheetData {
 }
 
 /* ---------------- skill advancement (Crawlers & Customization p.42) ---------------- */
+
+/** The highest Rank a Skill can reach: 15 on Floors 1–5, and Heal is "Rank 1 maximum". */
+export const maxRank = (name: string) => (/^(heal|curar)$/i.test(name.trim()) ? 1 : MAX_SKILL_RANK);
 
 export type AdvanceMode = 'session' | 'floor';
 export type AdvanceResult = { index: number; name: string; from: number; roll: number; gained: boolean };
@@ -441,7 +460,7 @@ export function rollAdvancement(
     if (!s.done || !s.name.trim()) return s;
     if (mode === 'session' && rank > 4) return s;
     const r = roll();
-    const gained = r >= rank && rank < MAX_SKILL_RANK;
+    const gained = r >= rank && rank < maxRank(s.name);
     results.push({ index, name: s.name, from: rank, roll: r, gained });
     if (!gained) return { ...s, done: false };
     const newRank = String(rank + 1);
@@ -457,6 +476,14 @@ export function attackMatchesSkill(attackName: string, skillName: string): boole
   if (!a || !s) return false;
   return a === s || a.includes(`(${s})`);
 }
+
+/**
+ * Learning a Skill by attempting it untrained only works on the Tutorial Floors (1–2): from the Third Floor on,
+ * untrained Checks still work but teach nothing (Core Rulebook "Checks without Skill Ranks"). An unknown Floor counts
+ * as a Tutorial Floor.
+ */
+export const learnsUntrained = (floor: number | null | undefined) =>
+  floor === null || floor === undefined || floor <= 2;
 
 /** Gain Rank 1 in one skill attempted untrained this session, then clear the list. */
 export function learnUntrained(d: SheetData, skillName: string): SheetData {

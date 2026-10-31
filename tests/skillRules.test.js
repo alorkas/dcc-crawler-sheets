@@ -19,7 +19,15 @@ import {
   upgradeDice,
   withEffectDice,
 } from '../shared/skillRules.js';
-import { debuffDisadvantage, dropDebuffs, isWoozy, rollMode, usedUpBy, withRollMode } from '../shared/combat.js';
+import {
+  debuffDisadvantage,
+  dropDebuffs,
+  isWoozy,
+  randomTargets,
+  rollMode,
+  usedUpBy,
+  withRollMode,
+} from '../shared/combat.js';
 
 test('Rank damage dice (Table 37)', () => {
   assert.deepEqual([1, 2, 4, 6, 8, 10, 12, 14, 16].map(rankDie), [
@@ -208,4 +216,22 @@ test('Debuffs that change rolls (Table 11) and Advantage/Disadvantage counting',
   assert.equal(withRollMode('d20+5', 'dis'), '2d20kl1+5');
   assert.equal(withRollMode('2d20kh1-1', 'dis'), '2d20kl1-1');
   assert.equal(withRollMode('d20+5', 'normal'), 'd20+5');
+});
+
+test('Random Mob targets: different crawlers, Dying ones last', () => {
+  const party = [
+    { id: 1, view: { hbLost: 10 } },
+    { id: 2, view: { hbLost: 3 } },
+    { id: 3, view: {} },
+  ];
+  const first = () => 0; // the shuffle's first choice every time
+  assert.equal(randomTargets(party, 1, first).length, 1);
+  assert.notEqual(randomTargets(party, 1, first)[0], 1, 'a Dying crawler is not picked while others are up');
+  assert.deepEqual(new Set(randomTargets(party, 2, first)), new Set([2, 3]));
+  assert.equal(randomTargets(party, 3, first)[2], 1, 'Dying only when nobody else is left');
+  assert.equal(randomTargets(party, 9).length, 3);
+  assert.deepEqual(randomTargets([], 1), []);
+  // every crawler gets picked sometimes
+  const seen = new Set(Array.from({ length: 200 }, () => randomTargets(party.slice(1))[0]));
+  assert.deepEqual(seen, new Set([2, 3]));
 });

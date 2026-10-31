@@ -16,6 +16,7 @@ import { useAuth } from '../lib/auth';
 import { useI18n, type MsgKey } from '../lib/i18n';
 import { useLive } from '../lib/live';
 import { normalize, signed } from '../lib/sheet';
+import { randomTargets } from '../../shared/combat.js';
 import { applyAttackDamage } from '../lib/combat';
 import { HitResult } from './CombatAttack';
 import { DegreeBadge, LinkChips, linkText } from './Status';
@@ -732,6 +733,15 @@ export function DeclareForm({
   const [areaSet, setArea] = useState<boolean | null>(null);
   const area = areaSet ?? isAreaAttack(a);
   const [splash, setSplash] = useState<number[]>([]);
+  // 🎲 random targets (again to re-roll); an Area Attack can hit several
+  const [howMany, setHowMany] = useState(2);
+  // the Mob's Advantage / Disadvantage: ±5 to the Evade Difficulty (the GM never rolls)
+  const [mode, setMode] = useState<'normal' | 'adv' | 'dis'>('normal');
+  const pickRandom = () => {
+    const rand = (k: number) => crypto.getRandomValues(new Uint32Array(1))[0] % k;
+    setTargets(randomTargets(members, area ? howMany : 1, rand));
+    setSplash([]);
+  };
   const toggle = (id: number) => setTargets((l) => (l.includes(id) ? l.filter((x) => x !== id) : [...l, id]));
   const toggleSplash = (id: number) => setSplash((l) => (l.includes(id) ? l.filter((x) => x !== id) : [...l, id]));
   const submit = async () => {
@@ -744,6 +754,7 @@ export function DeclareForm({
           targets,
           area,
           splash: area ? splash.filter((id) => targets.includes(id)) : [],
+          mode,
         }),
       );
       onDone();
@@ -784,7 +795,29 @@ export function DeclareForm({
           </label>
         </div>
       )}
-      <div className="lbl">{t('decl.targets')}</div>
+      <div className="decl-target-head">
+        <span className="lbl">{t('decl.targets')}</span>
+        {members.length > 1 && (
+          <>
+            <button type="button" className="btn small ghost" onClick={pickRandom} title={t('decl.randomHint')}>
+              🎲 {t('decl.random')}
+            </button>
+            {area && (
+              <label className="mini" title={t('decl.howManyHint')}>
+                <span>{t('decl.howMany')}</span>
+                <input
+                  className="in center tiny-in"
+                  type="number"
+                  min={1}
+                  max={members.length}
+                  value={howMany}
+                  onChange={(e) => setHowMany(Math.max(1, Math.min(members.length, Number(e.target.value) || 1)))}
+                />
+              </label>
+            )}
+          </>
+        )}
+      </div>
       {members.length === 0 && <p className="dim tiny">{t('decl.noParty')}</p>}
       <div className="target-picks">
         {members.map((m) => (
@@ -813,8 +846,20 @@ export function DeclareForm({
           </div>
         </>
       )}
+      <label className="gm-check" title={t('decl.modeHint')}>
+        <select className="in sel tiny-sel" value={mode} onChange={(e) => setMode(e.target.value as typeof mode)}>
+          <option value="normal">{t('decl.mode.normal')}</option>
+          <option value="adv">{t('decl.mode.adv')}</option>
+          <option value="dis">{t('decl.mode.dis')}</option>
+        </select>
+      </label>
+      {!area && targets.length > 1 && <p className="dim tiny">{t('decl.perTarget', { n: targets.length })}</p>}
       <div className="add-opp-row">
-        <span className="dim tiny grow">{t('decl.dc', { n: dc ?? '?' })}</span>
+        <span className="dim tiny grow">
+          {t('decl.dc', {
+            n: dc === null ? '?' : dc + (mode === 'adv' ? 5 : mode === 'dis' ? -5 : 0),
+          })}
+        </span>
         <button
           type="button"
           className="btn small primary"
@@ -1093,6 +1138,12 @@ export function TargetedBy({
               </span>
             )}
             <span className="pill">{t('decl.dc', { n: d.dc ?? '?' })}</span>
+            {d.mode && (
+              <span className="pill" title={t(d.mode === 'dis' ? 'decl.disHint' : 'decl.advHint')}>
+                {d.mode === 'adv' ? '▲' : '▼'} {t(`decl.mode.${d.mode}` as MsgKey)}
+                {d.mode === 'dis' && !e && ` · ${t('taunt.free')}`}
+              </span>
+            )}
             {tg.caughtFor && (
               <span className="pill" title={t('catch.noEvade')}>
                 🧤 {t('catch.for', { name: tg.caughtFor })}

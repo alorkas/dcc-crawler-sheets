@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from 'react';
 import { Area, Check, Input, Section, useSheet } from './fields';
 import { AdvancementPanel, RankBadge, StatMod, useStatMod } from './rulesWidgets';
 import { useI18n, type MsgKey } from '../lib/i18n';
-import { canPin, castHeal, checkRoll, classifyRow, num, spendMana, type CheckRoll } from '../lib/rules';
+import { canPin, castHeal, checkRoll, classifyRow, isTainted, num, spendMana, type CheckRoll } from '../lib/rules';
 import { spellRef } from '../../shared/items.js';
 import { BOOK_EFFECTS, effectsFor, isDamageEffect } from '../../shared/skillRules.js';
 import { useLiveOptional } from '../lib/live';
@@ -687,6 +687,7 @@ export function CastButton({ i, compact }: { i: number; compact?: boolean }) {
     if (!isHeal && combat.inCombat && !data.hotSlots.includes(spellRef(s.name))) return setMsg(t('spell.notOnHotlist'));
     // in combat, Heal is an Interrupt (or an Action in step 4): it uses one of the crawler's Actions
     if (isHeal && combat.inCombat) {
+      if (isTainted(data)) return setMsg(t('heal.tainted'));
       if (!castHeal(data)) return setMsg(t('mana.notEnough'));
       const r = await combat.spend('heal');
       if (!r.ok) return setMsg(r.error);

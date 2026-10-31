@@ -48,9 +48,17 @@ export function cleanEffect(raw) {
   };
 }
 
+/** A Dying crawler (0% Health Bar) loses one of their remaining rounds. Same sheet when not Dying. */
+export function dyingTick(data) {
+  const left = parseInt(String(data?.dyingRounds ?? ''), 10);
+  if ((Number(data?.hbLost) || 0) < 10 || !Number.isFinite(left) || left <= 0) return data;
+  return { ...data, dyingRounds: String(left - 1) };
+}
+
 /**
  * End of a combat round (Clean Up): effects and debuffs with a number of rounds lose one; the ones that reach 0
- * end. Returns the new sheet (or the same one when nothing changed) and the names of what ended.
+ * end, and a Dying crawler has one round less to live ("during Combat Step 5: Clean Up, subtract 1"). Returns the
+ * new sheet (or the same one when nothing changed) and the names of what ended.
  */
 export function tickRound(data) {
   const ended = [];
@@ -73,7 +81,8 @@ export function tickRound(data) {
     }
     return [{ ...d, rounds: d.rounds - 1 }];
   });
-  return { data: changed ? { ...data, effects, debuffList } : data, ended };
+  const out = changed ? { ...data, effects, debuffList } : data;
+  return { data: dyingTick(out), ended };
 }
 
 /** End of combat: effects that last the fight (or a number of rounds) end, and so do timed debuffs. */
@@ -107,6 +116,27 @@ export function addDebuffTo(list, id) {
     return without.some((d) => d.id === lt) ? without : [...without, { id: lt, stacks: 1, note: '' }];
   }
   return [...cur, { id, stacks: 1, note: '' }];
+}
+
+/* ---------------- Mob targeting ---------------- */
+
+/**
+ * Random targets for a Mob attack (a GM shortcut: the book leaves targeting to the GM). `n` different crawlers,
+ * preferring the ones not Dying (at 0% Health Bar); Dying ones only when there aren't enough others.
+ * `rand(k)` returns an integer in [0, k).
+ */
+export function randomTargets(members, n = 1, rand = (k) => Math.floor(Math.random() * k)) {
+  const shuffle = (list) => {
+    const a = [...list];
+    for (let i = a.length - 1; i > 0; i--) {
+      const j = rand(i + 1);
+      [a[i], a[j]] = [a[j], a[i]];
+    }
+    return a;
+  };
+  const dying = (m) => (Number(m?.view?.hbLost) || 0) >= 10;
+  const ids = [...shuffle(members.filter((m) => !dying(m))), ...shuffle(members.filter(dying))].map((m) => m.id);
+  return ids.slice(0, Math.max(1, Math.min(ids.length, Math.floor(n) || 1)));
 }
 
 /* ---------------- Debuffs that change rolls (Table 11) ---------------- */

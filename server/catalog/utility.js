@@ -4,7 +4,7 @@ export const UTILITY = [
   {
     name: 'Acute Ears',
     stat: 'int',
-    subtype: 'unopposed',
+    subtype: 'passive',
   },
   {
     name: 'Aiming',
@@ -91,7 +91,7 @@ export const UTILITY = [
   {
     name: 'Chopper Pilot',
     stat: 'dex',
-    subtype: 'opposed',
+    subtype: 'unopposed',
   },
   {
     name: 'Climbing',
@@ -146,7 +146,7 @@ export const UTILITY = [
   {
     name: 'Driving',
     stat: 'dex',
-    subtype: 'opposed',
+    subtype: 'unopposed',
   },
   {
     name: 'Dumpster Diving',
@@ -256,7 +256,7 @@ export const UTILITY = [
   {
     name: 'Leadership',
     stat: 'cha',
-    subtype: 'unopposed',
+    subtype: 'opposed',
   },
   {
     name: 'Light on Your Feet',
@@ -286,7 +286,7 @@ export const UTILITY = [
   {
     name: 'Perception',
     stat: 'int',
-    subtype: 'opposed',
+    subtype: 'unopposed',
   },
   {
     name: 'Performance',
