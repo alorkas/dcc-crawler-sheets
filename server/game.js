@@ -6,9 +6,11 @@ import {
   effectRankDice,
   effectSpec,
   effectsFor,
+  effectiveSkills,
   findSkill,
   isRangedAttack,
   multApplies,
+  multiplyBaseDice,
   skillRank,
   tauntCount,
   tauntPerks,
@@ -22,13 +24,18 @@ import { damageDice, isAreaAttack, resolveNum } from '../shared/formula.js';
 import {
   addDebuffTo,
   cleanEffect,
+  debuffDisadvantage,
   degreeOf,
   doubleDice,
+  dropDebuffs,
   endCombat,
   isSuccess,
   itemEffect,
   newEffectId,
+  rollMode,
   tickRound,
+  usedUpBy,
+  withRollMode,
 } from '../shared/combat.js';
 import {
   hideCurses,
@@ -685,7 +692,7 @@ export function mountGame(app, { db, auth, adminOnly, loadChar, live, hooks = {}
     const reroll = !!req.body?.reroll;
     const acts = actionsOf(enc, target.id);
     const sheet = JSON.parse(charRow(target.id)?.data || '{}');
-    const dodge = dodgeOf(sheet.skills);
+    const dodge = dodgeOf(effectiveSkills(sheet.skills, sheet.inventory));
     // a free Evade from Taunt (Rank 5) that failed can be rolled again by spending the Evade Action
     const retryFree = !reroll && target.freeEvade && target.evade?.success === false && !target.evade.retried;
     if (reroll) {
@@ -705,9 +712,17 @@ export function mountGame(app, { db, auth, adminOnly, loadChar, live, hooks = {}
         acts.used.push('evade');
       }
     }
-    // Advantage: Dodge Rank 10 against Spells and Ranged Attacks, Taunt Rank 15 on its free Evades
-    const adv = (dodge.advVsRanged && isRangedAttack(d.attack)) || (target.evadeAdv && !target.evade);
-    const r = rollDice(adv ? expr.replace(/^1?d20/i, '2d20kh1') : expr);
+    // Advantage: Dodge Rank 10 against Spells and Ranged Attacks, Taunt Rank 15 on its free Evades. Disadvantage:
+    // Debuffs (Shit-Faced, Stunned, Queasy). Each Advantage cancels one Disadvantage.
+    const advs = [dodge.advVsRanged && isRangedAttack(d.attack), target.evadeAdv && !target.evade].filter(Boolean);
+    const dis = debuffDisadvantage(sheet.debuffList, 'evade');
+    const mode = rollMode(advs.length, dis.length);
+    const adv = mode === 'adv';
+    const r = rollDice(withRollMode(expr, mode));
+    // Stunned / Queasy last one roll
+    const usedUp = usedUpBy(sheet.debuffList, 'evade');
+    if (usedUp.length)
+      changeSheet(target.id, (data) => ({ ...data, debuffList: dropDebuffs(data.debuffList, usedUp) }), req.user.id);
     const first = reroll || retryFree ? target.evade.total : undefined;
     target.evade = {
       total: r.total,
@@ -715,6 +730,7 @@ export function mountGame(app, { db, auth, adminOnly, loadChar, live, hooks = {}
       ...(reroll ? { rerolled: true, first } : {}),
       ...(retryFree ? { retried: true, first } : {}),
       ...(adv ? { advantage: true } : {}),
+      ...(mode === 'dis' ? { disadvantage: true } : {}),
     };
     // Dodge is marked for Advancement when Evading, until Rank 5
     if (dodge.rank > 0 && dodge.rank < 5) markSkill(target.id, ['Dodge', 'Esquivar'], req.user.id);
@@ -726,7 +742,7 @@ export function mountGame(app, { db, auth, adminOnly, loadChar, live, hooks = {}
       charName: target.name,
       roll: {
         ...r,
-        label: `${reroll ? 'Evade reroll (AI Favor)' : 'Evade'}${adv ? ' ▲' : ''} · ${o?.hidden ? '???' : d.opponentName} – ${d.attack.name}`,
+        label: `${reroll ? 'Evade reroll (AI Favor)' : 'Evade'}${adv ? ' ▲' : mode === 'dis' ? ' ▼' : ''} · ${o?.hidden ? '???' : d.opponentName} – ${d.attack.name}`,
         vs: { dc: d.dc, success: target.evade.success, area: !!d.area, kind: 'evade', degree: target.evade.degree },
       },
     });
@@ -916,14 +932,22 @@ export function mountGame(app, { db, auth, adminOnly, loadChar, live, hooks = {}
     if (!useAction(enc, row.id, 'interrupt'))
       return res.status(409).json({ error: 'No Actions left', code: 'no_actions_left' });
     const data = JSON.parse(row.data || '{}');
-    const rank = skillRank(data.skills, 'Taunt', 'Provocar');
+    // Ranks from equipped gear count (Platinum armor: +3 to Catcher or Taunt)
+    const rank = skillRank(effectiveSkills(data.skills, data.inventory), 'Taunt', 'Provocar');
     const perks = tauntPerks(rank);
-    // the Mobs resist with Int: the sharpest of the ones picked rolls
+    // an Int-Opposed Check: the GM never rolls, the Difficulty is 10 + the Mob's Int + the Floor (Core Rulebook
+    // "Opposed Checks"), using the sharpest of the Mobs picked
     const mobs = [...new Set(picks.map(({ d }) => d.opponentId))].map((id) => enc.opponents.find((o) => o.id === id));
     const mobMod = Math.max(0, ...mobs.map((o) => (o ? int(attackSource()(o).mods?.int, 0) : 0)));
-    const mine = rollDice(expr);
-    const mob = rollDice(`d20${mobMod >= 0 ? '+' : ''}${mobMod}`);
-    const degree = degreeOf(mine.total, mine.natural, mob.total);
+    const dc = 10 + mobMod + (Number(enc.floor) || 0);
+    // untrained (no Ranks) and Debuffs (Shit-Faced, Stunned, Queasy) roll with Disadvantage
+    const dis = [...(rank > 0 ? [] : ['untrained']), ...debuffDisadvantage(data.debuffList, 'check')];
+    const mode = rollMode(0, dis.length);
+    const mine = rollDice(withRollMode(expr, mode));
+    const usedUp = usedUpBy(data.debuffList, 'check');
+    if (usedUp.length)
+      changeSheet(row.id, (sheet) => ({ ...sheet, debuffList: dropDebuffs(sheet.debuffList, usedUp) }), req.user.id);
+    const degree = degreeOf(mine.total, mine.natural, dc);
     const n = Math.min(picks.length, tauntCount(degree));
     const name = clip(data.name) || '?';
     const hidden = mobs.some((o) => o?.hidden);
@@ -932,18 +956,16 @@ export function mountGame(app, { db, auth, adminOnly, loadChar, live, hooks = {}
       userId: req.user.id,
       characterId: row.id,
       charName: name,
-      roll: { ...mine, label: `Taunt → ${shown}`, vs: { dc: mob.total, success: n > 0, kind: 'taunt', degree } },
-      gmOnly: hidden,
-    });
-    live.postRoll({
-      userId: req.user.id,
-      charName: shown,
-      roll: { ...mob, label: `Int (resists Taunt by ${name})` },
+      roll: {
+        ...mine,
+        label: `Taunt${mode === 'dis' ? ' ▼' : ''} → ${shown}`,
+        vs: { dc, success: n > 0, kind: 'taunt', degree },
+      },
       gmOnly: hidden,
     });
     picks.forEach(({ d, tg }, i) => {
       const won = i < n;
-      d.taunt = { id: row.id, name, total: mine.total, mob: mob.total, won, degree };
+      d.taunt = { id: row.id, name, total: mine.total, mob: dc, won, degree };
       if (!won) return;
       d.tauntedFrom = [...(d.tauntedFrom || []), tg.name];
       Object.assign(tg, {
@@ -983,7 +1005,7 @@ export function mountGame(app, { db, auth, adminOnly, loadChar, live, hooks = {}
     if (!d || !revealed(enc) || !row) return res.status(404).json({ error: 'Not found', code: 'not_found' });
     if (d.area) return res.status(409).json({ error: 'Not against an Area Attack', code: 'no_catch_area' });
     const data = JSON.parse(row.data || '{}');
-    const rank = skillRank(data.skills, 'Catcher');
+    const rank = skillRank(effectiveSkills(data.skills, data.inventory), 'Catcher');
     if (rank <= 0 && !req.user.is_admin)
       return res.status(409).json({ error: 'Needs Ranks in Catcher', code: 'needs_catcher' });
     const ally = d.targets.find((x) => x.id === Number(req.body?.allyId));
@@ -1472,8 +1494,10 @@ export function mountGame(app, { db, auth, adminOnly, loadChar, live, hooks = {}
     let effect = null;
     let effSkill = null;
     if (b.effect) {
-      const attackSkill = findSkill(data.skills, label);
-      effSkill = effectsFor(data.skills, attackSkill).find(
+      // Ranks from equipped gear count
+      const skills = effectiveSkills(data.skills, data.inventory);
+      const attackSkill = findSkill(skills, label);
+      effSkill = effectsFor(skills, attackSkill).find(
         (x) => String(x.name).trim().toLowerCase() === String(b.effect).trim().toLowerCase(),
       );
       if (!effSkill || opps.length > 1)
@@ -1510,6 +1534,10 @@ export function mountGame(app, { db, auth, adminOnly, loadChar, live, hooks = {}
     }
     a.used.push('attack');
     const r = rollDice(expr);
+    // Debuffs that last one roll go (Stunned, Queasy, Staggered's next Attack)
+    const usedUp = usedUpBy(data.debuffList, 'attack');
+    if (usedUp.length)
+      changeSheet(cid, (sheet) => ({ ...sheet, debuffList: dropDebuffs(sheet.debuffList, usedUp) }), req.user.id);
     const name = clip(data.name) || '?';
     const area = opps.length > 1;
     const group = area ? enc.seq + 1 : null;
@@ -1668,11 +1696,8 @@ export function mountGame(app, { db, auth, adminOnly, loadChar, live, hooks = {}
     const r = expr ? rollDice(expr) : null;
     if (!r) return res.status(400).json({ error: 'Invalid dice', code: 'bad_dice' });
     // Powerful Strike: the base damage dice result × its Rank, then the modifiers
-    let rolled = r.total;
-    if (fx?.multBase > 1) {
-      const dice = r.parts.filter((p) => p.dice).reduce((sum, p) => sum + p.sign * p.value, 0);
-      rolled = r.total + dice * (fx.multBase - 1);
-    }
+    // (only the base damage dice: the Rank dice added after them aren't multiplied)
+    const rolled = multiplyBaseDice(r, fx?.multBase ?? 1, parseDice(doubled)?.length ?? 0);
     const same = atk.group ? enc.attacks.filter((x) => x.group === atk.group && x.round === enc.round) : [atk];
     const parts = [];
     for (const x of same) {

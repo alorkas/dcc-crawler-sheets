@@ -14,6 +14,7 @@ export const PLAY_PATHS = [
   ['pet', 'hbLost'],
   ['mount', 'hbLost'],
   ['skills', '*', 'done'], // skill advancement marks
+  ['untrained'], // Skills attempted untrained this session (the Core tab's Skill-less check adds to it)
   ['dr', 'aiFavor'], // AI Favor is spent at the table (rerolls, extra Actions)
   ['inventory'], // items are used, picked up and swapped during play (equipping included)
   ['hotlist'],

@@ -2,17 +2,17 @@
 import crypto from 'node:crypto';
 import { rollDice } from './dice.js';
 import { statScores } from '../shared/items.js';
+import { effectiveSkills, multiplyBaseDice } from '../shared/skillRules.js';
 import { partyLeader } from './world.js';
 
 const MAX_TEXT = 1000;
 const KEEP_MESSAGES = 2000;
 
-const skillRank = (d, re) =>
+/** Ranks in a Skill, gear included (the best of the matching rows). */
+const skillRank = (skills, re) =>
   Math.max(
     0,
-    ...(Array.isArray(d.skills) ? d.skills : [])
-      .filter((s) => re.test(String(s?.name ?? '').trim()))
-      .map((s) => parseInt(String(s.rank ?? ''), 10) || 0),
+    ...skills.filter((s) => re.test(String(s?.name ?? '').trim())).map((s) => parseInt(String(s.rank ?? ''), 10) || 0),
   );
 
 /** The part of a sheet the party panel needs. Mana is only shared with the owner and the GM. */
@@ -48,6 +48,7 @@ export function partyView(data, withMana) {
     portraitTag: portraitTag(d.portrait),
   };
   // mana and Evade (for the Evade roll against a declared attack) only for the owner and the GM
+  const geared = withMana ? effectiveSkills(d.skills, d.inventory) : [];
   if (withMana)
     Object.assign(view, {
       manaMax: d.manaMax ?? '',
@@ -56,10 +57,11 @@ export function partyView(data, withMana) {
       dr: { armor: d.dr?.armor ?? '', buffs: d.dr?.buffs ?? '', aiFavor: d.dr?.aiFavor ?? '' },
       // Interrupts this crawler can use for an ally: Catcher needs Ranks; Taunt is a Taunt (Cha) Check
       interrupts: {
-        catcher: skillRank(d, /catcher/i) > 0,
-        tauntRank: skillRank(d, /^taunt/i),
+        catcher: skillRank(geared, /catcher/i) > 0,
+        tauntRank: skillRank(geared, /^(taunt|provocar)/i),
       },
-      // the Skills that change rolls made from the party panel (Dodge on Evade, Taunt's Stat)
+      // the Skills that change rolls made from the party panel (Dodge on Evade, Taunt's Stat); the browser adds the
+      // Ranks from the gear below (skillBonus)
       skills: (Array.isArray(d.skills) ? d.skills : [])
         .filter((sk) => /^(dodge|esquivar|taunt|catcher)$/i.test(String(sk?.name ?? '').trim()))
         .map((sk) => ({ name: sk.name, rank: sk.rank ?? '', stat: sk.stat ?? '', category: sk.category ?? '' })),
@@ -74,6 +76,7 @@ export function partyView(data, withMana) {
           slot: it.slot ?? '',
           hot: !!it.hot,
           bonus: it.bonus ?? {},
+          skillBonus: it.slot ? String(it.skillBonus ?? '').slice(0, 200) : '',
           notes: it.hot ? String(it.notes ?? '').slice(0, 200) : '',
           ability: it.hot ? String(it.ability ?? '').slice(0, 200) : '',
           charges: it.charges ?? '',
@@ -366,6 +369,15 @@ export function mountLive(app, { db, auth, adminOnly, loadChar }) {
       if (!r) return res.status(400).json({ error: 'Invalid dice expression', code: 'bad_dice' });
       kind = 'roll';
       roll = { ...r, label, ...(body.roll?.stat ? { stat: true } : {}) }; // Stat Checks can't be Intervened
+      // damage multipliers: Powerful Strike (the base dice × its Rank), Choke Out / Smush (× the total)
+      const between = (v, lo, hi) => Math.max(lo, Math.min(hi, parseInt(v, 10) || lo));
+      const multBase = between(body.roll?.multBase, 1, 20);
+      const multTotal = between(body.roll?.multTotal, 1, 8);
+      if (multBase > 1 || multTotal > 1) {
+        const total = multiplyBaseDice(r, multBase, between(body.roll?.baseTerms, 0, 12)) * multTotal;
+        const marks = [multBase > 1 && `base ×${multBase}`, multTotal > 1 && `×${multTotal}`].filter(Boolean);
+        roll = { ...roll, total, label: `${label} (${marks.join(', ')})`.slice(0, 140) };
+      }
     } else if (!text) {
       return res.status(400).json({ error: 'Empty message', code: 'empty_message' });
     }

@@ -9,6 +9,8 @@ import {
   attackMatchesSkill,
   castHeal,
   checkPenalty,
+  checkRoll,
+  plainRoll,
   derive,
   SCHEMA_VERSION,
   effectiveDamage,
@@ -71,6 +73,70 @@ describe('derived values', () => {
     expect(d.penalty).toBe(-2);
     expect(d.evadeTotal).toBe(0);
     expect(d.moveEffective).toBe(10);
+  });
+});
+
+describe('checks', () => {
+  const skill = (rank: string, stat: 'str' | 'dex' = 'dex', category: 'combat' | 'utility' = 'utility') => ({
+    ...emptySkill(),
+    name: 'X',
+    category,
+    subtype: category === 'combat' ? 'edged' : 'unopposed',
+    rank,
+    stat,
+  });
+
+  it('Rank + Stat Mod + penalties; untrained rolls with Disadvantage and no Ranks', () => {
+    const s = withStats({ dex: '5' });
+    const der = derive(s);
+    expect(checkRoll(s, der, skill('3'), 2, 'check')).toMatchObject({ bonus: 5, mode: 'normal', expr: 'd20+5' });
+    expect(checkRoll(s, der, skill('0'), 2, 'check')).toMatchObject({ bonus: 2, mode: 'dis', expr: '2d20kl1+2' });
+    expect(checkRoll(s, der, skill(''), 2, 'check')?.why).toEqual(['untrained']);
+    // no Spell without Ranks; Passive Skills don't roll
+    expect(checkRoll(s, der, { ...skill('0'), category: 'spell', subtype: 'attack' }, 2, 'attack')).toBeNull();
+    expect(checkRoll(s, der, { ...skill('4'), subtype: 'passive' }, 2, 'check')).toBeNull();
+  });
+
+  it('Debuffs: Disadvantage, one-shot ones get used up, Woozy drops Dex from Attacks and Evade', () => {
+    const s = withStats({ dex: '5' });
+    s.debuffList = [
+      { id: 'stunned', stacks: 1, note: '' },
+      { id: 'woozy', stacks: 1, note: '' },
+    ];
+    const der = derive(s);
+    expect(checkRoll(s, der, skill('3', 'dex', 'combat'), 2, 'attack')).toMatchObject({
+      bonus: 3,
+      mode: 'dis',
+      usesUp: ['stunned'],
+    });
+    // a Dex Skill Check that isn't an Attack keeps its Mod
+    expect(checkRoll(s, der, skill('3'), 2, 'check')?.bonus).toBe(5);
+    expect(der.evadeTotal).toBe(0);
+    expect(plainRoll(s, 4, 'check')).toMatchObject({ mode: 'dis', expr: '2d20kl1+4' });
+    // untrained + Stunned: one Advantage only cancels one of them
+    expect(checkRoll(s, der, skill('0'), 2, 'check', { adv: ['x'] })?.mode).toBe('dis');
+  });
+
+  it('equipped gear adds Skill Ranks (and Dodge counts on Evade)', () => {
+    const s = withStats({ dex: '5' });
+    s.skills = [{ ...emptySkill(), name: 'Stealth', rank: '2', stat: 'dex' }];
+    const cloak: Item = {
+      ...emptyItem(),
+      item: 'Cloak',
+      qty: '1',
+      type: 'equipment',
+      fits: 'back',
+      slot: 'eq.back.1',
+      skillBonus: 'Stealth +3, Dodge +5',
+    };
+    s.inventory = [cloak];
+    const der = derive(s);
+    expect(der.skills[0].rank).toBe('5');
+    expect(der.skills[1]).toMatchObject({ name: 'Dodge', rank: '5', fromGear: true, category: 'utility' });
+    expect(der.evadeTotal).toBe(2 + 2); // Dex Mod +2, Dodge Rank 5 +2
+    // taken off: nothing
+    s.inventory = [{ ...cloak, slot: '' }];
+    expect(derive(s).skills[0].rank).toBe('2');
   });
 });
 

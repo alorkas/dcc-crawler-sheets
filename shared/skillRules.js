@@ -1,5 +1,8 @@
 // Rules for Skills that change other rolls (Core Rulebook ch. 4): Dodge on Evade, Taunt and Catcher in Crawler
-// Reaction, and hand-to-hand Damage Effects added to an Attack Skill. Shared by the browser and the server.
+// Reaction, and hand-to-hand Damage Effects added to an Attack Skill; Skill Ranks from gear. Shared by the browser
+// and the server.
+import { equipped } from './items.js';
+import { skillEs } from './namesEs.js';
 
 const int = (v) => {
   const n = parseInt(String(v ?? '').replace(/[^\d-]/g, ''), 10);
@@ -31,7 +34,86 @@ export function rankDie(rank) {
   if (r <= 11) return '1d10';
   if (r <= 13) return '1d12';
   if (r <= 15) return '1d8+1d6';
-  return '2d8';
+  if (r <= 17) return '2d8';
+  if (r <= 19) return '1d10+1d8';
+  return '2d10';
+}
+
+/* ---------------- Skill Ranks from gear ---------------- */
+
+/**
+ * An item's Skill bonuses, one per comma, semicolon or line: "Pugilism +1, Taunt +3", "+2 Stealth", "+1 a Sigilo"
+ * → [{ skill: 'Pugilism', ranks: 1 }, …].
+ */
+export function parseSkillBonus(text) {
+  const out = [];
+  for (const raw of String(text ?? '').split(/[,;\n]/)) {
+    const part = raw.trim().replace(/[−–]/g, '-');
+    let m = part.match(/^([+-]?\s*\d+)\s+(?:(?:to|in|a|en)\s+)?(.+)$/i);
+    let skill = '';
+    let ranks = '';
+    if (m) [, ranks, skill] = m;
+    else if ((m = part.match(/^(.+?)\s*([+-]\s*\d+)$/))) [, skill, ranks] = m;
+    const n = parseInt(ranks.replace(/\s+/g, ''), 10);
+    skill = skill.replace(/\s+(?:skill|ranks?|rangos?)$/i, '').trim();
+    if (n && skill) out.push({ skill, ranks: n });
+  }
+  return out;
+}
+
+/**
+ * Skill Ranks from equipped gear (an item only grants its Skill bonuses while held or worn), by skill name:
+ * Map(normalized name → { name, total, from: [{ name: item, value }] }).
+ */
+export function gearSkillRanks(inventory) {
+  const map = new Map();
+  for (const it of equipped(inventory)) {
+    for (const { skill, ranks } of parseSkillBonus(it.skillBonus)) {
+      const key = norm(skill);
+      const cur = map.get(key) ?? { name: skill, total: 0, from: [] };
+      cur.total += ranks;
+      cur.from.push({ name: it.item, value: ranks });
+      map.set(key, cur);
+    }
+  }
+  return map;
+}
+
+/** The gear bonus for a Skill (by its English or Spanish name), or null. */
+export function gearFor(gear, name) {
+  if (!gear?.size) return null;
+  return gear.get(norm(name)) ?? gear.get(norm(skillEs(name))) ?? null;
+}
+
+/**
+ * The crawler's Skills with gear included, in the same order: `rank` is the trained Rank + the Ranks from equipped
+ * gear (the trained one stays in `baseRank`). Skills the gear grants that aren't on the sheet go at the end with
+ * `fromGear: true`: the crawler has them at the Rank noted (Core Rulebook "X Values"). Skill Advancement keeps using
+ * the trained Rank.
+ */
+export function effectiveSkills(skills, inventory) {
+  const list = Array.isArray(skills) ? skills : [];
+  const gear = gearSkillRanks(inventory);
+  if (!gear.size) return list;
+  const used = new Set();
+  const out = list.map((s) => {
+    const g = gearFor(gear, s?.name);
+    if (!g || !String(s?.name ?? '').trim()) return s;
+    used.add(g);
+    return { ...s, rank: String(int(s.rank) + g.total), baseRank: s.rank, gearRanks: g.total, gearFrom: g.from };
+  });
+  for (const g of gear.values()) {
+    if (used.has(g) || g.total <= 0) continue;
+    out.push({
+      name: g.name,
+      rank: String(g.total),
+      baseRank: '',
+      gearRanks: g.total,
+      gearFrom: g.from,
+      fromGear: true,
+    });
+  }
+  return out;
 }
 
 /* ---------------- Dodge ---------------- */
@@ -277,6 +359,23 @@ export function effectRankDice(spec) {
   if (!spec?.rankDice || !spec.rankDie) return '';
   return Array.from({ length: spec.rankDice }, () => spec.rankDie).join('+');
 }
+/**
+ * Powerful Strike: the base damage dice result × its Rank (modifiers aren't multiplied). Only the first `baseTerms`
+ * terms of the rolled expression are base damage; the ones after them (Rank damage dice…) stay as they are.
+ * Returns the new total.
+ */
+export function multiplyBaseDice(roll, multBase, baseTerms) {
+  if (!roll) return 0;
+  if (!(multBase > 1)) return roll.total;
+  const dice = roll.parts
+    .slice(0, Math.max(0, baseTerms))
+    .filter((p) => p.dice)
+    .reduce((sum, p) => sum + p.sign * p.value, 0);
+  return roll.total + dice * (multBase - 1);
+}
+/** How many terms a dice expression has ("2d4+1d2+3" → 3). */
+export const termCount = (expr) => (String(expr ?? '').match(/[+-]?\s*(?:\d*d\d+(?:k[hl]\d+)?|\d+)/gi) ?? []).length;
+
 /** Does a total-damage multiplier apply to a target at this Health Bar %? */
 export const multApplies = (spec, targetPct) =>
   (spec?.multTotal ?? 1) > 1 && (spec.atOrBelow === null || (targetPct !== undefined && targetPct <= spec.atOrBelow));

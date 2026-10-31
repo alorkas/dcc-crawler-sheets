@@ -109,6 +109,50 @@ export function addDebuffTo(list, id) {
   return [...cur, { id, stacks: 1, note: '' }];
 }
 
+/* ---------------- Debuffs that change rolls (Table 11) ---------------- */
+
+/**
+ * Which rolls a Debuff gives Disadvantage to: 'check' (Skill and Stat Checks), 'attack', 'evade'. Shit-Faced: every
+ * Check; Stunned: the next Check; Queasy: the next Action with a roll; Staggered: the next Action, if an Attack;
+ * Terrified: Attacks; Blinded: Checks that need sight (Attacks always do).
+ */
+const DEBUFF_DIS = {
+  shitFaced: ['check', 'attack', 'evade'],
+  stunned: ['check', 'attack', 'evade'],
+  queasy: ['check', 'attack', 'evade'],
+  staggered: ['attack'],
+  terrified: ['attack'],
+  blinded: ['attack'],
+};
+/** Debuffs that end once they've affected a roll. */
+const ONE_SHOT = ['stunned', 'queasy', 'staggered'];
+
+/** The Debuffs (ids) that give this kind of roll Disadvantage. */
+export function debuffDisadvantage(list, kind) {
+  return (Array.isArray(list) ? list : []).map((d) => d?.id).filter((id) => DEBUFF_DIS[id]?.includes(kind));
+}
+/** The one-shot Debuffs a roll of this kind uses up (Stunned after a Check, Staggered after an Attack…). */
+export const usedUpBy = (list, kind) => debuffDisadvantage(list, kind).filter((id) => ONE_SHOT.includes(id));
+/** Take those Debuffs off. Returns the same list when there's nothing to take off. */
+export function dropDebuffs(list, ids) {
+  const cur = Array.isArray(list) ? list : [];
+  return ids?.length && cur.some((d) => ids.includes(d?.id)) ? cur.filter((d) => !ids.includes(d?.id)) : cur;
+}
+/** Woozy: no Dex Mod on Attack or Evade Checks. */
+export const isWoozy = (list) => (Array.isArray(list) ? list : []).some((d) => d?.id === 'woozy');
+
+/**
+ * Advantage or Disadvantage from how many reasons there are of each: one of each cancels out, and whatever is left
+ * wins (two Advantages and one Disadvantage roll with Advantage). Either way it's only one extra d20.
+ */
+export const rollMode = (adv, dis) =>
+  Number(adv) > Number(dis) ? 'adv' : Number(dis) > Number(adv) ? 'dis' : 'normal';
+/** "d20+5" → "2d20kh1+5" (Advantage) / "2d20kl1+5" (Disadvantage). */
+export const withRollMode = (expr, mode) =>
+  mode === 'adv' || mode === 'dis'
+    ? String(expr).replace(/^(?:1?d20|2d20k[hl]1)/i, mode === 'adv' ? '2d20kh1' : '2d20kl1')
+    : String(expr);
+
 /* ---------------- items ---------------- */
 
 /**

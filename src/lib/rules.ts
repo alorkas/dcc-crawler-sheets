@@ -1,7 +1,16 @@
 // Game rules from "Rules for Survival" and "Crawlers & Customization" (DCC RPG, Tutorial Floors).
 // Everything here is pure data → data so it can be unit tested and reused by the UI.
-import { clearRestEffects } from '../../shared/combat.js';
-import { dodgeOf } from '../../shared/skillRules.js';
+import {
+  clearRestEffects,
+  debuffDisadvantage,
+  isWoozy,
+  rollMode,
+  usedUpBy,
+  withRollMode,
+  type RollKind,
+  type RollMode,
+} from '../../shared/combat.js';
+import { dodgeOf, effectiveSkills, type GearedSkill } from '../../shared/skillRules.js';
 import {
   ensureIds,
   gearBonus,
@@ -88,6 +97,7 @@ export type DebuffDef = { id: string; penalty?: number; stackable?: boolean; hal
 
 /** Debuffs from Table 8. Effect/duration text lives in the locale files (debuff.<id>.*). */
 export const DEBUFFS: DebuffDef[] = [
+  { id: 'blinded' },
   { id: 'bloodTrail', stackable: true },
   { id: 'burned' },
   { id: 'drowning' },
@@ -175,6 +185,10 @@ export type Derived = {
   /** Lifting limit (Str × 15 lb in the book), shown in kg rounded to 5. */
   liftKg: number | null;
   dying: boolean;
+  /** The Skills with Ranks from equipped gear included (same order as the sheet; gear-only Skills at the end). */
+  skills: GearedSkill<SheetData['skills'][number]>[];
+  /** Woozy: no Dex Mod on Attack or Evade Checks. */
+  woozy: boolean;
 };
 
 const STAT_KEYS: StatKey[] = ['str', 'int', 'con', 'dex', 'cha'];
@@ -204,19 +218,24 @@ export function derive(d: SheetData): Derived {
   const manaMax = d.manaMax.trim() ? num(d.manaMax) : manaMaxAuto;
   const dexMod = d.evade.dexMod.trim() ? num(d.evade.dexMod) : mods.dex;
   const penalty = checkPenalty(d.debuffList);
+  const woozy = isWoozy(d.debuffList);
+  // items held or worn add Skill Ranks; Skills only the gear grants come after the sheet's own
+  const skills = effectiveSkills(d.skills, d.inventory).map((s) =>
+    'fromGear' in s && s.fromGear ? classifyRow({ ...emptySkill(), ...s }) : s,
+  );
   const gearDr = gearBonus(d.inventory, 'dr');
   const gearEvade = gearBonus(d.inventory, 'evade');
   // the Dodge Skill (Passive) is an Evade Buff: +1, +2 at Rank 5, +4 at 10, +6 at 15
-  const dodge = dodgeOf(d.skills);
+  const dodge = dodgeOf(skills);
   if (dodge.evade) {
     gearEvade.total += dodge.evade;
     gearEvade.from = [...gearEvade.from, { name: `Dodge (${dodge.rank})`, value: dodge.evade }];
   }
-  const evadeSum = sumNumbers(dexMod === null ? '' : String(dexMod), d.evade.buffs);
+  const evadeSum = sumNumbers(dexMod === null ? '' : String(woozy ? 0 : dexMod), d.evade.buffs);
   const evadeBase = evadeSum === null ? null : evadeSum + gearEvade.total;
   const drSum = sumNumbers(d.dr.armor, d.dr.buffs);
   const drTotal = drSum === null && !gearDr.total ? null : (drSum ?? 0) + gearDr.total;
-  const running = d.skills.find((s) => s.name.trim().toLowerCase() === 'running');
+  const running = skills.find((s) => s.name.trim().toLowerCase() === 'running');
   const moveAuto = BASE_MOVE + ((num(running?.rank ?? '') ?? 0) >= 5 ? 5 : 0);
   const move = d.evade.move.trim() ? num(d.evade.move) : moveAuto;
   const stepAuto = BASE_STEP;
@@ -249,7 +268,55 @@ export function derive(d: SheetData): Derived {
     moveMod: move === null ? null : Math.floor((halve ? Math.floor(move / 2) : move) / 10),
     liftKg: str === null ? null : Math.max(5, Math.round((str * 15 * 0.4536) / 5) * 5),
     dying: hbLost >= HB_SLOTS,
+    skills,
+    woozy,
   };
+}
+
+/** A Check ready to roll: the bonus, Advantage/Disadvantage and why, and the one-shot Debuffs it uses up. */
+export type CheckRoll = { bonus: number; mode: RollMode; why: string[]; usesUp: string[]; expr: string };
+
+/**
+ * A Skill or Attack Check: d20 + Rank (gear included) + Stat Mod + Debuff penalties (Core Rulebook p. 58).
+ * Without Ranks it is rolled untrained, with Disadvantage and no Ranks; Debuffs add Disadvantage too (Shit-Faced,
+ * Stunned, Terrified…), and Woozy drops the Dex Mod from Attacks. `adv`/`dis` are other reasons (status effects,
+ * Aiming). Null when the Skill can't be rolled: Passive Skills, and Spells without Ranks.
+ */
+export function checkRoll(
+  d: SheetData,
+  der: Derived,
+  s: { category: string; subtype: string; stat: StatSel; rank: string },
+  statMod: number | null,
+  kind: RollKind,
+  extra: { adv?: string[]; dis?: string[]; bonus?: number } = {},
+): CheckRoll | null {
+  const rank = num(s.rank);
+  if (s.stat === 'none' || s.subtype === 'passive' || s.subtype === 'damageEffect') return null;
+  if (rank === null && statMod === null) return null;
+  const untrained = (rank ?? 0) <= 0;
+  if (untrained && s.category === 'spell') return null; // no Spell without Ranks in it
+  const mod = kind === 'attack' && der.woozy && s.stat === 'dex' ? 0 : (statMod ?? 0);
+  const bonus = Math.max(0, rank ?? 0) + mod + der.penalty + (extra.bonus ?? 0);
+  const fromDebuffs = debuffDisadvantage(d.debuffList, kind);
+  const dis = [...(untrained ? ['untrained'] : []), ...fromDebuffs.map((id) => `debuff:${id}`), ...(extra.dis ?? [])];
+  const adv = extra.adv ?? [];
+  const mode = rollMode(adv.length, dis.length);
+  const sign = bonus >= 0 ? `+${bonus}` : `${bonus}`;
+  return {
+    bonus,
+    mode,
+    why: [...adv, ...dis],
+    usesUp: usedUpBy(d.debuffList, kind),
+    expr: withRollMode(`d20${sign}`, mode),
+  };
+}
+
+/** A Stat Check or Evade: no Ranks, but the same Debuffs. */
+export function plainRoll(d: SheetData, bonus: number, kind: RollKind): CheckRoll {
+  const dis = debuffDisadvantage(d.debuffList, kind).map((id) => `debuff:${id}`);
+  const mode = rollMode(0, dis.length);
+  const sign = bonus >= 0 ? `+${bonus}` : `${bonus}`;
+  return { bonus, mode, why: dis, usesUp: usedUpBy(d.debuffList, kind), expr: withRollMode(`d20${sign}`, mode) };
 }
 
 /** Mod for a skill/attack stat selection ('none' → 0, '' → null meaning "use legacy text"). */

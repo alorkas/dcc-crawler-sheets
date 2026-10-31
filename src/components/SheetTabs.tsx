@@ -5,16 +5,18 @@ import { ListRows, Portrait } from './widgets';
 import { EffectsPanel } from './Status';
 import { SheetQuickItems } from './QuickItems';
 import { AutoNumber, DebuffPanel, HealButton, HealthBar, HealthTools, ManaTools, useStatMod } from './rulesWidgets';
-import { annotateDamage, damageExpr, num, pinnedAttacks, statModFromScore } from '../lib/rules';
+import { annotateDamage, checkRoll, damageExpr, num, pinnedAttacks, plainRoll, statModFromScore } from '../lib/rules';
 import { useSearchParams } from 'react-router-dom';
-import { CastButton } from './SkillsTab';
-import { RollButton } from './RollButton';
+import { CastButton, SkillNameList } from './SkillsTab';
+import { UntrainedCheck } from './UntrainedCheck';
+import { CheckButton, RollButton } from './RollButton';
 import { damageBonusFor, isSpellRef, spellRef, weaponFor } from '../../shared/items.js';
 import {
   effectRankDice,
   effectSpec,
   effectsFor,
   rankUpgrades,
+  termCount,
   upgradeDice,
   withEffectDice,
   type EffectSpec,
@@ -32,7 +34,7 @@ const statShort = (k: StatKey) => `stat.${k}.short` as MsgKey;
 
 /* ---------------- Page 1: Core ---------------- */
 export function CoreTab() {
-  const { der } = useSheet();
+  const { data, der } = useSheet();
   const { t } = useI18n();
 
   return (
@@ -94,8 +96,8 @@ export function CoreTab() {
                 className="stat-mod"
               />
               {der.mods[s.key] !== null && (
-                <RollButton
-                  expr={`d20${signed((der.mods[s.key] ?? 0) + der.penalty)}`}
+                <CheckButton
+                  roll={plainRoll(data, (der.mods[s.key] ?? 0) + der.penalty, 'check')}
                   text={t('core.statCheck')}
                   stat
                   label={t('core.statCheckOf', { stat: t(statLabel(s.key)) })}
@@ -130,9 +132,8 @@ export function CoreTab() {
               {der.evadeTotal === null ? (
                 <output className="total-val">—</output>
               ) : (
-                <RollButton
-                  expr={`d20${signed(der.evadeTotal)}`}
-                  text={`d20 ${signed(der.evadeTotal)}`}
+                <CheckButton
+                  roll={plainRoll(data, der.evadeTotal, 'evade')}
                   label={t('core.evade')}
                   className="total-val evade-roll"
                 />
@@ -164,10 +165,11 @@ export function CoreTab() {
               <span className="dim tiny">{t('core.stepHint')}</span>
             </div>
           </div>
-          {(der.penalty !== 0 || der.moveEffective !== der.move) && (
+          {(der.penalty !== 0 || der.moveEffective !== der.move || der.woozy) && (
             <div className="penalty-note">
               {der.penalty !== 0 && t('core.penaltyNote', { n: der.penalty })}
               {der.moveEffective !== der.move && ' ' + t('core.moveHalved', { n: der.moveEffective ?? 0 })}
+              {der.woozy && ' ' + t('core.woozyNote')}
             </div>
           )}
         </div>
@@ -219,6 +221,11 @@ export function CoreTab() {
             </li>
           ))}
         </ol>
+      </Section>
+
+      <Section title={t('untr.title')} className="span-untrained">
+        <SkillNameList />
+        <UntrainedCheck />
       </Section>
 
       <Section title={t('core.attacks')} className="span-attacks">
@@ -326,16 +333,21 @@ function PinnedAttacks() {
  * Aiming for this attack: the crawler's Aiming Ranks and how many d4 it adds, when the attack is a Ranged Attack
  * (a ranged Skill or weapon, or a Spell with a range beyond Melee). Null when it doesn't apply.
  */
-function aimingFor(data: SheetData, s: SheetData['skills'][number]): { rank: number; dice: number } | null {
-  const sk = data.skills.find((x) => /^(aiming|apuntar)$/i.test(x.name.trim()));
+function aimingFor(
+  data: SheetData,
+  skills: { name: string; rank: string }[],
+  s: SheetData['skills'][number],
+): { rank: number; plain: number; base: number } | null {
+  const sk = skills.find((x) => /^(aiming|apuntar)$/i.test(x.name.trim()));
   const rank = num(sk?.rank ?? '') ?? 0;
-  if (rank < 1 || sk === s) return null;
+  if (rank < 1 || sk?.name === s.name) return null;
   const range = s.range.trim();
   const rangedSpell =
     s.category === 'spell' && /\d/.test(range) && !/melee|cuerpo|touch|toque|self|personal/i.test(range);
   const rangedWeapon = !!weaponFor(data.inventory, s.name)?.ranged;
   if (s.attackType !== 'ranged' && !rangedSpell && !rangedWeapon) return null;
-  return { rank, dice: 1 + (rank >= 5 ? 1 : 0) + (rank >= 10 ? 1 : 0) + (rank >= 15 ? 1 : 0) };
+  // 1d4 damage, +1d4 at Rank 5; +1d4 base damage at Ranks 10 and 15
+  return { rank, plain: 1 + (rank >= 5 ? 1 : 0), base: (rank >= 10 ? 1 : 0) + (rank >= 15 ? 1 : 0) };
 }
 
 /** "Melee" + "Melee (5 ft)" → "Melee (5 ft)"; otherwise "Ranged · 100 feet". */
@@ -372,14 +384,15 @@ function PinnedRow({ i, der, onEdit }: { i: number; der: ReturnType<typeof useSh
   const { t } = useI18n();
   const es = useNamesEs();
   const s = data.skills[i];
+  // the same Skill with Ranks from equipped gear included
+  const g = der.skills[i] ?? s;
   const mod = useStatMod(s.stat, s.statMod);
-  const rank = num(s.rank);
-  const toHit = rank === null && mod === null ? null : (rank ?? 0) + (mod ?? 0) + der.penalty;
+  const rank = num(g.rank);
   const statLbl = s.stat && s.stat !== 'none' ? t(`stat.${s.stat}.short` as MsgKey) : '';
   const spell = s.category === 'spell';
   const gearDmg = damageBonusFor(data.inventory, s.name, spell);
   // Rank upgrades of the Attack Skill (Pugilism R5 +2d2, Crossbow R5 +1d8…), applied on their own
-  const up = upgradeDice(rankUpgrades(s));
+  const up = upgradeDice(rankUpgrades(g));
   const sheetExpr = s.baseDamage ? damageExpr(s.baseDamage, der, data.floor) : null;
   const baseExpr = sheetExpr && up.base ? `${sheetExpr}+${up.base}` : sheetExpr;
   // Overcharge: cheap spells take extra Mana, one more damage die per point (up to the spell's level)
@@ -391,11 +404,18 @@ function PinnedRow({ i, der, onEdit }: { i: number; der: ReturnType<typeof useSh
   const gearExpr = withBoost && gearDmg.total ? `${withBoost}${signed(gearDmg.total)}` : withBoost;
   // Aiming (passive Skill): a Ranged Attack made with Disadvantage adds the Aiming Ranks to hit and 1d4 damage
   // (+1d4 at Ranks 5, 10 and 15)
-  const aim = aimingFor(data, s);
+  const aim = aimingFor(data, der.skills, s);
   const [aimed, setAimed] = useState(false);
   const aiming = !!aim && aimed;
+  // to hit: Rank + Stat Mod + penalties (+ Aiming Ranks); untrained, it's rolled with Disadvantage
+  const chk = checkRoll(data, der, g, mod, 'attack', { bonus: aiming ? aim.rank : 0 });
+  const toHit = chk?.bonus ?? null;
+  const untrained = (rank ?? 0) <= 0;
+  // Aiming's first two d4 are plain damage (not doubled on a Critical Hit); the Rank 10 and 15 ones are base damage
+  const aimBase = aiming && aim.base ? `${aim.base}d4` : '';
+  const aimPlain = aiming ? `${aim.plain}d4` : '';
   // hand-to-hand Damage Effects that go with this Attack Skill (Iron Punch on Pugilism…)
-  const effects = effectsFor(data.skills, s);
+  const effects = effectsFor(der.skills, g);
   const [effName, setEffName] = useState('');
   const [sameSize, setSameSize] = useState(true);
   const [stunInstead, setStunInstead] = useState(false);
@@ -406,13 +426,23 @@ function PinnedRow({ i, der, onEdit }: { i: number; der: ReturnType<typeof useSh
     : null;
   const fx = spec?.usable ? spec : null;
   const strMod = der.mods.str ?? 0;
+  // Choke Out / Smush multiply the total only when the target is weak enough: out of combat the player says so
+  const [weak, setWeak] = useState(false);
   const fxExpr = fx && gearExpr ? withEffectDice(gearExpr, fx, fx.addStr ? strMod : 0) : gearExpr;
-  const fxRank = fx ? effectRankDice(fx) : '';
-  const withFx = fxExpr && fxRank ? `${fxExpr}+${fxRank}` : fxExpr;
-  const withAim = aiming && withFx ? `${withFx}+${aim.dice}d4` : withFx;
-  const dmgExpr = withAim && up.rank ? `${withAim}+${up.rank}` : withAim;
+  // base damage first (Powerful Strike multiplies those dice), then what's added on top
+  const baseDmg = fxExpr && aimBase ? `${fxExpr}+${aimBase}` : fxExpr;
+  const onTop = [fx ? effectRankDice(fx) : '', aimPlain, up.rank].filter(Boolean).join('+');
+  const dmgExpr = baseDmg && onTop ? `${baseDmg}+${onTop}` : baseDmg;
+  const dmgMult =
+    fx && (fx.multBase > 1 || (weak && fx.multTotal > 1))
+      ? {
+          ...(fx.multBase > 1 ? { multBase: fx.multBase, baseTerms: termCount(baseDmg) } : {}),
+          ...(weak && fx.multTotal > 1 ? { multTotal: fx.multTotal } : {}),
+        }
+      : undefined;
   // in a fight the server adds the Damage Effect and the Rank dice itself (Critical Hits double only the base dice)
-  const attackBase = gearExpr && aiming ? `${gearExpr}+${aim.dice}d4` : gearExpr;
+  const attackBase = gearExpr && aimBase ? `${gearExpr}+${aimBase}` : gearExpr;
+  const attackRank = [up.rank, aimPlain].filter(Boolean).join('+');
   // a Damage Effect with a cooldown (Powerful Strike) starts it on the game clock when used out of combat
   const startCooldown = () => {
     if (!fx?.cooldownHours || !effSkill) return;
@@ -446,13 +476,14 @@ function PinnedRow({ i, der, onEdit }: { i: number; der: ReturnType<typeof useSh
           <strong>—</strong>
         ) : (
           <AttackRollButton
-            expr={`d20${signed(toHit + (aiming ? aim.rank : 0))}`}
-            text={`d20 ${signed(toHit + (aiming ? aim.rank : 0))}`}
+            expr={`d20${signed(toHit)}`}
+            text={`d20 ${signed(toHit)}`}
             label={t(aiming ? 'roll.toHitAimed' : 'roll.toHit', { name: s.name || t('skills.phSkill') })}
             name={s.name || t('skills.phSkill')}
             damage={dmgExpr}
             damageBase={attackBase}
-            damageRank={up.rank}
+            damageRank={attackRank}
+            untrained={untrained}
             manaCost={cost !== null ? cost + boost : null}
             spell={spell}
             aimed={aiming}
@@ -495,6 +526,12 @@ function PinnedRow({ i, der, onEdit }: { i: number; der: ReturnType<typeof useSh
               </label>
             )}
             {fx && <FxSummary spec={fx} />}
+            {fx && fx.multTotal > 1 && !live?.encounter?.active && (
+              <label className="gm-check tiny" title={t('fx.weakHint')}>
+                <input type="checkbox" checked={weak} onChange={(e) => setWeak(e.target.checked)} />
+                {t('fx.weak', { pct: fx.atOrBelow ?? 0, n: fx.multTotal })}
+              </label>
+            )}
           </div>
         )}
         {aim && toHit !== null && (
@@ -502,11 +539,11 @@ function PinnedRow({ i, der, onEdit }: { i: number; der: ReturnType<typeof useSh
             type="button"
             className={`btn small ghost aim-toggle ${aiming ? 'on' : ''}`}
             aria-pressed={aiming}
-            title={t('aim.hint', { rank: aim.rank, dice: `${aim.dice}d4` })}
+            title={t('aim.hint', { rank: aim.rank, dice: `${aim.plain + aim.base}d4` })}
             onClick={() => setAimed(!aimed)}
           >
             🎯 {t('aim.label')}
-            {aiming && ` +${aim.rank} · +${aim.dice}d4 · ▼`}
+            {aiming && ` +${aim.rank} · +${aim.plain + aim.base}d4 · ▼`}
           </button>
         )}
         <span className="dim tiny">
@@ -561,6 +598,7 @@ function PinnedRow({ i, der, onEdit }: { i: number; der: ReturnType<typeof useSh
             text={t('roll.damage')}
             label={t('roll.damageOf', { name: s.name || t('skills.phSkill') })}
             className="dmg-roll"
+            mult={dmgMult}
           />
         )}
       </div>

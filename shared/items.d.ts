@@ -32,6 +32,8 @@ export type Item = {
   maxCharges: string;
   ability: string;
   bonus: Record<BonusKey, string>;
+  /** Skill Ranks it grants while held or worn: "Pugilism +1, Taunt +3". */
+  skillBonus: string;
   curse: Curse | null;
 };
 export type Curse = { text: string; bonus: Partial<Record<BonusKey, string>>; revealed: boolean };
@@ -121,6 +123,7 @@ export type ItemCard = {
   notes: string;
   ability: string;
   bonus: Partial<Record<BonusKey, string>>;
+  skillBonus?: string;
   ranged?: boolean;
   twoHanded?: boolean;
   charges?: string;

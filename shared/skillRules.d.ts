@@ -4,6 +4,24 @@ type SkillLike = Partial<Skill> & { name?: string; rank?: string };
 export function findSkill(skills: SkillLike[] | undefined, ...names: string[]): SkillLike | null;
 export function skillRank(skills: SkillLike[] | undefined, ...names: string[]): number;
 export function rankDie(rank: number | string): string;
+export function parseSkillBonus(text: string | undefined | null): { skill: string; ranks: number }[];
+export type GearSkill = { name: string; total: number; from: { name: string; value: number }[] };
+export function gearSkillRanks(inventory: unknown[] | undefined): Map<string, GearSkill>;
+export function gearFor(gear: Map<string, GearSkill> | undefined, name: string | undefined): GearSkill | null;
+/** A Skill with gear included: `rank` = trained + gear; `fromGear` when only the gear grants it. */
+export type GearedSkill<T> = T & {
+  baseRank?: string;
+  gearRanks?: number;
+  gearFrom?: { name: string; value: number }[];
+  fromGear?: boolean;
+};
+export function effectiveSkills<T extends SkillLike>(skills: T[] | undefined, inventory: unknown[] | undefined): GearedSkill<T>[];
+export function multiplyBaseDice(
+  roll: { total: number; parts: { sign: number; dice?: string; value: number }[] } | null,
+  multBase: number,
+  baseTerms: number,
+): number;
+export function termCount(expr: string | null | undefined): number;
 export function dodgeOf(skills: SkillLike[] | undefined): {
   rank: number;
   evade: number;

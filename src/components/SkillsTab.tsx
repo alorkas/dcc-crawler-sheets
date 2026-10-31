@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from 'react';
 import { Area, Check, Input, Section, useSheet } from './fields';
 import { AdvancementPanel, RankBadge, StatMod, useStatMod } from './rulesWidgets';
 import { useI18n, type MsgKey } from '../lib/i18n';
-import { canPin, castHeal, num, spendMana } from '../lib/rules';
+import { canPin, castHeal, checkRoll, classifyRow, num, spendMana, type CheckRoll } from '../lib/rules';
 import { spellRef } from '../../shared/items.js';
 import { BOOK_EFFECTS, effectsFor, isDamageEffect } from '../../shared/skillRules.js';
 import { useLiveOptional } from '../lib/live';
@@ -13,7 +13,7 @@ import { fillSkill, hitType, lookup } from '../lib/catalog';
 import { api } from '../lib/api';
 import { useAuth } from '../lib/auth';
 import { STARTER_SPELLS } from '../lib/creation';
-import { RollButton } from './RollButton';
+import { CheckButton } from './RollButton';
 import { useCombatAction } from './CombatAttack';
 import { ProgressionPanel } from './Progression';
 
@@ -158,6 +158,8 @@ export function SkillsTab() {
         </Section>
       )}
 
+      <GearSkills />
+
       <Section title={t('prog.section')}>
         <ProgressionPanel />
       </Section>
@@ -177,14 +179,72 @@ function usePatch(i: number) {
     update((d) => ({ ...d, skills: d.skills.map((x, j) => (j === i ? { ...x, ...p } : x)) }));
 }
 
-/** Roll total for a skill, or null when it doesn't roll (passive skills, passive spells, damage effects). */
-function useRollTotal(s: Skill): number | null {
-  const { der } = useSheet();
+/**
+ * A skill's Check (Ranks from gear included), or null when it doesn't roll (passive skills, passive spells, damage
+ * effects, spells without Ranks). Attack Skills and Attack Spells roll as Attacks (Woozy, Terrified… count).
+ */
+function useCheck(i: number): CheckRoll | null {
+  const { data, der } = useSheet();
+  const s = der.skills[i] ?? data.skills[i];
   const mod = useStatMod(s.stat, s.statMod);
-  const rank = num(s.rank);
-  const passive = s.stat === 'none' || s.subtype === 'passive' || s.subtype === 'damageEffect';
-  if (passive || (rank === null && mod === null)) return null;
-  return (rank ?? 0) + (mod ?? 0) + der.penalty;
+  const attack = s.category === 'combat' || (s.category === 'spell' && s.subtype === 'attack');
+  return checkRoll(data, der, s, mod, attack ? 'attack' : 'check');
+}
+
+/** "+3 ⚙" next to a Rank: Ranks from equipped gear (hover for the items). */
+function GearRank({ i }: { i: number }) {
+  const { der } = useSheet();
+  const { t } = useI18n();
+  const g = der.skills[i];
+  if (!g?.gearRanks) return null;
+  const list = (g.gearFrom ?? []).map((f) => `${f.name} ${signed(f.value)}`).join(', ');
+  return (
+    <span className="dim tiny gear-rank" title={t('skills.gearRanks', { list })}>
+      {signed(g.gearRanks)} ⚙
+    </span>
+  );
+}
+
+/** Skills only equipped gear grants (not on the sheet): the crawler has them at the Rank noted while it's equipped. */
+function GearSkills() {
+  const { der, update, locked } = useSheet();
+  const { t } = useI18n();
+  const es = useNamesEs();
+  const rows = der.skills.filter((s) => s.fromGear);
+  if (!rows.length) return null;
+  // added at Rank 0 (the gear's Ranks go on top), with its type and Stat from the book when it's there
+  const add = async (name: string) => {
+    const blank: Skill = { ...emptySkill(), name, rank: '0' };
+    let row = classifyRow(blank);
+    try {
+      const hit = await lookup(name);
+      if (hit) row = { ...blank, ...fillSkill(blank, hit) };
+    } catch {
+      /* offline: the book's list of names still sorts it */
+    }
+    update((d) => (d.skills.some((x) => x.name === name) ? d : { ...d, skills: [...d.skills, row] }));
+  };
+  return (
+    <Section title={t('skills.fromGear')} className="skill-cat">
+      <p className="dim small cat-hint">{t('skills.fromGearHint')}</p>
+      <div className="list">
+        {rows.map((s) => (
+          <div key={s.name} className="list-row gear-skill">
+            <strong>{es(s.name) || s.name}</strong>
+            <span className="pill tiny-pill">
+              {t('skills.rank')} {s.rank}
+            </span>
+            <span className="dim tiny">{(s.gearFrom ?? []).map((f) => `${f.name} ${signed(f.value)}`).join(', ')}</span>
+            {!locked && (
+              <button type="button" className="btn small ghost" onClick={() => add(s.name)}>
+                + {t('skills.fromGearAdd')}
+              </button>
+            )}
+          </div>
+        ))}
+      </div>
+    </Section>
+  );
 }
 
 /**
@@ -295,7 +355,8 @@ function NameInput({ i }: { i: number }) {
  * Name suggestions, one list per category: weapons (combat) and utility skills for everyone (they're in the
  * player books) and the starter spells; the GM also gets every spell so they can hand spells out quickly.
  */
-function SkillNameList() {
+/** Skill names from the book as suggestions (`skill-names-<category>` and `skill-names-all`). */
+export function SkillNameList() {
   const { user } = useAuth();
   const [lists, setLists] = useState<Record<SkillCategory, string[]>>({ combat: [], utility: [], spell: [] });
   useEffect(() => {
@@ -387,18 +448,11 @@ function FillButton({ i }: { i: number }) {
   );
 }
 
-/** The skill's check total; click it to roll to the shared log. */
-function SkillRoll({ s, total }: { s: Skill; total: number | null }) {
+/** The skill's check; click it to roll to the shared log (▼ when untrained or a Debuff gives Disadvantage). */
+function SkillRoll({ s, roll }: { s: Skill; roll: CheckRoll | null }) {
   const { t } = useI18n();
-  if (total === null) return <output className="roll-total center" />;
-  return (
-    <RollButton
-      expr={`d20${signed(total)}`}
-      text={`d20 ${signed(total)}`}
-      label={s.name || t('skills.phSkill')}
-      className="center"
-    />
-  );
+  if (roll === null) return <output className="roll-total center" />;
+  return <CheckButton roll={roll} label={s.name || t('skills.phSkill')} className="center" />;
 }
 
 function RemoveBtn({ i, onRemove }: { i: number; onRemove: (i: number) => void }) {
@@ -441,7 +495,7 @@ function UtilityRow({ i, onRemove }: { i: number; onRemove: (i: number) => void 
   const { data } = useSheet();
   const { t } = useI18n();
   const s = data.skills[i];
-  const total = useRollTotal(s);
+  const roll = useCheck(i);
   return (
     <div className="list-row">
       <div className="skills-cols">
@@ -450,10 +504,11 @@ function UtilityRow({ i, onRemove }: { i: number; onRemove: (i: number) => void 
         <div className="rank-cell">
           <Input path={['skills', i, 'rank']} ariaLabel={t('skills.rank')} placeholder={t('skills.rank')} center />
           <RankBadge rank={s.rank} />
+          <GearRank i={i} />
         </div>
         <StatMod statPath={['skills', i, 'stat']} legacyPath={['skills', i, 'statMod']} label={t('skills.statMod')} />
         <Input path={['skills', i, 'notes']} ariaLabel={t('skills.notes')} placeholder={t('skills.notes')} />
-        <SkillRoll s={s} total={total} />
+        <SkillRoll s={s} roll={roll} />
         <Check path={['skills', i, 'done']} label={t('skills.checked')} />
       </div>
       <RemoveBtn i={i} onRemove={onRemove} />
@@ -478,7 +533,7 @@ function SkillCard({
   const { t } = useI18n();
   const patch = usePatch(i);
   const s = data.skills[i];
-  const total = useRollTotal(s);
+  const roll = useCheck(i);
   const spell = s.category === 'spell';
   const f = (k: keyof Skill) => ['skills', i, k];
   const summary = spell
@@ -515,9 +570,10 @@ function SkillCard({
         <div className="rank-cell">
           <Input path={f('rank')} ariaLabel={t('skills.rank')} placeholder={t('skills.rank')} center />
           <RankBadge rank={s.rank} />
+          <GearRank i={i} />
         </div>
         <StatMod statPath={f('stat')} legacyPath={f('statMod')} label={t('skills.statMod')} />
-        <SkillRoll s={s} total={total} />
+        <SkillRoll s={s} roll={roll} />
         <PinButton i={i} />
         <Check path={f('done')} label={t('skills.checked')} />
         <RemoveBtn i={i} onRemove={onRemove} />

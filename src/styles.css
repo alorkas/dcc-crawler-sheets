@@ -845,8 +845,32 @@ main {
   grid-template-areas:
     'stats identity identity'
     'stats defense mana'
+    'stats untrained mana'
     'attacks attacks attacks';
   align-items: start;
+}
+.span-untrained {
+  grid-area: untrained;
+}
+.untrained-check {
+  display: grid;
+  gap: 0.4rem;
+}
+.untrained-check-row {
+  display: flex;
+  gap: 0.6rem;
+  align-items: flex-end;
+  flex-wrap: wrap;
+}
+.untrained-check-row .grow {
+  flex: 1 1 180px;
+  min-width: 0;
+}
+.untrained-check-row .in.sel {
+  min-width: 150px;
+}
+.untrained-check-roll .roll-total {
+  min-width: 96px;
 }
 .span-identity {
   grid-area: identity;
@@ -870,13 +894,14 @@ main {
       'identity identity'
       'stats defense'
       'stats mana'
+      'stats untrained'
       'attacks attacks';
   }
 }
 @media (max-width: 700px) {
   .core-grid {
     grid-template-columns: minmax(0, 1fr);
-    grid-template-areas: 'identity' 'stats' 'defense' 'mana' 'attacks';
+    grid-template-areas: 'identity' 'stats' 'defense' 'untrained' 'mana' 'attacks';
   }
 }
 
@@ -4301,6 +4326,66 @@ ul.plain {
   flex-direction: column;
   gap: 0.15rem;
   min-width: 0;
+}
+.inv-name-row {
+  display: flex;
+  align-items: center;
+  gap: 0.25rem;
+  min-width: 0;
+}
+.inv-name-row > :last-child {
+  flex: 1;
+  min-width: 0;
+}
+.inv-row.open .expand-btn {
+  transform: rotate(90deg);
+}
+/* an expanded row: the item's details under it, like a Skill card */
+.inv-row.open {
+  flex-wrap: wrap;
+}
+.inv-details {
+  flex: 1 0 100%;
+  padding: 0.4rem 0 0.5rem 30px;
+  border-top: 1px dashed var(--border);
+  margin-top: 0.3rem;
+}
+.inv-details .item-grid {
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+}
+.inv-summary {
+  margin-left: 30px;
+  font-size: 0.78rem;
+}
+.inv-head-actions {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  flex-wrap: wrap;
+}
+.gear-rank {
+  position: absolute;
+  bottom: -9px;
+  right: -4px;
+  font-size: 0.62rem;
+  white-space: nowrap;
+}
+.gear-skill {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  flex-wrap: wrap;
+}
+.gear-skill > :first-child {
+  flex: 0 1 auto;
+}
+@media (max-width: 820px) {
+  .inv-details {
+    padding-left: 0;
+  }
+  .inv-details .item-grid {
+    grid-template-columns: 1fr;
+  }
 }
 .inv-tags {
   display: flex;

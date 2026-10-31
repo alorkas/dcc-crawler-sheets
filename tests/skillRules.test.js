@@ -5,16 +5,21 @@ import {
   dodgeOf,
   effectRankDice,
   effectSpec,
+  effectiveSkills,
   effectsFor,
   isRangedAttack,
   multApplies,
+  multiplyBaseDice,
+  parseSkillBonus,
   rankDie,
   rankUpgrades,
   tauntCount,
   tauntPerks,
+  termCount,
   upgradeDice,
   withEffectDice,
 } from '../shared/skillRules.js';
+import { debuffDisadvantage, dropDebuffs, isWoozy, rollMode, usedUpBy, withRollMode } from '../shared/combat.js';
 
 test('Rank damage dice (Table 37)', () => {
   assert.deepEqual([1, 2, 4, 6, 8, 10, 12, 14, 16].map(rankDie), [
@@ -28,6 +33,8 @@ test('Rank damage dice (Table 37)', () => {
     '1d8+1d6',
     '2d8',
   ]);
+  // past Rank 15 (gear can take a Skill there)
+  assert.deepEqual([17, 18, 19, 20, 25].map(rankDie), ['2d8', '1d10+1d8', '1d10+1d8', '2d10', '2d10']);
 });
 
 test('Dodge adds up: +1, +2 at Rank 5, +4 at 10, +6 at 15', () => {
@@ -136,4 +143,69 @@ test('Attack Skill Rank upgrades come from the book notes', () => {
   };
   assert.deepEqual(upgradeDice(rankUpgrades(ip)), { base: '', rank: '' });
   assert.deepEqual(upgradeDice(rankUpgrades({ ...xbow, category: 'spell', rank: '5' })), { base: '', rank: '' });
+});
+
+test('Skill bonuses on items: parsed in either order, counted only while held or worn', () => {
+  assert.deepEqual(parseSkillBonus('Pugilism +1, Taunt +3; +2 Stealth\n+1 a Sigilo, Tire Iron (Club) +2, junk'), [
+    { skill: 'Pugilism', ranks: 1 },
+    { skill: 'Taunt', ranks: 3 },
+    { skill: 'Stealth', ranks: 2 },
+    { skill: 'Sigilo', ranks: 1 },
+    { skill: 'Tire Iron (Club)', ranks: 2 },
+  ]);
+  const inventory = [
+    { item: 'Ring', qty: '1', slot: 'acc.finger.1', skillBonus: 'Taunt +3, Iron Punch +2, Esquivar +1' },
+    { item: 'Bag charm', qty: '1', slot: '', skillBonus: 'Taunt +5' },
+  ];
+  const skills = [
+    { name: 'Taunt', rank: '2' },
+    { name: 'Dodge', rank: '4' },
+    { name: 'Climbing', rank: '1' },
+  ];
+  const out = effectiveSkills(skills, inventory);
+  assert.equal(out[0].rank, '5');
+  assert.equal(out[0].baseRank, '2');
+  assert.equal(out[1].rank, '5', 'the Spanish name counts too');
+  assert.equal(out[2], skills[2], 'untouched Skills stay as they are');
+  // a Skill only the gear grants: the crawler has it at that Rank
+  assert.deepEqual(
+    out.slice(3).map((s) => [s.name, s.rank, s.fromGear]),
+    [['Iron Punch', '2', true]],
+  );
+  assert.equal(dodgeOf(out).evade, 2, 'Dodge Rank 5 from gear');
+  assert.equal(effectiveSkills(skills, []), skills);
+});
+
+test('Powerful Strike multiplies only the base damage dice', () => {
+  // 2d4 base (7) + 2, then a Rank die 1d10 (6): base dice ×3 → 21 + 2 + 6
+  const roll = {
+    total: 15,
+    parts: [
+      { sign: 1, dice: '2d4', value: 7 },
+      { sign: 1, value: 2 },
+      { sign: 1, dice: '1d10', value: 6 },
+    ],
+  };
+  assert.equal(multiplyBaseDice(roll, 3, 2), 29);
+  assert.equal(multiplyBaseDice(roll, 1, 2), 15);
+  assert.equal(termCount('2d4+2'), 2);
+  assert.equal(termCount('1d2+1d4-1'), 3);
+});
+
+test('Debuffs that change rolls (Table 11) and Advantage/Disadvantage counting', () => {
+  const list = [{ id: 'stunned' }, { id: 'terrified' }, { id: 'minorInjury' }];
+  assert.deepEqual(debuffDisadvantage(list, 'check'), ['stunned']);
+  assert.deepEqual(debuffDisadvantage(list, 'attack'), ['stunned', 'terrified']);
+  assert.deepEqual(debuffDisadvantage([{ id: 'shitFaced' }], 'evade'), ['shitFaced']);
+  assert.deepEqual(usedUpBy(list, 'attack'), ['stunned'], 'Stunned lasts one Check; Terrified stays');
+  assert.deepEqual(dropDebuffs(list, ['stunned']), list.slice(1));
+  assert.equal(dropDebuffs(list, []), list);
+  assert.equal(isWoozy([{ id: 'woozy' }]), true);
+  // one of each cancels out; what's left wins, and it's still one extra d20
+  assert.equal(rollMode(1, 1), 'normal');
+  assert.equal(rollMode(2, 1), 'adv');
+  assert.equal(rollMode(0, 3), 'dis');
+  assert.equal(withRollMode('d20+5', 'dis'), '2d20kl1+5');
+  assert.equal(withRollMode('2d20kh1-1', 'dis'), '2d20kl1-1');
+  assert.equal(withRollMode('d20+5', 'normal'), 'd20+5');
 });

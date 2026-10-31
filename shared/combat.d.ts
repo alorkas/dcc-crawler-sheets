@@ -27,3 +27,12 @@ export function addDebuffTo<T extends { id: string }>(list: T[], id: string): T[
 export function itemEffect(
   notes: string,
 ): { type: 'heal'; amount: number } | { type: 'manaFull' } | { type: 'mana'; amount: number } | null;
+
+export type RollKind = 'check' | 'attack' | 'evade';
+export type RollMode = 'normal' | 'adv' | 'dis';
+export function debuffDisadvantage(list: { id: string }[] | undefined, kind: RollKind): string[];
+export function usedUpBy(list: { id: string }[] | undefined, kind: RollKind): string[];
+export function dropDebuffs<T extends { id: string }>(list: T[] | undefined, ids: string[]): T[];
+export function isWoozy(list: { id: string }[] | undefined): boolean;
+export function rollMode(adv: number | boolean, dis: number | boolean): RollMode;
+export function withRollMode(expr: string, mode: RollMode): string;

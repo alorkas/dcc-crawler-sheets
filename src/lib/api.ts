@@ -482,7 +482,8 @@ export type ProgressAction =
 export type HpManaSources = { hp?: string[]; mana?: string[] };
 export type NewMessage = {
   text?: string;
-  roll?: { expr: string; label?: string; stat?: boolean };
+  /** `multBase`/`baseTerms`: Powerful Strike (the first `baseTerms` terms × multBase); `multTotal`: × the total. */
+  roll?: { expr: string; label?: string; stat?: boolean; multBase?: number; baseTerms?: number; multTotal?: number };
   characterId?: number | null;
   gmOnly?: boolean;
 };

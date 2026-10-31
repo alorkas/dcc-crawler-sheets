@@ -61,6 +61,7 @@ function ItemTip({ card, anchor }: { card: ItemCard; anchor: HTMLElement }) {
     ...(['str', 'int', 'con', 'dex', 'cha'] as const).map((k) =>
       n(card.bonus[k]) ? `${t(`stat.${k}.short` as MsgKey)} ${signed(n(card.bonus[k]))}` : '',
     ),
+    card.skillBonus ?? '',
   ].filter(Boolean);
   const kind = [
     card.type && t(`itemType.${card.type}` as MsgKey),

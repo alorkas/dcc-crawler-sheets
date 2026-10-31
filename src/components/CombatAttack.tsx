@@ -6,7 +6,8 @@ import { ammoFor, isHealSpell, spellRef, spendOne, weaponFor } from '../../share
 import type { Effect } from '../lib/sheet';
 import { DegreeBadge } from './Status';
 import { useLiveOptional } from '../lib/live';
-import { RollButton } from './RollButton';
+import { RollButton, useUseUp, useWhy } from './RollButton';
+import { debuffDisadvantage, rollMode, usedUpBy, withRollMode } from '../../shared/combat.js';
 import { useSheet } from './fields';
 
 /* In combat, a crawler's pinned attacks can target an opponent: the server rolls against the Mob's Evade
@@ -33,20 +34,22 @@ const TargetCtx = createContext<TargetState>({
 
 /**
  * Advantage/Disadvantage for an attack: from the crawler's status effects (an Advantage earned against this Mob,
- * or a general one). Both at once cancel out (Core Rulebook "Advantage & Disadvantage").
+ * or a general one) and other reasons (`dis`: untrained, Debuffs, Aiming). Each Advantage cancels one Disadvantage
+ * (Core Rulebook "Advantage & Disadvantage").
  */
-function autoMode(effects: Effect[], targets: number[]): { mode: 'normal' | 'adv' | 'dis'; why: string[] } {
-  const adv = effects.filter(
-    (e) => e.kind === 'advantage' && (e.vsOpponent === undefined || targets.includes(e.vsOpponent)),
-  );
-  const dis = effects.filter((e) => e.kind === 'disadvantage');
-  const why = [...adv, ...dis].map((e) => e.name);
-  if (adv.length && dis.length) return { mode: 'normal', why };
-  return { mode: adv.length ? 'adv' : dis.length ? 'dis' : 'normal', why };
+function autoMode(
+  effects: Effect[],
+  targets: number[],
+  dis: string[] = [],
+): { mode: 'normal' | 'adv' | 'dis'; adv: string[]; dis: string[]; why: string[] } {
+  const adv = effects
+    .filter((e) => e.kind === 'advantage' && (e.vsOpponent === undefined || targets.includes(e.vsOpponent)))
+    .map((e) => e.name);
+  const against = [...effects.filter((e) => e.kind === 'disadvantage').map((e) => e.name), ...dis];
+  return { mode: rollMode(adv.length, against.length), adv, dis: against, why: [...adv, ...against] };
 }
 /** "d20+5" → "2d20kh1+5" (Advantage) / "2d20kl1+5" (Disadvantage). */
-export const withMode = (expr: string, mode: 'normal' | 'adv' | 'dis') =>
-  mode === 'normal' ? expr : expr.replace(/^1?d20/i, mode === 'adv' ? '2d20kh1' : '2d20kl1');
+export const withMode = (expr: string, mode: 'normal' | 'adv' | 'dis') => withRollMode(expr, mode);
 
 /** The fight as this sheet's crawler sees it: null when not in combat or not in the party. */
 function useFight() {
@@ -67,16 +70,21 @@ export function TargetProvider({ children }: { children: ReactNode }) {
   );
 }
 
-/** The targets and roll mode an attack button would use right now. */
-function useAim() {
+/**
+ * The targets and roll mode an attack button would use right now. Debuffs that give Attacks Disadvantage (Terrified,
+ * Shit-Faced…) always count; `dis` adds the attack's own reasons (untrained, Aiming).
+ */
+function useAim(dis: string[] = []) {
   const fight = useFight();
   const { data } = useSheet();
+  const { t } = useI18n();
   const { target, area, mode } = useContext(TargetCtx);
   if (!fight) return null;
   const ids = area ? area.filter((id) => fight.targets.some((o) => o.id === id)) : target !== null ? [target] : [];
   const opps = fight.targets.filter((o) => ids.includes(o.id));
-  const auto = autoMode(data.effects, ids);
-  return { fight, opps, ids, mode: mode === 'auto' ? auto.mode : mode, auto };
+  const debuffs = debuffDisadvantage(data.debuffList, 'attack').map((id) => t(`debuff.${id}` as MsgKey));
+  const auto = autoMode(data.effects, ids, [...debuffs, ...dis]);
+  return { fight, opps, ids, mode: mode === 'auto' ? auto.mode : mode, manual: mode !== 'auto', auto };
 }
 
 /** Above the pinned attacks during combat: pick a target, see Actions left and this round's attacks. */
@@ -235,6 +243,7 @@ export function AttackRollButton({
   manaCost = null,
   spell = false,
   aimed = false,
+  untrained = false,
   effect = null,
   strMod = 0,
   onPlainRoll,
@@ -259,6 +268,8 @@ export function AttackRollButton({
   spell?: boolean;
   /** Aiming: the roll is made with Disadvantage (an Advantage cancels it out). */
   aimed?: boolean;
+  /** No Ranks in the Attack Skill: rolled with Disadvantage. */
+  untrained?: boolean;
   /** A Damage Effect added to the attack (the server checks it against the sheet and works out the damage). */
   effect?: { name: string; opts: { sameSize?: boolean; stunInstead?: boolean } } | null;
   strMod?: number;
@@ -268,7 +279,10 @@ export function AttackRollButton({
 }) {
   const { t, err } = useI18n();
   const { data, update, playLocked } = useSheet();
-  const aim = useAim();
+  const why = useWhy();
+  const dropUsed = useUseUp();
+  const extraDis = [...(untrained ? [t('roll.untrained')] : []), ...(aimed ? [t('aim.label')] : [])];
+  const aim = useAim(extraDis);
   const [flash, setFlash] = useState<string | null>(null);
   const [ammoPick, setAmmoPick] = useState('');
   // a ranged weapon (held, tied to this attack) fires one Ammunition from the Hotlist
@@ -316,22 +330,30 @@ export function AttackRollButton({
       });
       return true;
     };
+    // out of combat: Disadvantage from Debuffs, untrained and Aiming (status effects need a target to count)
+    const debuffs = debuffDisadvantage(data.debuffList, 'attack');
+    const plain = {
+      mode: rollMode(0, debuffs.length + extraDis.length),
+      why: [...debuffs.map((id) => `debuff:${id}`), ...extraDis],
+    };
     return (
       <>
         <RollButton
-          expr={aimed ? withMode(expr, 'dis') : expr}
-          text={flash ?? `${aimed ? '▼ ' : ''}${text}`}
+          expr={withMode(expr, plain.mode)}
+          text={flash ?? `${plain.mode === 'dis' ? '▼ ' : ''}${text}`}
           label={label}
           className={className}
+          why={why(plain)}
           beforeRoll={weapon?.ranged || onPlainRoll ? beforeRoll : undefined}
+          onRolled={dropUsed(usedUpBy(data.debuffList, 'attack'))}
         />
         {picker}
       </>
     );
   }
   const { fight, opps } = aim;
-  // Aiming adds a Disadvantage: with an Advantage they cancel out (Core Rulebook "Advantage & Disadvantage")
-  const mode = aimed ? (aim.mode === 'adv' ? 'normal' : 'dis') : aim.mode;
+  // Aiming needs a Disadvantage: a chosen Advantage cancels it out (Core Rulebook "Advantage & Disadvantage")
+  const mode = aim.manual && aimed ? (aim.mode === 'adv' ? 'normal' : 'dis') : aim.mode;
   const attack = async () => {
     // in combat a Spell is cast from the Hotlist (Heal is always available)
     if (spell && !isHealSpell(name) && !data.hotSlots.includes(spellRef(name))) return say(t('spell.notOnHotlist'));
@@ -368,7 +390,7 @@ export function AttackRollButton({
         onClick={attack}
         title={[
           t('atkt.attackHint', { name: names }),
-          mode !== 'normal' && t(`atkt.mode.${mode}` as MsgKey),
+          mode !== 'normal' && (aim.manual ? t(`atkt.mode.${mode}` as MsgKey) : why({ mode, why: aim.auto.why })),
           manaCost && t('skill.sumMana', { n: manaCost }),
         ]
           .filter(Boolean)

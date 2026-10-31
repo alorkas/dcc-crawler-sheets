@@ -176,6 +176,8 @@ export function emptyItem() {
     /** Equipment / Accessory / Special: what it does when used from the Hotlist (not used up). */
     ability: '',
     bonus: { damage: '', dr: '', evade: '', str: '', int: '', con: '', dex: '', cha: '' },
+    /** Skill Ranks it grants while held or worn: "Pugilism +1, Taunt +3". */
+    skillBonus: '',
     /** A curse ({ text, bonus, revealed }): hidden from the player until the item is equipped, then it sticks. */
     curse: null,
   };
@@ -222,6 +224,7 @@ export function sameKind(a, b) {
     norm(a.fits) === norm(b.fits) &&
     norm(a.ammoType) === norm(b.ammoType) &&
     norm(a.ability) === norm(b.ability) &&
+    norm(a.skillBonus) === norm(b.skillBonus) &&
     BONUS_KEYS.every((k) => n(a.bonus?.[k]) === n(b.bonus?.[k]))
   );
 }
@@ -449,6 +452,7 @@ export function itemCard(it, fallbackNotes = '') {
     ability: c(it?.ability, 300),
     bonus,
   };
+  if (String(it?.skillBonus ?? '').trim()) card.skillBonus = c(it.skillBonus, 200);
   if (it?.ranged) card.ranged = true;
   if (it?.twoHanded) card.twoHanded = true;
   if (String(it?.maxCharges ?? '').trim()) card.charges = `${c(it.charges, 6)}/${c(it.maxCharges, 6)}`;
